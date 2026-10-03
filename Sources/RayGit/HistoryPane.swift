@@ -24,7 +24,10 @@ struct HistoryPane: View {
     var isBusy: Bool = false
     var onAction: (HistoryAction, GitCommit) -> Void = { _, _ in }
     var compact: Bool = false
+    var onJump: (String) -> Void = { _ in }
 
+    @Binding var authorFilter: String
+    @State private var jumpHash = ""
     @State private var authorWidth: CGFloat = 135
     @State private var dateWidth: CGFloat = 125
     @State private var resizeOrigin: CGFloat?
@@ -41,6 +44,10 @@ struct HistoryPane: View {
                     Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
                         .buttonStyle(.plain).foregroundStyle(.secondary)
                         .accessibilityLabel(historyText("history.clearSearch"))
+                }
+                if !compact {
+                    TextField(workflowText("Author"), text: $authorFilter).textFieldStyle(.roundedBorder).frame(width: 155)
+                    TextField(workflowText("Commit hash"), text: $jumpHash).textFieldStyle(.roundedBorder).frame(width: 110).onSubmit { onJump(jumpHash) }
                 }
                 if isLoading { ProgressView().controlSize(.small) }
             }.padding(.horizontal, 12).padding(.vertical, 9)

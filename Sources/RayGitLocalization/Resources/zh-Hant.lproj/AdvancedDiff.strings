@@ -9,3 +9,9 @@
 "page" = "第 %d 頁 · 從第 %d 行開始";
 "external" = "外部比較…";
 "chooseExternal" = "選擇比較工具執行檔或應用程式";
+"leftRevision" = "左側版本";
+"rightRevision" = "右側版本";
+"launchExternal" = "比較所選版本";
+"base" = "共同祖先";
+"ours" = "我們的版本";
+"theirs" = "他們的版本";

@@ -24,7 +24,7 @@ struct ComparisonEditor: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSSplitView {
-        let split = NSSplitView()
+        let split = ComparisonSplitView()
         split.isVertical = true
         split.dividerStyle = .thin
         context.coordinator.split = split
@@ -74,6 +74,8 @@ struct ComparisonEditor: NSViewRepresentable {
                 if let focusedID, let pane = panes.first(where: { $0.id == focusedID }) {
                     split.window?.makeFirstResponder(pane.text)
                 }
+                (split as? ComparisonSplitView)?.distributeEqually = true
+                split.needsLayout = true
                 split.adjustSubviews()
             }
             var changed = rebuild || previousSearch != value.search || previousLanguage != value.languagePath
@@ -98,6 +100,7 @@ struct ComparisonEditor: NSViewRepresentable {
                 pane.wrap(value.wrapLines)
                 pane.gutter.setContent(column.text)
                 pane.gutter.needsDisplay = true
+                pane.needsLayout = true
             }
             if changed { decorate() }
             if lastChangeNavigation != value.changeNavigation {
@@ -138,7 +141,7 @@ struct ComparisonEditor: NSViewRepresentable {
             guard target.text.isEditable else { return [] }
             return panes.filter { $0 !== target && !$0.scroll.isHidden }.compactMap { source in
                 let diff = TextLineDiff(source: source.text.string, target: target.text.string)
-                guard let block = diff.blocks().first(where: { $0.targetLines.contains(line) || ($0.targetLines.isEmpty && $0.targetLines.lowerBound == line) }) else { return nil }
+                guard let block = diff.blocks().first(where: { $0.targetLines.contains(line) || ($0.targetLines.isEmpty && ($0.targetLines.lowerBound == line || $0.targetLines.lowerBound == line + 1)) }) else { return nil }
                 let title = L10n.text("acceptBlock", table: "AdvancedDiff", arguments: [source.title.stringValue])
                 return (title, { [weak target] in
                     guard let target else { return }
@@ -258,6 +261,32 @@ struct ComparisonEditor: NSViewRepresentable {
     }
 }
 
+private final class ComparisonSplitView: NSSplitView {
+    var distributeEqually = true
+    override func layout() {
+        super.layout()
+        guard distributeEqually, bounds.width > 0, !subviews.isEmpty else { return }
+        distributeEqually = false
+        let width = max(1, (bounds.width - CGFloat(subviews.count - 1) * dividerThickness) / CGFloat(subviews.count))
+        for (index, view) in subviews.enumerated() {
+            view.frame = NSRect(x: CGFloat(index) * (width + dividerThickness), y: 0, width: width, height: bounds.height)
+            view.needsLayout = true
+        }
+    }
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        guard !subviews.isEmpty else { return }
+        let previous = subviews.reduce(CGFloat(0)) { $0 + $1.frame.width }
+        let available = max(1, bounds.width - CGFloat(subviews.count - 1) * dividerThickness)
+        var x: CGFloat = 0
+        for view in subviews {
+            let ratio = previous > 0 && !distributeEqually ? view.frame.width / previous : 1 / CGFloat(subviews.count)
+            let width = available * ratio
+            view.frame = NSRect(x: x, y: 0, width: width, height: bounds.height)
+            x += width + dividerThickness
+        }
+    }
+}
+
 private final class ComparisonTextView: NSTextView {
     private let history = UndoManager()
     var blockMenu: ((Int) -> [(String, () -> Void)])?
@@ -287,13 +316,17 @@ private final class Pane: NSView {
     let title = NSTextField(labelWithString: "")
     let message = NSTextField(wrappingLabelWithString: "")
     let scroll = NSScrollView()
-    let text = ComparisonTextView()
+    let text = ComparisonTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
     let gutter = LineGutter()
     var gutterWidth: NSLayoutConstraint!
     private var wrapped: Bool?
     init(column: ComparisonEditorColumn) {
         id = column.id
         super.init(frame: .zero)
+        clipsToBounds = true
+        gutter.clipsToBounds = true
+        scroll.clipsToBounds = true
+        scroll.contentView.clipsToBounds = true
         text.string = column.text
         text.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         text.isRichText = false
@@ -351,6 +384,19 @@ private final class Pane: NSView {
         let glyph = layout.glyphIndexForCharacter(at: character)
         return layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil).minY + text.textContainerInset.height
     }
+    override func layout() {
+        super.layout()
+        let viewport = scroll.contentSize
+        guard viewport.width > 0 else { return }
+        if wrapped == true {
+            text.textContainer?.containerSize.width = viewport.width
+            text.setFrameSize(NSSize(width: viewport.width, height: max(text.frame.height, viewport.height)))
+        } else {
+            text.setFrameSize(NSSize(width: max(text.frame.width, viewport.width), height: max(text.frame.height, viewport.height)))
+        }
+        text.sizeToFit()
+        text.setFrameSize(NSSize(width: max(text.frame.width, viewport.width), height: max(text.frame.height, viewport.height)))
+    }
     func wrap(_ enabled: Bool) {
         guard wrapped != enabled else { return }
         wrapped = enabled
@@ -376,8 +422,11 @@ private final class LineGutter: NSView {
     }
     override var isFlipped: Bool { true }
     override func draw(_ dirtyRect: NSRect) {
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSBezierPath(rect: bounds).addClip()
         NSColor.windowBackgroundColor.setFill()
-        dirtyRect.fill()
+        bounds.intersection(dirtyRect).fill()
         guard let text, let scroll, let layout = text.layoutManager, let container = text.textContainer else { return }
         let visible = scroll.contentView.bounds
         let inset = text.textContainerInset

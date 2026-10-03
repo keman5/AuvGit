@@ -2,6 +2,22 @@ import XCTest
 @testable import GitCore
 
 final class AdvancedDiffTests: XCTestCase {
+    func testRepeatedAndMovedLinesBlocksReconstructSource() {
+        var samples = [""]
+        for count in 1...4 {
+            for mask in 0..<(1 << count) {
+                samples.append((0..<count).map { mask & (1 << $0) == 0 ? "a" : "b" }.joined(separator: "\n"))
+            }
+        }
+        for source in samples {
+            for target in samples {
+                let blocks = TextLineDiff(source: source, target: target).blocks()
+                var accepted = target
+                for block in blocks.reversed() { accepted = TextLineDiff.accepting(block, source: source, target: accepted) }
+                XCTAssertEqual(accepted, source, "\(source.debugDescription) / \(target.debugDescription)")
+            }
+        }
+    }
     func testAcceptOneBlockPreservesOtherEdits() {
         let source = "a\nold\ncommon\nsource\n"
         let target = "a\nnew\ncommon\ntarget\n"
@@ -50,6 +66,21 @@ final class AdvancedDiffTests: XCTestCase {
         let last = TextPager.page(text, index: 2)
         XCTAssertEqual(last.text, "1001 😀\n")
         XCTAssertFalse(last.hasNext)
+        XCTAssertEqual(TextPager.page("short", index: 5).text, "")
+    }
+    func testLongLinePagesAreBounded() {
+        let text = String(repeating: "😀", count: 100_001)
+        let first = TextPager.page(text, index: 0)
+        let second = TextPager.page(text, index: 1)
+        let third = TextPager.page(text, index: 2)
+        XCTAssertLessThanOrEqual(first.text.utf16.count, 100_000)
+        XCTAssertEqual(first.text + second.text + third.text, text)
+        XCTAssertEqual(second.firstLine, 1)
+    }
+    func testEmojiChangeDoesNotSplitSurrogatePair() {
+        let diff = CharacterDiff(source: "😀", target: "😁")
+        XCTAssertEqual(diff.source, [NSRange(location: 0, length: 2)])
+        XCTAssertEqual(diff.target, [NSRange(location: 0, length: 2)])
     }
     func testMergeCleanAndConflictingDraft() async throws {
         let clean = try await MergePreview.create(base: "a\nb\nc\n", ours: "A\nb\nc\n", theirs: "a\nb\nC\n")

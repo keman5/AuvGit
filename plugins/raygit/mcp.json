@@ -1,0 +1,13 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "raygit": {
+      "type": "stdio",
+      "command": "/bin/sh",
+      "args": ["${PLUGIN_ROOT}/scripts/start.sh"],
+      "cwd": "${PLUGIN_ROOT}",
+      "env_vars": ["PATH", "CODEX_MCP_NODE_PATH", "SSH_AUTH_SOCK"],
+      "tool_timeout_sec": 90
+    }
+  }
+}

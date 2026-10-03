@@ -36,7 +36,7 @@ extension GitRepository {
         if file.isConflict { reason = "Resolve conflicts before partial staging." }
         else if original != nil { reason = "Renamed files must be staged or unstaged as a whole." }
         else if !file.index.exists || !(unstage ? file.head.exists : file.worktree.exists) { reason = "New and deleted files must be staged or unstaged as a whole." }
-        else if file.index.text == nil || (unstage ? file.head.text : file.worktree.text) == nil { reason = "Only UTF-8 text supports partial staging." }
+        else if !file.index.isEditable || !(unstage ? file.head.isEditable : file.worktree.isEditable) { reason = "Only UTF-8 text supports partial staging." }
         else { reason = nil }
         return PartialStagingSnapshot(file: file, unstage: unstage, hunks: hunks, unavailableReason: reason, header: header.joined(separator: "\n"))
     }

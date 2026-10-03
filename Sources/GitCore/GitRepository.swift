@@ -36,9 +36,10 @@ public actor GitRepository {
         if symbolic.code == 0 { return symbolic.text.trimmingCharacters(in: .newlines) }
         return "Detached " + (try await run(["rev-parse", "--short", "HEAD"])).text.trimmingCharacters(in: .newlines)
     }
-    public func log(limit: Int = 200, skip: Int = 0, search: String = "", path: String? = nil, ref: String? = nil) async throws -> [GitCommit] {
+    public func log(limit: Int = 200, skip: Int = 0, search: String = "", path: String? = nil, ref: String? = nil, author: String = "") async throws -> [GitCommit] {
         var args = ["log", "--topo-order", "-z", "--format=%H%x00%P%x00%an%x00%at%x00%s%x00%B%x00%D"]
         if path == nil { args += ["--max-count=\(max(0,limit))", "--skip=\(max(0,skip))"] }
+        if path == nil && !author.isEmpty { args += ["--fixed-strings", "--regexp-ignore-case", "--author=" + author] }
         if path == nil && !search.isEmpty { args += ["--fixed-strings", "--regexp-ignore-case", "--grep=" + search] }
         let head = try await run(["rev-parse", "--verify", "HEAD"], allowedCodes: [0, 128])
         if let ref { args.append(try await validatedCommit(ref)) }
@@ -56,7 +57,7 @@ public actor GitRepository {
         if path != nil {
             // Git's --skip/--grep can skip the rename needed by --follow. Traverse
             // the complete file history before filtering and paginating it.
-            let matching = search.isEmpty ? result : result.filter { $0.body.range(of: search, options: .caseInsensitive) != nil }
+            let matching = result.filter { (search.isEmpty || $0.body.range(of: search, options: .caseInsensitive) != nil) && (author.isEmpty || $0.author.range(of: author, options: .caseInsensitive) != nil) }
             return Array(matching.dropFirst(max(0, skip)).prefix(max(0, limit)))
         }
         return result

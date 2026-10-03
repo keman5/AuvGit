@@ -46,19 +46,25 @@ struct MediaCompareView: View {
 struct PagedComparisonView: View {
     let snapshot: FileComparisonSnapshot
     @State private var page = 0
+    private var revisions: [(String, String, FileRevisionContent)] {
+        if snapshot.isConflict {
+            return [("base", advancedText("base"), snapshot.base), ("ours", advancedText("ours"), snapshot.ours), ("theirs", advancedText("theirs"), snapshot.theirs), ("worktree", advancedText("worktree"), snapshot.worktree)].compactMap { id, title, content in content.map { (id, title, $0) } }
+        }
+        return [("head", "HEAD", snapshot.head), ("index", advancedText("index"), snapshot.index), ("worktree", advancedText("worktree"), snapshot.worktree)]
+    }
     private var columns: [ComparisonEditorColumn] {
-        [("head", "HEAD", snapshot.head), ("index", advancedText("index"), snapshot.index), ("worktree", advancedText("worktree"), snapshot.worktree)].map { id, title, revision in
+        revisions.map { id, title, revision in
             ComparisonEditorColumn(id: id, title: title, text: revision.text.map { TextPager.page($0, index: page).text } ?? "", isEditable: false, message: revision.text == nil ? revision.unavailableReason : nil)
         }
     }
-    private var hasNext: Bool { [snapshot.head, snapshot.index, snapshot.worktree].contains { $0.text.map { TextPager.page($0, index: page).hasNext } ?? false } }
+    private var hasNext: Bool { revisions.contains { $0.2.text.map { TextPager.page($0, index: page).hasNext } ?? false } }
     var body: some View {
         VStack(spacing: 0) {
             HStack {
                 Text(advancedText("pagedReadOnly")).font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button(advancedText("previousPage")) { page = max(0, page - 1) }.disabled(page == 0)
-                Text(L10n.text("page", table: "AdvancedDiff", arguments: [page + 1, page * 500 + 1]))
+                Text(L10n.text("page", table: "AdvancedDiff", arguments: [page + 1, TextPager.page(snapshot.worktree.text ?? snapshot.head.text ?? "", index: page).firstLine]))
                 Button(advancedText("nextPage")) { page += 1 }.disabled(!hasNext)
                 ExternalComparisonButton(snapshot: snapshot)
             }.padding(10)
@@ -70,27 +76,50 @@ struct PagedComparisonView: View {
 struct ExternalComparisonButton: View {
     let snapshot: FileComparisonSnapshot
     @State private var error: String?
+    @State private var left = "head"
+    @State private var right = "worktree"
+    @AppStorage("externalComparisonExecutable") private var executablePath = ""
+    private var revisions: [(String, String, FileRevisionContent)] {
+        var result = [("head", "HEAD", snapshot.head), ("index", advancedText("index"), snapshot.index), ("worktree", advancedText("worktree"), snapshot.worktree)]
+        if let value = snapshot.base { result.append(("base", advancedText("base"), value)) }
+        if let value = snapshot.ours { result.append(("ours", advancedText("ours"), value)) }
+        if let value = snapshot.theirs { result.append(("theirs", advancedText("theirs"), value)) }
+        return result
+    }
     var body: some View {
-        Button(advancedText("external")) {
-            let panel = NSOpenPanel()
-            panel.title = advancedText("chooseExternal"); panel.canChooseDirectories = false; panel.canChooseFiles = true; panel.allowsMultipleSelection = false
-            if let previous = UserDefaults.standard.string(forKey: "externalComparisonExecutable") { panel.directoryURL = URL(fileURLWithPath: previous).deletingLastPathComponent() }
-            guard panel.runModal() == .OK, let executable = panel.url else { return }
-            UserDefaults.standard.set(executable.path, forKey: "externalComparisonExecutable")
-            do { try ExternalComparison.launch(executable: executable, snapshot: snapshot) } catch { self.error = error.localizedDescription }
-        }.alert(advancedText("external"), isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) { Button("OK") { error = nil } } message: { Text(error ?? "") }
+        Menu {
+            Picker(advancedText("leftRevision"), selection: $left) { ForEach(revisions, id: \.0) { revision in Text(revision.1).tag(revision.0) } }
+            Picker(advancedText("rightRevision"), selection: $right) { ForEach(revisions, id: \.0) { revision in Text(revision.1).tag(revision.0) } }
+            if !executablePath.isEmpty { Button(advancedText("launchExternal")) { launch(URL(fileURLWithPath: executablePath)) } }
+            Button(advancedText("chooseExternal")) {
+                let panel = NSOpenPanel()
+                panel.title = advancedText("chooseExternal"); panel.canChooseDirectories = false; panel.canChooseFiles = true; panel.allowsMultipleSelection = false
+                if !executablePath.isEmpty { panel.directoryURL = URL(fileURLWithPath: executablePath).deletingLastPathComponent() }
+                guard panel.runModal() == .OK, let executable = panel.url else { return }
+                executablePath = executable.path
+                launch(executable)
+            }
+        } label: { Text(advancedText("external")) }
+        .alert(advancedText("external"), isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) { Button("OK") { error = nil } } message: { Text(error ?? "") }
+    }
+    private func launch(_ executable: URL) {
+        guard let a = revisions.first(where: { $0.0 == left }), let b = revisions.first(where: { $0.0 == right }) else { return }
+        do { try ExternalComparison.launch(executable: executable, path: snapshot.path, revisions: [(a.1, a.2), (b.1, b.2)]) } catch { self.error = error.localizedDescription }
     }
 }
 
 private enum ExternalComparison {
-    static func launch(executable: URL, snapshot: FileComparisonSnapshot) throws {
+    static func launch(executable: URL, path: String, revisions: [(String, FileRevisionContent)]) throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("raygit-compare-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var paths: [String] = []
         do {
-            for (name, revision) in [("HEAD", snapshot.head), ("Worktree", snapshot.worktree)] {
-                let path = directory.appendingPathComponent(name + "-" + URL(fileURLWithPath: snapshot.path).lastPathComponent)
-                try (revision.data ?? Data()).write(to: path)
+            for (index, revision) in revisions.enumerated() {
+                let name = revision.0
+                let content = revision.1
+                guard !content.exists || content.data != nil else { throw GitError(content.unavailableReason ?? "Revision content is unavailable.") }
+                let path = directory.appendingPathComponent("\(index)-" + name + "-" + URL(fileURLWithPath: path).lastPathComponent)
+                try (content.data ?? Data()).write(to: path)
                 try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: path.path)
                 paths.append(path.path)
             }

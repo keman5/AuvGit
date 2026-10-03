@@ -23,7 +23,11 @@ final class PartialStagingTests: XCTestCase {
         let undo = try await repo.partialStaging(path: path, unstage: true)
         try await repo.applyPartialStaging(undo, selectedLines: Set(undo.hunks.flatMap(\.lines).filter(\.isChange).map(\.id)))
         state = try await repo.fileComparison(path: path); XCTAssertEqual(state.index.text, "a\nb\nc\n"); XCTAssertEqual(state.worktree.text, "a\nB\nc\nextra\n")
+        try Data("a\nb\nC".utf8).write(to: file)
+        let noNewline = try await repo.partialStaging(path: path, unstage: false)
+        try await repo.applyPartialStaging(noNewline, selectedLines: Set(noNewline.hunks.flatMap(\.lines).filter(\.isChange).map(\.id)))
+        state = try await repo.fileComparison(path: path); XCTAssertEqual(state.index.text, "a\nb\nC")
         try await repo.saveIndex(path: path, text: "edited index\n", expected: state.index)
-        state = try await repo.fileComparison(path: path); XCTAssertEqual(state.index.text, "edited index\n"); XCTAssertEqual(state.worktree.text, "a\nB\nc\nextra\n")
+        state = try await repo.fileComparison(path: path); XCTAssertEqual(state.index.text, "edited index\n"); XCTAssertEqual(state.worktree.text, "a\nb\nC")
     }
 }

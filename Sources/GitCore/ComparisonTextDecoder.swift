@@ -28,16 +28,25 @@ public enum TextPager {
     /// Scans UTF-16 line boundaries without allocating an array for every line of the file.
     public static func page(_ text: String, index: Int, linesPerPage: Int = 500) -> TextPage {
         let ns = text as NSString
-        let pageSize = max(1, linesPerPage), startLine = max(0, index) * pageSize
-        var position = 0, line = 0, start = 0
-        while position < ns.length, line < startLine {
-            let range = ns.lineRange(for: NSRange(location: position, length: 0))
-            position = NSMaxRange(range); line += 1
+        let pageSize = max(1, linesPerPage), wanted = max(0, index)
+        var position = 0, firstLine = 1, pageStart = 0, pageFirstLine = 1
+        for current in 0...wanted {
+            pageStart = position; pageFirstLine = firstLine
+            let cap = min(ns.length, position + 100_000)
+            var lines = 0
+            while position < cap, lines < pageSize {
+                let end = NSMaxRange(ns.lineRange(for: NSRange(location: position, length: 0)))
+                if end > cap {
+                    position = cap
+                    // Never split a surrogate pair at the page boundary.
+                    if position < ns.length, position > pageStart, (0xDC00...0xDFFF).contains(ns.character(at: position)) { position -= 1 }
+                    break
+                }
+                position = end; lines += 1; firstLine += 1
+            }
+            if current == wanted { break }
+            if position == ns.length { return TextPage(text: "", firstLine: firstLine, hasNext: false) }
         }
-        start = position
-        while position < ns.length, line < startLine + pageSize {
-            position = NSMaxRange(ns.lineRange(for: NSRange(location: position, length: 0))); line += 1
-        }
-        return TextPage(text: ns.substring(with: NSRange(location: start, length: position - start)), firstLine: startLine + 1, hasNext: position < ns.length)
+        return TextPage(text: ns.substring(with: NSRange(location: pageStart, length: position - pageStart)), firstLine: pageFirstLine, hasNext: position < ns.length)
     }
 }

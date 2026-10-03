@@ -85,3 +85,123 @@
 "Unstage File" = "Unstage File";
 
 "Stage File" = "Stage File";
+
+"Saved editor drafts" = "Saved editor drafts";
+
+"Replace working tree draft with auto merge?" = "Replace working tree draft with auto merge?";
+
+"Edit .gitignore" = "Edit .gitignore";
+
+"Ignored Files" = "Ignored Files";
+
+"Restore from Trash" = "Restore from Trash";
+
+"Open Compare" = "Open Compare";
+
+"Rename File" = "Rename File";
+
+"Move to Trash" = "Move to Trash";
+
+"Ignore Path" = "Ignore Path";
+
+"Repository-relative destination" = "Repository-relative destination";
+
+"Close" = "Close";
+
+"Keyboard Shortcuts" = "Keyboard Shortcuts";
+
+"Open Repository" = "Open Repository";
+
+"Refresh" = "Refresh";
+
+"Stage" = "Stage";
+
+"Commit" = "Commit";
+
+"Use four distinct single letters; shortcuts use Command." = "Use four distinct single letters; shortcuts use Command.";
+
+"Kind" = "Kind";
+
+"Name" = "Name";
+
+"Main Branch" = "Main Branch";
+
+"Develop Branch" = "Develop Branch";
+
+"Start Git Flow" = "Start Git Flow";
+
+"Finish Git Flow" = "Finish Git Flow";
+
+"Pull / Merge Request" = "Pull / Merge Request";
+
+"Target Branch" = "Target Branch";
+
+"Open Review Page" = "Open Review Page";
+
+"Updates" = "Updates";
+
+"Trusted HTTPS Manifest URL" = "Trusted HTTPS Manifest URL";
+
+"Check for Updates" = "Check for Updates";
+
+"Available Version" = "Available Version";
+
+"Download Release" = "Download Release";
+
+"Git Flow completed" = "Git Flow completed";
+
+"Extensions" = "Extensions";
+
+"Finish merges locally and removes only a merged branch. Release and hotfix create a tag named after the branch suffix." = "Finish merges locally and removes only a merged branch. Release and hotfix create a tag named after the branch suffix.";
+
+"The index or working tree changed. Reload before partial staging." = "The index or working tree changed. Reload before partial staging.";
+
+"Invalid patch hunk." = "Invalid patch hunk.";
+
+"Select at least one changed line." = "Select at least one changed line.";
+
+"The index changed. Reload before saving to the index." = "The index changed. Reload before saving to the index.";
+
+"Only UTF-8 text up to 2 MB can be saved to the index." = "Only UTF-8 text up to 2 MB can be saved to the index.";
+
+"Index entry is missing." = "Index entry is missing.";
+
+"Symbolic links cannot be managed by this operation." = "Symbolic links cannot be managed by this operation.";
+
+"The destination already exists." = "The destination already exists.";
+
+"The system did not return the trash location." = "The system did not return the trash location.";
+
+"This trash item belongs to a different repository." = "This trash item belongs to a different repository.";
+
+"Paths containing newlines cannot be represented in .gitignore." = "Paths containing newlines cannot be represented in .gitignore.";
+
+"The .gitignore file must use UTF-8." = "The .gitignore file must use UTF-8.";
+
+"The .gitignore file changed. Reload before saving." = "The .gitignore file changed. Reload before saving.";
+
+"Use a GitHub or GitLab HTTPS/SSH remote." = "Use a GitHub or GitLab HTTPS/SSH remote.";
+
+"Invalid review branches or remote path." = "Invalid review branches or remote path.";
+
+"Invalid review URL." = "Invalid review URL.";
+
+"The update manifest must use HTTPS." = "The update manifest must use HTTPS.";
+
+"Update manifest request failed." = "Update manifest request failed.";
+
+"Invalid update manifest." = "Invalid update manifest.";
+
+"A clean worktree and index are required" = "A clean worktree and index are required";
+
+"Check out the matching Git Flow branch before finishing." = "Check out the matching Git Flow branch before finishing.";
+
+"The release tag already exists." = "The release tag already exists.";
+
+"Shortcut conflicts with another action or a macOS command." = "Shortcut conflicts with another action or a macOS command.";
+
+"This installation is up to date." = "This installation is up to date.";
+
+"Invalid release version." = "Invalid release version.";
+
+"Git Flow main, develop and task branches must be distinct." = "Git Flow main, develop and task branches must be distinct.";

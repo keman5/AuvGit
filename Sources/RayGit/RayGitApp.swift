@@ -8,6 +8,11 @@ struct RayGitApp: App {
     @NSApplicationDelegateAdaptor(RayGitApplicationDelegate.self) private var appDelegate
     @StateObject private var store = RepositoryStore()
     @AppStorage(L10n.preferenceKey) private var languageCode = AppLanguage.system.rawValue
+    @AppStorage("shortcut.open") private var openKey = "o"
+    @AppStorage("shortcut.refresh") private var refreshKey = "r"
+    @AppStorage("shortcut.stage") private var stageKey = "t"
+    @AppStorage("shortcut.commit") private var commitKey = "k"
+    private var configuredShortcuts: [String] { ShortcutRules.normalized([openKey, refreshKey, stageKey, commitKey]) }
     var body: some Scene {
         WindowGroup {
             MainWindow(store: store)
@@ -20,16 +25,19 @@ struct RayGitApp: App {
         .defaultSize(width: 1440, height: 940)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button(L10n.text("Open Repository…")) { store.chooseRepository() }.keyboardShortcut("o")
+                Button(L10n.text("Open Repository…")) { store.chooseRepository() }.keyboardShortcut(KeyEquivalent(configuredShortcuts[0].first ?? "o"))
             }
             CommandGroup(after: .newItem) {
-                Button(L10n.text("Refresh Repository")) { Task { await store.refresh() } }.keyboardShortcut("r")
+                Button(L10n.text("Refresh Repository")) { Task { await store.refresh() } }.keyboardShortcut(KeyEquivalent(configuredShortcuts[1].first ?? "r"))
                     .disabled(store.repository == nil || store.isBusy)
-                Button(L10n.text("Stage Selected Files")) { store.stageSelection() }.keyboardShortcut("t")
+                Button(L10n.text("Stage Selected Files")) { store.stageSelection() }.keyboardShortcut(KeyEquivalent(configuredShortcuts[2].first ?? "t"))
                     .disabled(store.selectedPaths.isEmpty || store.isBusy)
+                Button(compareText("Commit")) { store.commit() }.keyboardShortcut(KeyEquivalent(configuredShortcuts[3].first ?? "k"))
+                    .disabled(store.repository == nil || store.isBusy || store.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         Settings {
+            TabView {
             Form {
                 Picker(L10n.text("Language", table: "Language"), selection: $languageCode) {
                     ForEach(AppLanguage.allCases) { language in
@@ -38,7 +46,10 @@ struct RayGitApp: App {
                 }
             }
             .padding(24)
-            .frame(width: 360)
+            .frame(width: 620)
+            .tabItem { Text(L10n.text("Language", table: "Language")) }
+            ExtensionsSettings(store: store).tabItem { Text(compareText("Extensions")) }
+            }
             .environment(\.locale, L10n.locale)
         }
     }
@@ -48,6 +59,20 @@ struct RayGitApp: App {
 final class RepositoryStore: ObservableObject {
     @Published var repository: GitRepository?
     @Published var repositoryURL: URL?
+    @Published var openRepositories: [String] = []
+    @Published var repositoryGroups = UserDefaults.standard.dictionary(forKey: "repositoryGroups") as? [String: String] ?? [:]
+    private var accessedURL: URL?
+    private var fileObserver: RepositoryFileObserver?
+    private var filesystemRefresh: Task<Void, Never>?
+    private var repositoryDrafts: [String: (String, Bool)] = [:]
+    func closeRepositoryTab(_ path: String) {
+        openRepositories.removeAll { $0 == path }
+        guard repositoryURL?.path == path else { return }
+        repositoryDrafts[path] = (commitMessage, amend)
+        if let next = openRepositories.last { Task { await open(URL(fileURLWithPath: next)) } }
+        else { fileObserver = nil; filesystemRefresh?.cancel(); repository = nil; repositoryURL = nil; files = []; commits = []; branches = []; stashes = []; commitMessage = ""; amend = false; accessedURL?.stopAccessingSecurityScopedResource(); accessedURL = nil }
+    }
+    func setGroup(path: String, group: String) { repositoryGroups[path] = group; UserDefaults.standard.set(repositoryGroups, forKey: "repositoryGroups") }
     @Published var recentPaths = UserDefaults.standard.stringArray(forKey: "recentRepositories") ?? []
     @Published var files: [GitFile] = []
     @Published var branches: [GitBranch] = []
@@ -67,6 +92,7 @@ final class RepositoryStore: ObservableObject {
     var diffTitle: String { L10n.text(diffTitleKey, arguments: diffTitleArguments.map { $0 as CVarArg }) }
     @Published var fileFilter = ""
     @Published var historySearch = ""
+    @Published var historyAuthor = ""
     @Published var historyPath: String?
     @Published var historyRef: String?
     @Published var commitMessage = ""
@@ -111,7 +137,7 @@ final class RepositoryStore: ObservableObject {
     private var searchTask: Task<Void, Never>?
     var selectedFile: GitFile? { files.first { $0.path == selectedPaths.sorted().first } }
     var filteredFiles: [GitFile] { files.filter { fileFilter.isEmpty || $0.path.localizedCaseInsensitiveContains(fileFilter) } }
-    var stagedCount: Int { files.filter(\.isStaged).count }
+    var stagedCount: Int { files.filter { $0.isStaged && !$0.isConflict }.count }
 
     func restore() async {
         guard !restored else { return }; restored = true
@@ -127,19 +153,41 @@ final class RepositoryStore: ObservableObject {
     }
     func open(_ url: URL) async {
         guard !isBusy else { return }
+        if let old = repositoryURL?.path { repositoryDrafts[old] = (commitMessage, amend) }
         isBusy = true; errorMessage = nil; setStatus("Opening repository…")
         do {
-            let repo = try await GitRepository.open(url)
+            var selectedURL = url
+            if let data = UserDefaults.standard.data(forKey: "bookmark:" + url.path) { var stale = false; if let restored = try? URL(resolvingBookmarkData: data, options: .withSecurityScope, bookmarkDataIsStale: &stale) { selectedURL = restored } }
+            let accessed = selectedURL.startAccessingSecurityScopedResource()
+            let repo: GitRepository
+            do { repo = try await GitRepository.open(selectedURL) } catch { if accessed { selectedURL.stopAccessingSecurityScopedResource() }; throw error }
+            accessedURL?.stopAccessingSecurityScopedResource(); accessedURL = accessed ? selectedURL : nil
+            if let data = try? selectedURL.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) { UserDefaults.standard.set(data, forKey: "bookmark:" + repo.url.path) }
+            if !openRepositories.contains(repo.url.path) { openRepositories.append(repo.url.path) }
             let root = repo.url
             repoVersion = UUID(); diffVersion = UUID(); detailVersion = UUID(); historyVersion = UUID()
             repository = repo; repositoryURL = root
+            fileObserver = nil; filesystemRefresh?.cancel()
+            let gitDirectory = try await repo.workflowRead(["rev-parse", "--absolute-git-dir"]).trimmingCharacters(in: .newlines)
+            fileObserver = RepositoryFileObserver(paths: [root.path, gitDirectory]) { [weak self] in
+                Task { @MainActor [weak self] in self?.scheduleFilesystemRefresh(root: root) }
+            }
             files = []; branches = []; commits = []; commitFiles = []; stashes = []
             selectedPaths = []; selectedCommit = nil; selectedCommitPath = nil; diffText = ""
-            commitMessage = ""; amend = false; historySearch = ""; historyPath = nil; historyRef = nil
+            commitMessage = repositoryDrafts[root.path]?.0 ?? ""; amend = repositoryDrafts[root.path]?.1 ?? false; historySearch = ""; historyPath = nil; historyRef = nil
             recentPaths.removeAll { $0 == root.path }; recentPaths.insert(root.path, at: 0)
             recentPaths = Array(recentPaths.prefix(12)); UserDefaults.standard.set(recentPaths, forKey: "recentRepositories")
             isBusy = false; await refresh()
         } catch { report(error); isBusy = false }
+    }
+    private func scheduleFilesystemRefresh(root: URL) {
+        filesystemRefresh?.cancel()
+        filesystemRefresh = Task {
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard !Task.isCancelled, repositoryURL == root else { return }
+            // Existing write operations finish with refresh; otherwise read immediately.
+            if !isBusy { await refresh() }
+        }
     }
     private var lastObservedState = ""
     func refreshIfChanged() async {
@@ -147,8 +195,13 @@ final class RepositoryStore: ObservableObject {
         do {
             let status = try await repository.workflowRead(["status", "--porcelain=v1", "-z"])
             let refs = (try? await repository.workflowRead(["show-ref", "--head"])) ?? ""
-            let state = status + refs
-            guard state != lastObservedState else { return }; lastObservedState = state; await refresh()
+            let paths = try await repository.status().filter { $0.isUnstaged }.map(\.path)
+            let stamps = paths.map { path -> String in
+                let attrs = try? FileManager.default.attributesOfItem(atPath: repository.url.appendingPathComponent(path).path)
+                return path + String(describing: attrs?[.modificationDate]) + String(describing: attrs?[.size])
+            }.joined(separator: "\0")
+            let state = status + refs + stamps
+            guard repositoryURL == repository.url, state != lastObservedState else { return }; lastObservedState = state; await refresh()
         } catch { /* Empty repositories have no refs; explicit refresh remains available. */ }
     }
     func refresh() async {
@@ -174,7 +227,7 @@ final class RepositoryStore: ObservableObject {
         let version = UUID(); historyVersion = version; loadingHistory = true
         let skip = reset ? 0 : commits.count
         do {
-            let rows = try await repository.log(limit: 200, skip: skip, search: historySearch, path: historyPath, ref: historyRef)
+            let rows = try await repository.log(limit: 200, skip: skip, search: historySearch, path: historyPath, ref: historyRef, author: historyAuthor)
             guard historyVersion == version else { return }
             commits = reset ? rows : commits + rows; hasMore = rows.count == 200
             if let selectedCommit, !commits.contains(where: { $0.hash == selectedCommit }) { self.selectedCommit = nil; commitFiles = []; selectedCommitPath = nil }

@@ -9,3 +9,9 @@
 "page" = "ページ %d · 行 %d から";
 "external" = "外部比較…";
 "chooseExternal" = "比較用の実行ファイルまたはアプリを選択";
+"leftRevision" = "左のリビジョン";
+"rightRevision" = "右のリビジョン";
+"launchExternal" = "選択したリビジョンを比較";
+"base" = "共通祖先";
+"ours" = "こちらのバージョン";
+"theirs" = "相手のバージョン";

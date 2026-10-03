@@ -85,3 +85,123 @@
 "Unstage File" = "取消暂存文件";
 
 "Stage File" = "暂存文件";
+
+"Saved editor drafts" = "编辑器草稿已保存";
+
+"Replace working tree draft with auto merge?" = "用自动合并替换工作区草稿？";
+
+"Edit .gitignore" = "编辑 .gitignore";
+
+"Ignored Files" = "被忽略文件";
+
+"Restore from Trash" = "从回收站恢复";
+
+"Open Compare" = "打开比较";
+
+"Rename File" = "重命名文件";
+
+"Move to Trash" = "移到回收站";
+
+"Ignore Path" = "忽略此路径";
+
+"Repository-relative destination" = "相对于仓库的目标路径";
+
+"Close" = "关闭";
+
+"Keyboard Shortcuts" = "快捷键";
+
+"Open Repository" = "打开仓库";
+
+"Refresh" = "刷新";
+
+"Stage" = "暂存";
+
+"Commit" = "提交";
+
+"Use four distinct single letters; shortcuts use Command." = "使用四个不同的单字母；快捷键搭配 Command。";
+
+"Kind" = "类型";
+
+"Name" = "名称";
+
+"Main Branch" = "主分支";
+
+"Develop Branch" = "开发分支";
+
+"Start Git Flow" = "开始 Git Flow";
+
+"Finish Git Flow" = "完成 Git Flow";
+
+"Pull / Merge Request" = "拉取 / 合并请求";
+
+"Target Branch" = "目标分支";
+
+"Open Review Page" = "打开请求页面";
+
+"Updates" = "更新";
+
+"Trusted HTTPS Manifest URL" = "可信 HTTPS 更新清单地址";
+
+"Check for Updates" = "检查更新";
+
+"Available Version" = "可用版本";
+
+"Download Release" = "下载版本";
+
+"Git Flow completed" = "Git Flow 已完成";
+
+"Extensions" = "扩展";
+
+"Finish merges locally and removes only a merged branch. Release and hotfix create a tag named after the branch suffix." = "完成操作在本地合并并仅删除已合并分支。发布和修补创建以分支后缀命名的标签。";
+
+"The index or working tree changed. Reload before partial staging." = "索引或工作区已更改。逐块暂存前请重新加载。";
+
+"Invalid patch hunk." = "补丁块无效。";
+
+"Select at least one changed line." = "请至少选择一个变更行。";
+
+"The index changed. Reload before saving to the index." = "索引已更改。保存到索引前请重新加载。";
+
+"Only UTF-8 text up to 2 MB can be saved to the index." = "仅可将不超过 2 MB 的 UTF-8 文本保存到索引。";
+
+"Index entry is missing." = "索引条目不存在。";
+
+"Symbolic links cannot be managed by this operation." = "此操作不支持管理符号链接。";
+
+"The destination already exists." = "目标已存在。";
+
+"The system did not return the trash location." = "系统未返回回收站位置。";
+
+"This trash item belongs to a different repository." = "此回收站项目属于其他仓库。";
+
+"Paths containing newlines cannot be represented in .gitignore." = "包含换行的路径无法写入 .gitignore。";
+
+"The .gitignore file must use UTF-8." = ".gitignore 文件必须使用 UTF-8。";
+
+"The .gitignore file changed. Reload before saving." = ".gitignore 文件已更改。保存前请重新加载。";
+
+"Use a GitHub or GitLab HTTPS/SSH remote." = "请使用 GitHub 或 GitLab 的 HTTPS/SSH 远程地址。";
+
+"Invalid review branches or remote path." = "请求分支或远程路径无效。";
+
+"Invalid review URL." = "请求页面地址无效。";
+
+"The update manifest must use HTTPS." = "更新清单必须使用 HTTPS。";
+
+"Update manifest request failed." = "更新清单请求失败。";
+
+"Invalid update manifest." = "更新清单无效。";
+
+"A clean worktree and index are required" = "需要干净的工作区和索引。";
+
+"Check out the matching Git Flow branch before finishing." = "完成操作前请切换到对应的 Git Flow 分支。";
+
+"The release tag already exists." = "发布标签已存在。";
+
+"Shortcut conflicts with another action or a macOS command." = "快捷键与其他操作或 macOS 命令冲突。";
+
+"This installation is up to date." = "当前安装版本已是最新。";
+
+"Invalid release version." = "发布版本号无效。";
+
+"Git Flow main, develop and task branches must be distinct." = "Git Flow 的主分支、开发分支和任务分支必须不同。";

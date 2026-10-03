@@ -38,3 +38,90 @@ final class RepositoryWorkflowTests: XCTestCase {
         XCTAssertFalse(after.contains("second"))
     }
 }
+
+extension RepositoryWorkflowTests {
+    func testStashRenamePreservesEveryObjectOrderAndTimestamp() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repo = try await GitRepository.initialize(at: root)
+        _ = try await repo.workflowRead(["config", "user.name", "Tester"])
+        _ = try await repo.workflowRead(["config", "user.email", "test@example.invalid"])
+        try "base".write(to: root.appendingPathComponent("a"), atomically: true, encoding: .utf8)
+        try await repo.stage(paths: ["a"]); try await repo.commit(message: "base")
+        for i in 1...3 { try "change \(i)".write(to: root.appendingPathComponent("a"), atomically: true, encoding: .utf8); try await repo.stash(message: "stash \(i)") }
+        let before = try await repo.workflowRead(["stash", "list", "--format=%H %gt"])
+        _ = try await repo.renameStash(reference: "stash@{1}", message: "renamed")
+        let after = try await repo.workflowRead(["stash", "list", "--format=%H %gt"])
+        XCTAssertEqual(before, after)
+        let stashes = try await repo.stashes(); XCTAssertEqual(stashes.count, 3); XCTAssertEqual(stashes[1].subject, "renamed"); XCTAssertTrue(stashes[0].subject.contains("stash 3")); XCTAssertTrue(stashes[2].subject.contains("stash 1"))
+        do { _ = try await repo.renameStash(reference: "stash@{9}", message: "bad"); XCTFail("Invalid stash accepted") } catch { }
+        let final = try await repo.workflowRead(["stash", "list", "--format=%H %gt"]); XCTAssertEqual(before, final)
+    }
+}
+
+extension RepositoryWorkflowTests {
+    func testInteractiveRebaseDropFixupAndInvalidPlans() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repo = try await GitRepository.initialize(at: root)
+        _ = try await repo.workflowRead(["config", "user.name", "Tester"])
+        _ = try await repo.workflowRead(["config", "user.email", "test@example.invalid"])
+        for i in 0...3 { try "\(i)".write(to: root.appendingPathComponent("file\(i)"), atomically: true, encoding: .utf8); try await repo.stage(paths: ["file\(i)"]); try await repo.commit(message: "commit \(i)") }
+        let rows = try await repo.log(); let head = rows[0].hash, base = rows[3].hash
+        let plan = "pick \(rows[2].hash) first\nfixup \(rows[1].hash) second\ndrop \(rows[0].hash) third\n"
+        for invalid in ["pick \(rows[2].hash)\n", "pick \(rows[2].hash)\npick \(rows[2].hash)\ndrop \(rows[0].hash)", "drop \(rows[2].hash)\nfixup \(rows[1].hash)\ndrop \(rows[0].hash)"] {
+            do { _ = try await repo.interactiveRebase(onto: base, plan: invalid); XCTFail("Invalid plan accepted") } catch { }
+            let current = try await repo.workflowRevision("HEAD"); XCTAssertEqual(current, head)
+        }
+        try "dirty".write(to: root.appendingPathComponent("untracked"), atomically: true, encoding: .utf8)
+        do { _ = try await repo.interactiveRebase(onto: base, plan: plan); XCTFail("Dirty rebase accepted") } catch { }
+        try FileManager.default.removeItem(at: root.appendingPathComponent("untracked"))
+        _ = try await repo.interactiveRebase(onto: base, plan: plan)
+        let after = try await repo.log(); XCTAssertEqual(after.count, 2)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("file2").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("file3").path))
+    }
+}
+
+extension RepositoryWorkflowTests {
+    func testMergeConflictAbortAndContinue() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repo = try await GitRepository.initialize(at: root)
+        _ = try await repo.workflowRead(["config", "user.name", "Tester"])
+        _ = try await repo.workflowRead(["config", "user.email", "test@example.invalid"])
+        try "base\n".write(to: root.appendingPathComponent("file"), atomically: true, encoding: .utf8)
+        try await repo.stage(paths: ["file"]); try await repo.commit(message: "base")
+        let branch = try await repo.currentBranch()
+        try await repo.createBranch(name: "topic")
+        try "topic\n".write(to: root.appendingPathComponent("file"), atomically: true, encoding: .utf8)
+        try await repo.stage(paths: ["file"]); try await repo.commit(message: "topic")
+        try await repo.checkout(branch: branch)
+        try "main\n".write(to: root.appendingPathComponent("file"), atomically: true, encoding: .utf8)
+        try await repo.stage(paths: ["file"]); try await repo.commit(message: "main")
+        for action in [RepositoryWorkflow.mergeAbort, .mergeContinue] {
+            do { _ = try await repo.advancedOperation(.merge, first: "topic", second: ""); XCTFail("Expected conflict") } catch { }
+            let status = try await repo.status(); XCTAssertTrue(status.contains { $0.isConflict })
+            if action == .mergeContinue { try "resolved\n".write(to: root.appendingPathComponent("file"), atomically: true, encoding: .utf8); try await repo.stage(paths: ["file"]) }
+            _ = try await repo.advancedOperation(action, first: "", second: "")
+            let clean = try await repo.status(); XCTAssertTrue(clean.isEmpty)
+        }
+        let rows = try await repo.log(); XCTAssertEqual(rows[0].parents.count, 2)
+        let base = rows.last!.hash
+        let plan = try await repo.advancedOperation(.rebasePlan, first: base, second: "")
+        do { _ = try await repo.interactiveRebase(onto: base, plan: plan); XCTFail("Merge plan silently flattened") } catch { }
+    }
+    func testAuthorFilterPrecedesPagination() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repo = try await GitRepository.initialize(at: root)
+        _ = try await repo.workflowRead(["config", "user.email", "test@example.invalid"])
+        for (i, author) in ["Alice", "Bob", "Alice"].enumerated() {
+            _ = try await repo.workflowRead(["config", "user.name", author])
+            try "\(i)".write(to: root.appendingPathComponent("file"), atomically: true, encoding: .utf8)
+            try await repo.stage(paths: ["file"]); try await repo.commit(message: "commit \(i)")
+        }
+        let rows = try await repo.log(limit: 1, skip: 1, author: "Alice")
+        XCTAssertEqual(rows.count, 1); XCTAssertEqual(rows[0].subject, "commit 0")
+    }
+}

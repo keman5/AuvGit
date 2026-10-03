@@ -85,3 +85,123 @@
 "Unstage File" = "ファイルのステージを解除";
 
 "Stage File" = "ファイルをステージ";
+
+"Saved editor drafts" = "エディターの下書きを保存しました";
+
+"Replace working tree draft with auto merge?" = "作業ツリーの下書きを自動マージで置き換えますか？";
+
+"Edit .gitignore" = ".gitignore を編集";
+
+"Ignored Files" = "無視されたファイル";
+
+"Restore from Trash" = "ゴミ箱から復元";
+
+"Open Compare" = "比較を開く";
+
+"Rename File" = "ファイル名を変更";
+
+"Move to Trash" = "ゴミ箱に移動";
+
+"Ignore Path" = "このパスを無視";
+
+"Repository-relative destination" = "リポジトリ相対の移動先";
+
+"Close" = "閉じる";
+
+"Keyboard Shortcuts" = "キーボードショートカット";
+
+"Open Repository" = "リポジトリを開く";
+
+"Refresh" = "更新";
+
+"Stage" = "ステージ";
+
+"Commit" = "コミット";
+
+"Use four distinct single letters; shortcuts use Command." = "異なる4つの英字を指定します。Command と組み合わせます。";
+
+"Kind" = "種類";
+
+"Name" = "名前";
+
+"Main Branch" = "メインブランチ";
+
+"Develop Branch" = "開発ブランチ";
+
+"Start Git Flow" = "Git Flow を開始";
+
+"Finish Git Flow" = "Git Flow を完了";
+
+"Pull / Merge Request" = "プル・マージリクエスト";
+
+"Target Branch" = "ターゲットブランチ";
+
+"Open Review Page" = "レビュー画面を開く";
+
+"Updates" = "アップデート";
+
+"Trusted HTTPS Manifest URL" = "信頼する HTTPS マニフェスト URL";
+
+"Check for Updates" = "アップデートを確認";
+
+"Available Version" = "利用可能なバージョン";
+
+"Download Release" = "リリースをダウンロード";
+
+"Git Flow completed" = "Git Flow が完了しました";
+
+"Extensions" = "拡張";
+
+"Finish merges locally and removes only a merged branch. Release and hotfix create a tag named after the branch suffix." = "ローカルでマージし、マージ済みブランチだけを削除します。リリースとホットフィックスでは名前に対応するタグを作成します。";
+
+"The index or working tree changed. Reload before partial staging." = "インデックスまたは作業ツリーが変更されました。部分ステージの前に再読み込みしてください。";
+
+"Invalid patch hunk." = "パッチハンクが無効です。";
+
+"Select at least one changed line." = "変更行を1行以上選択してください。";
+
+"The index changed. Reload before saving to the index." = "インデックスが変更されました。保存前に再読み込みしてください。";
+
+"Only UTF-8 text up to 2 MB can be saved to the index." = "2 MB 以下の UTF-8 テキストだけをインデックスに保存できます。";
+
+"Index entry is missing." = "インデックスの項目がありません。";
+
+"Symbolic links cannot be managed by this operation." = "この操作ではシンボリックリンクを扱えません。";
+
+"The destination already exists." = "移動先は既に存在します。";
+
+"The system did not return the trash location." = "システムからゴミ箱の場所を取得できませんでした。";
+
+"This trash item belongs to a different repository." = "このゴミ箱項目は別のリポジトリに属しています。";
+
+"Paths containing newlines cannot be represented in .gitignore." = "改行を含むパスは .gitignore に記述できません。";
+
+"The .gitignore file must use UTF-8." = ".gitignore ファイルは UTF-8 である必要があります。";
+
+"The .gitignore file changed. Reload before saving." = ".gitignore が変更されました。保存前に再読み込みしてください。";
+
+"Use a GitHub or GitLab HTTPS/SSH remote." = "GitHub または GitLab の HTTPS/SSH リモートを使用してください。";
+
+"Invalid review branches or remote path." = "レビューブランチまたはリモートパスが無効です。";
+
+"Invalid review URL." = "レビュー URL が無効です。";
+
+"The update manifest must use HTTPS." = "更新マニフェストには HTTPS が必要です。";
+
+"Update manifest request failed." = "更新マニフェストの取得に失敗しました。";
+
+"Invalid update manifest." = "更新マニフェストが無効です。";
+
+"A clean worktree and index are required" = "作業ツリーとインデックスに未コミットの変更がないことが必要です。";
+
+"Check out the matching Git Flow branch before finishing." = "完了する前に該当する Git Flow ブランチをチェックアウトしてください。";
+
+"The release tag already exists." = "リリースタグは既に存在します。";
+
+"Shortcut conflicts with another action or a macOS command." = "他の操作または macOS のコマンドと競合するショートカットです。";
+
+"This installation is up to date." = "インストール済みのバージョンは最新です。";
+
+"Invalid release version." = "リリースのバージョン番号が無効です。";
+
+"Git Flow main, develop and task branches must be distinct." = "Git Flow のメイン・開発・作業ブランチには異なる名前が必要です。";

@@ -94,6 +94,7 @@ final class FileCompareSession: ObservableObject {
     @Published var indexDraft = ""
     @Published var partial: PartialStagingSnapshot?
     @Published var unstagePartial = false
+    private var patchGeneration = 0
     @Published var isBusy = false
     @Published var error: String?
     @Published var status = ""
@@ -113,8 +114,14 @@ final class FileCompareSession: ObservableObject {
         } catch { self.error = compareText(error.localizedDescription) }
     }
     func reloadPatch() async {
-        do { partial = try await repository.partialStaging(path: path, unstage: unstagePartial); patch = try await repository.diff(target: .worktree(path: path, untracked: snapshot?.index.exists == false && snapshot?.isConflict == false), ignoreWhitespace: ignoreWhitespace) }
-        catch { self.error = compareText(error.localizedDescription) }
+        patchGeneration += 1
+        let generation = patchGeneration, unstage = unstagePartial
+        do {
+            let partial = try await repository.partialStaging(path: path, unstage: unstage)
+            let patch = try await repository.diff(target: .worktree(path: path, untracked: snapshot?.index.exists == false && snapshot?.isConflict == false), ignoreWhitespace: ignoreWhitespace)
+            guard generation == patchGeneration else { return }
+            self.partial = partial; self.patch = patch
+        } catch { if generation == patchGeneration { self.error = compareText(error.localizedDescription) } }
     }
     @discardableResult
     func save() async -> Bool {
@@ -135,7 +142,7 @@ final class FileCompareSession: ObservableObject {
             }
             snapshot = try await repository.fileComparison(path: path)
             indexDraft = snapshot?.index.text ?? ""
-            await reloadPatch(); status = compareText("Saved to working tree; index unchanged")
+            await reloadPatch(); status = compareText("Saved editor drafts")
             NotificationCenter.default.post(name: .rayGitWorktreeChanged, object: repository.url)
             return true
         } catch { self.error = compareText(error.localizedDescription); return false }
@@ -158,6 +165,9 @@ final class FileCompareSession: ObservableObject {
         catch { self.error = compareText(error.localizedDescription); isBusy = false }
     }
     func autoMerge() async {
+        guard !isBusy else { return }
+        isBusy = true
+        defer { isBusy = false }
         guard let snapshot, let base = snapshot.base?.text, let ours = snapshot.ours?.text, let theirs = snapshot.theirs?.text else { return }
         do { draft = try await MergePreview.create(base: base, ours: ours, theirs: theirs).text } catch { self.error = compareText(error.localizedDescription) }
     }
@@ -167,10 +177,10 @@ final class FileCompareSession: ObservableObject {
         guard let expected = savedWorktree else { return }
         isBusy = true; error = nil
         do {
-            if resolve { try await repository.markResolved(path: path, expected: expected) }
+            if resolve || snapshot?.isConflict == true { try await repository.markResolved(path: path, expected: expected) }
             else {
                 let current = try await repository.fileComparison(path: path)
-                guard current.worktree.data == expected.data else { throw GitError("File changed on disk. Reload before saving.") }
+                guard current.worktree.data == expected.data, current.index.data == snapshot?.index.data else { throw GitError("The index or working tree changed. Reload before partial staging.") }
                 try await repository.stage(paths: [path])
             }
             NotificationCenter.default.post(name: .rayGitWorktreeChanged, object: repository.url)
@@ -192,6 +202,7 @@ private struct FileCompareContent: View {
     @State private var changeNavigation = 0
     @State private var confirmReload = false
     @State private var showBase = false
+    @State private var confirmMerge = false
     var body: some View {
         VStack(spacing: 0) {
             controls
@@ -207,7 +218,7 @@ private struct FileCompareContent: View {
                 PartialStagingPane(session: session)
             } else if let snapshot = session.snapshot, MediaCompareView.supports(snapshot) {
                 MediaCompareView(snapshot: snapshot)
-            } else if let snapshot = session.snapshot, [snapshot.head.data?.count ?? 0, snapshot.index.data?.count ?? 0, snapshot.worktree.data?.count ?? 0].max()! > 2 * 1024 * 1024 {
+            } else if let snapshot = session.snapshot, [snapshot.head.data?.count ?? 0, snapshot.index.data?.count ?? 0, snapshot.worktree.data?.count ?? 0, snapshot.base?.data?.count ?? 0, snapshot.ours?.data?.count ?? 0, snapshot.theirs?.data?.count ?? 0].max()! > 2 * 1024 * 1024 {
                 PagedComparisonView(snapshot: snapshot)
             } else if session.snapshot != nil {
                 HStack(spacing: 8) {
@@ -230,6 +241,10 @@ private struct FileCompareContent: View {
             }.font(.caption).padding(.horizontal, 10).frame(height: 28)
         }.environment(\.locale, L10n.locale)
             .task { await session.reload() }
+            .alert(compareText("Replace working tree draft with auto merge?"), isPresented: $confirmMerge) {
+                Button(compareText("Auto Merge"), role: .destructive) { Task { await session.autoMerge() } }
+                Button(compareText("Cancel"), role: .cancel) {}
+            }
             .alert(compareText("Discard unsaved changes and reload?"), isPresented: $confirmReload) {
                 Button(compareText("Reload"), role: .destructive) { Task { await session.reload() } }
                 Button(compareText("Cancel"), role: .cancel) {}
@@ -241,7 +256,7 @@ private struct FileCompareContent: View {
                 Text(session.path).font(.headline).lineLimit(1).truncationMode(.middle)
                 if session.isDirty { Circle().fill(.orange).frame(width: 7, height: 7) }
                 Spacer()
-                if session.snapshot?.isConflict == true { Button(compareText("Auto Merge")) { Task { await session.autoMerge() } }.disabled(session.isBusy) }
+                if session.snapshot?.isConflict == true { Button(compareText("Auto Merge")) { if session.draft != session.savedWorktree?.text { confirmMerge = true } else { Task { await session.autoMerge() } } }.disabled(session.isBusy) }
                 Button(compareText("Reload")) { if session.isDirty { confirmReload = true } else { Task { await session.reload() } } }.disabled(session.isBusy)
                 Button(compareText("Save")) { Task { await session.save() } }.keyboardShortcut("s").disabled(!session.isDirty || session.isBusy)
                 Button(compareText(session.snapshot?.isConflict == true ? "Save & Mark Resolved" : "Save & Stage")) { Task { await session.stage(resolve: session.snapshot?.isConflict == true) } }.disabled(session.isBusy || !session.canEdit)
@@ -271,7 +286,7 @@ private struct FileCompareContent: View {
                     Toggle(compareText("Line Numbers"), isOn: $showNumbers)
                     Toggle(compareText("Synchronized Scrolling"), isOn: $synchronize)
                 }
-                if layout == "patch" { Toggle(interactionText("Ignore Whitespace"), isOn: $session.ignoreWhitespace).onChange(of: session.ignoreWhitespace) { _, _ in Task { await session.reloadPatch() } } }
+
             }
         }.padding(10).background(.bar)
     }

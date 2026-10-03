@@ -16,7 +16,10 @@ struct MainWindow: View {
     }
     @State private var showActivity = false
     @State private var showTools = false
+    @State private var fileTree = false
     @State private var showCreate = false
+    @State private var showNetwork = false
+    @State private var showTags = false
     @State private var confirmation: PendingAction?
     @Environment(\.scenePhase) private var scenePhase
     struct PendingAction: Identifiable {
@@ -25,7 +28,7 @@ struct MainWindow: View {
         let message: String
         let action: () -> Void
     }
-    var body: some View {
+    private var windowContent: some View {
         VStack(spacing: 0) {
             if let error = store.error {
                 HStack(alignment: .top) {
@@ -35,6 +38,7 @@ struct MainWindow: View {
                 }.padding(10).background(Color.orange.opacity(0.10))
                 Divider()
             }
+            if !store.openRepositories.isEmpty { repositoryTabs; Divider() }
             if store.repository != nil { actionBar; Divider() }
             HSplitView {
                 sidebar.frame(minWidth: 190, idealWidth: 220, maxWidth: 300)
@@ -53,9 +57,13 @@ struct MainWindow: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .navigationTitle(store.repositoryURL?.lastPathComponent ?? "RayGit")
-        .toolbar {
+    }
+    private var toolbarContent: some View {
+        windowContent.toolbar {
             ToolbarItemGroup(placement: .navigation) {
                 Button { showCreate = true } label: { Label(workflowText("Create Repository"), systemImage: "plus") }.disabled(store.isBusy)
+                Button { showTags = true } label: { Label(workflowText("Tag Management"), systemImage: "tag") }.disabled(store.repository == nil || store.isBusy)
+                Button { showNetwork = true } label: { Label(workflowText("Network"), systemImage: "network") }.disabled(store.repository == nil || store.isBusy)
                 Button { showTools = true } label: { Label(workflowText("Repository Tools"), systemImage: "wrench.and.screwdriver") }.disabled(store.repository == nil || store.isBusy)
                 Button { store.chooseRepository() } label: { Label(mainText("open"), systemImage: "folder.badge.plus") }.help(mainText("openHelp")).disabled(store.isBusy)
                 Button { Task { await store.refresh() } } label: { Label(mainText("refresh"), systemImage: "arrow.clockwise") }.help(mainText("refreshHelp")).disabled(store.repository == nil || store.isBusy)
@@ -74,10 +82,12 @@ struct MainWindow: View {
             }
 
         }
-        .onReceive(NotificationCenter.default.publisher(for: .rayGitWorktreeChanged)) { event in
+    }
+    private var observedContent: some View {
+        toolbarContent.onReceive(NotificationCenter.default.publisher(for: .rayGitWorktreeChanged)) { event in
             if let url = event.object as? URL, url == store.repositoryURL { Task { await store.refresh() } }
         }
-        .onChange(of: store.amend) { _, value in if value, let repository = store.repository { Task { do { store.commitMessage = try await repository.workflowRead(["log", "-1", "--format=%B"]) } catch { store.report(error) } } } }
+        .onChange(of: store.amend) { _, value in fillAmendMessage(value) }
         .onChange(of: store.selectedPaths) { _, _ in if let file = store.selectedFile { store.stagedDiff = file.isStaged && !file.isUnstaged }; Task { await store.loadDiff() } }
         .onChange(of: store.stagedDiff) { _, _ in Task { await store.loadDiff() } }
         .onChange(of: store.ignoreWhitespace) { _, _ in Task { await store.loadDiff() } }
@@ -85,8 +95,11 @@ struct MainWindow: View {
         .onChange(of: store.selectedCommit) { _, _ in Task { await store.loadCommitFiles() } }
         .onChange(of: store.selectedCommitPath) { _, _ in Task { await store.loadDiff() } }
         .onChange(of: store.historySearch) { _, _ in store.scheduleSearch() }
+        .onChange(of: store.historyAuthor) { _, _ in store.scheduleSearch() }
         .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await store.refresh() } } }
-        .alert(item: $confirmation) { action in Alert(title: Text(action.title), message: Text(action.message), primaryButton: .default(Text(mainText("continue")), action: action.action), secondaryButton: .cancel(Text(mainText("cancel")))) }
+    }
+    var body: some View {
+        observedContent.alert(item: $confirmation) { action in Alert(title: Text(action.title), message: Text(action.message), primaryButton: .default(Text(mainText("continue")), action: action.action), secondaryButton: .cancel(Text(mainText("cancel")))) }
         .sheet(item: $namePrompt) { prompt in
             VStack(alignment: .leading, spacing: 18) {
                 Text(prompt.title).font(.headline)
@@ -94,6 +107,8 @@ struct MainWindow: View {
                 HStack { Spacer(); Button(mainText("cancel")) { namePrompt = nil }; Button(mainText("continue")) { submitName(prompt) }.buttonStyle(.borderedProminent).disabled(promptValue.trimmingCharacters(in: .whitespaces).isEmpty) }
             }.padding(24).frame(width: 460)
         }
+        .sheet(isPresented: $showTags) { TagManagementView(store: store) }
+        .sheet(isPresented: $showNetwork) { NetworkOperationsView(store: store) }
         .sheet(isPresented: $showTools) { RepositoryTools(store: store) }
         .sheet(isPresented: $showCreate) { CreateRepositorySheet(store: store) }
         .sheet(isPresented: $showActivity) {
@@ -101,6 +116,18 @@ struct MainWindow: View {
                 HStack { Text(mainText("activity")).font(.headline); Spacer(); Button(mainText("close")) { showActivity = false } }
                 ScrollView { Text(store.activity.isEmpty ? mainText("noActivity") : store.activity.joined(separator: "\n\n")).font(.system(.caption, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
             }.padding(20).frame(width: 650, height: 400)
+        }
+    }
+    private var repositoryTabs: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 6) {
+                ForEach(store.openRepositories, id: \.self) { path in
+                    Button { Task { await store.open(URL(fileURLWithPath: path)) } } label: {
+                        HStack { Image(systemName: "externaldrive"); Text(URL(fileURLWithPath: path).lastPathComponent) }
+                    }.buttonStyle(.bordered).tint(path == store.repositoryURL?.path ? .accentColor : .secondary).disabled(store.isBusy)
+                    Button { store.closeRepositoryTab(path) } label: { Image(systemName: "xmark") }.buttonStyle(.plain).disabled(store.isBusy)
+                }
+            }.padding(6)
         }
     }
     private func mainText(_ key: String, _ args: CVarArg...) -> String { L10n.text(key, table: "Main", arguments: args) }
@@ -157,7 +184,11 @@ struct MainWindow: View {
         }
     }
     var filesPane: some View {
-        WorkspaceFilesPane(files: store.files, selection: $store.selectedPaths, filter: $store.fileFilter, isBusy: store.isBusy, onAction: fileAction)
+        VStack(spacing: 0) {
+            Picker(workflowText("Files view"), selection: $fileTree) { Text(workflowText("Status list")).tag(false); Text(workflowText("Directory tree")).tag(true) }.pickerStyle(.segmented).frame(width: 260).padding(6)
+            if fileTree, let repository = store.repository { WorkspaceTree(repository: repository, openFile: { path in ComparePresenter.show(title: path, repository: repository, target: .worktree(path: path, untracked: store.files.first(where: { $0.path == path })?.isUntracked ?? false)) }, isBusy: store.isBusy, setBusy: { store.isBusy = $0 }).id(repository.url) }
+            else { WorkspaceFilesPane(files: store.files, selection: $store.selectedPaths, filter: $store.fileFilter, isBusy: store.isBusy, onAction: fileAction) }
+        }
     }
     var diffPane: some View {
         VStack(spacing: 0) {
@@ -176,12 +207,37 @@ struct MainWindow: View {
             Text(mainText("stagedCount", store.stagedCount)).font(.caption).foregroundStyle(.secondary)
             TextEditor(text: $store.commitMessage).focused($commitFocused).font(.system(size: 13)).scrollContentBackground(.hidden).padding(7).background(Color(nsColor: .textBackgroundColor)).clipShape(RoundedRectangle(cornerRadius: 6)).overlay(alignment: .topLeading) { if store.commitMessage.isEmpty { Text(mainText("commitPlaceholder")).foregroundStyle(.tertiary).font(.system(size: 13)).padding(12).allowsHitTesting(false) } }.frame(minHeight: 65)
             Toggle(mainText("amend"), isOn: $store.amend).font(.caption)
-            HStack { Button("Signed-off-by") { guard let repo = store.repository else { return }; Task { do { let name = try await repo.workflowRead(["config", "user.name"]).trimmingCharacters(in: .newlines); let email = try await repo.workflowRead(["config", "user.email"]).trimmingCharacters(in: .newlines); store.commitMessage += "\n\nSigned-off-by: " + name + " <" + email + ">" } catch { store.report(error) } } }; Button(workflowText("commitTemplate")) { guard let repo = store.repository else { return }; Task { do { let path = try await repo.workflowRead(["config", "--path", "commit.template"]).trimmingCharacters(in: .newlines); let url = path.hasPrefix("/") ? URL(fileURLWithPath: path) : repo.url.appendingPathComponent(path); store.commitMessage = try String(contentsOf: url, encoding: .utf8) } catch { store.report(error) } } } }.font(.caption)
+            HStack { Button("Signed-off-by", action: addSignoff); Button(workflowText("commitTemplate"), action: loadTemplate) }.font(.caption)
             if store.amend { Text(mainText("amendWarning")).font(.caption).foregroundStyle(.orange) }
             Button { if store.amend { confirm(mainText("amend"), mainText("amendMessage")) { store.commit() } } else { store.commit() } } label: { Text(store.amend ? mainText("amendCommit") : mainText("commitStaged")).frame(maxWidth: .infinity) }.buttonStyle(.borderedProminent).disabled(store.isBusy || store.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (!store.amend && store.stagedCount == 0) || store.files.contains(where: \.isConflict))
             Text(mainText("commitNote")).font(.caption2).foregroundStyle(.secondary)
 
         }.padding(14)
+    }
+    private func jumpToCommit(_ value: String) {
+        guard let repo = store.repository, !value.isEmpty else { return }
+        Task { do { let hash = try await repo.workflowRevision(value); if let commit = try await repo.log(limit: 1, ref: hash).first, store.repositoryURL == repo.url { CommitDetailPresenter.show(commit: commit, repository: repo) } } catch { store.report(error) } }
+    }
+    private func fillAmendMessage(_ value: Bool) {
+        guard value, store.commitMessage.isEmpty, let repo = store.repository else { return }
+        Task { do { let message = try await repo.workflowRead(["log", "-1", "--format=%B"]); if store.repositoryURL == repo.url && store.amend { store.commitMessage = message } } catch { store.report(error) } }
+    }
+    private func addSignoff() {
+        guard let repo = store.repository else { return }
+        Task { do {
+            let name = try await repo.workflowRead(["config", "user.name"]).trimmingCharacters(in: .newlines)
+            let email = try await repo.workflowRead(["config", "user.email"]).trimmingCharacters(in: .newlines)
+            if store.repositoryURL == repo.url { store.commitMessage += "\n\nSigned-off-by: " + name + " <" + email + ">" }
+        } catch { store.report(error) } }
+    }
+    private func loadTemplate() {
+        guard let repo = store.repository else { return }
+        Task { do {
+            let path = try await repo.workflowRead(["config", "--path", "commit.template"]).trimmingCharacters(in: .newlines)
+            let url = path.hasPrefix("/") ? URL(fileURLWithPath: path) : repo.url.appendingPathComponent(path)
+            let message = try String(contentsOf: url, encoding: .utf8)
+            if store.repositoryURL == repo.url { store.commitMessage = message }
+        } catch { store.report(error) } }
     }
     func statusName(_ status: String) -> String { [" ": "—", "?": mainText("untracked"), "M": mainText("modified"), "A": mainText("added"), "D": mainText("deleted"), "R": mainText("renamed"), "C": mainText("copied"), "U": mainText("conflict"), "T": mainText("type") ][status] ?? status }
     func statusColor(_ status: String) -> Color { switch status { case "A", "?": return .green; case "D": return .red; case "M", "R", "U": return .orange; default: return .secondary } }
@@ -211,7 +267,7 @@ extension MainWindow {
     private func historyPane(compact: Bool) -> some View {
         VStack(spacing: 0) {
             if compact { HStack { Text(interactionText("Log")).font(.system(size: 12, weight: .semibold)); Spacer(); Button { store.mode = "history" } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }.buttonStyle(.plain).help(interactionText("Expand History")) }.padding(.horizontal, 10).frame(height: 28).background(.bar) }
-            HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch, isLoading: store.loadingHistory, hasMore: store.hasMore, onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy, onAction: historyAction, compact: compact)
+            HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch, isLoading: store.loadingHistory, hasMore: store.hasMore, onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy, onAction: historyAction, compact: compact, onJump: jumpToCommit, authorFilter: $store.historyAuthor)
         }
     }
     private func copyText(_ text: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }

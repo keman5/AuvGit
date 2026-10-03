@@ -13,7 +13,7 @@ struct PartialStagingPane: View {
                 }.pickerStyle(.segmented).frame(width: 220)
                 Button(compareText(session.unstagePartial ? "Unstage Selected Lines" : "Stage Selected Lines")) { Task { await session.applySelection(selected); selected = [] } }
                     .disabled(selected.isEmpty || session.isBusy || session.isDirty || session.partial?.unavailableReason != nil)
-                Button(compareText(session.unstagePartial ? "Unstage File" : "Stage File")) { Task { if session.unstagePartial { await session.unstageFile() } else { await session.stage(resolve: false) } } }.disabled(session.isBusy || session.isDirty)
+                Button(compareText(session.unstagePartial ? "Unstage File" : session.snapshot?.isConflict == true ? "Save & Mark Resolved" : "Stage File")) { Task { if session.unstagePartial { await session.unstageFile() } else { await session.stage(resolve: false) } } }.disabled(session.isBusy || session.isDirty)
                 Spacer()
                 if session.isDirty { Text(compareText("Save drafts before partial staging")).foregroundStyle(.orange) }
             }.padding(8)
@@ -38,6 +38,6 @@ struct PartialStagingPane: View {
                     }
                 }
             }
-        }.onChange(of: session.unstagePartial) { _, _ in selected = []; Task { await session.reloadPatch() } }
+        }.onChange(of: session.partial?.file.index.data) { _, _ in selected = [] }.onChange(of: session.partial?.file.worktree.data) { _, _ in selected = [] }.onChange(of: session.unstagePartial) { _, _ in selected = []; Task { await session.reloadPatch() } }
     }
 }

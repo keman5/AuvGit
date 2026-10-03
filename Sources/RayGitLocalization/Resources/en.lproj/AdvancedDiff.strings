@@ -9,3 +9,9 @@
 "page" = "Page %d · starts at line %d";
 "external" = "External Compare…";
 "chooseExternal" = "Choose a comparison executable or app";
+"leftRevision" = "Left revision";
+"rightRevision" = "Right revision";
+"launchExternal" = "Compare selected revisions";
+"base" = "Base";
+"ours" = "Ours";
+"theirs" = "Theirs";

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "raygit",
+  "version": "0.1.0",
+  "description": "Local Git workspace, history, diffs, staging and commits inside Codex.",
+  "author": { "name": "RayGit" },
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "RayGit",
+        "shortDescription": "Git 工作区、历史与差异",
+        "longDescription": "在 Codex 内查看本地 Git 仓库、分支、提交历史和文件差异，暂存改动并创建提交。无需独立 Git 客户端。",
+        "developerName": "RayGit",
+        "category": "Developer Tools",
+        "capabilities": ["Interactive", "Read", "Write"],
+        "defaultPrompt": "打开当前项目的 RayGit 面板",
+        "logo": "./assets/icon.svg",
+        "composerIcon": "./assets/icon.svg"
+      }
+    }
+  }
+}

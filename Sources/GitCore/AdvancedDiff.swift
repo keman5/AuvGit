@@ -33,12 +33,34 @@ public struct CharacterDiff: Equatable {
     public let source: [NSRange]
     public let target: [NSRange]
     public init(source a: String, target b: String) {
-        // Keep this linear for pathological generated lines. Common prefix/suffix isolates the changed span.
-        let aa = Array(a.utf16), bb = Array(b.utf16)
+        let aa = Array(a), bb = Array(b)
         var prefix = 0, suffix = 0
         while prefix < min(aa.count, bb.count), aa[prefix] == bb[prefix] { prefix += 1 }
         while suffix < min(aa.count, bb.count) - prefix, aa[aa.count - suffix - 1] == bb[bb.count - suffix - 1] { suffix += 1 }
-        source = aa.count - suffix > prefix ? [NSRange(location: prefix, length: aa.count - suffix - prefix)] : []
-        target = bb.count - suffix > prefix ? [NSRange(location: prefix, length: bb.count - suffix - prefix)] : []
+        let ac = aa.count - prefix - suffix, bc = bb.count - prefix - suffix
+        var removed = Set<Int>(), added = Set<Int>()
+        if ac + bc > 4_000 || (ac > 0 && bc > 1_000_000 / ac) {
+            removed = Set(prefix..<(aa.count - suffix)); added = Set(prefix..<(bb.count - suffix))
+        } else {
+            for change in bb[prefix..<(bb.count - suffix)].difference(from: aa[prefix..<(aa.count - suffix)]) {
+                switch change {
+                case .remove(let offset, _, _): removed.insert(prefix + offset)
+                case .insert(let offset, _, _): added.insert(prefix + offset)
+                }
+            }
+        }
+        func ranges(_ characters: [Character], changed: Set<Int>) -> [NSRange] {
+            var result: [NSRange] = [], offset = 0
+            for (index, character) in characters.enumerated() {
+                let length = String(character).utf16.count
+                if changed.contains(index) {
+                    if let last = result.last, NSMaxRange(last) == offset { result[result.count - 1].length += length }
+                    else { result.append(NSRange(location: offset, length: length)) }
+                }
+                offset += length
+            }
+            return result
+        }
+        source = ranges(aa, changed: removed); target = ranges(bb, changed: added)
     }
 }
