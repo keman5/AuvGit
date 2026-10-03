@@ -1,0 +1,10 @@
+"show" = "显示提交详情 / 日志";
+"copyHash" = "复制提交 ID";
+"copyMessage" = "复制提交消息";
+"createBranch" = "创建分支…";
+"createTag" = "创建标签…";
+"checkout" = "检出提交（分离 HEAD）…";
+"cherryPick" = "摘取…";
+"revert" = "还原…";
+"files" = "变更文件";
+"noFiles" = "没有变更文件";

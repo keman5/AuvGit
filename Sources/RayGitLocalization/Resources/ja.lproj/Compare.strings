@@ -1,0 +1,87 @@
+"Save changes before closing?" = "閉じる前に変更を保存しますか？";
+"Save" = "保存";
+"Discard Draft" = "下書きを破棄";
+"Cancel" = "キャンセル";
+"Loaded from disk" = "ディスクから読み込みました";
+"Saved to working tree; index unchanged" = "作業ツリーに保存済み。インデックスは変更されていません";
+"File changed on disk. Reload before saving." = "ディスク上のファイルが変更されました。再読み込みしてください。";
+"Marked resolved and staged" = "解決済みとしてステージしました";
+"Staged working tree file" = "作業ツリーのファイルをステージしました";
+"Conflict: edit the result, save, then mark resolved" = "競合：結果を編集・保存してから解決済みにしてください";
+"Show merge base" = "共通祖先を表示";
+"Patch shows saved disk content; save to update it" = "パッチは保存済みの内容です。更新するには保存してください";
+"Find in files" = "ファイル内を検索";
+"Previous match" = "前の一致";
+"Next match" = "次の一致";
+"No file loaded" = "ファイルが読み込まれていません";
+"Unsaved changes" = "未保存の変更あり";
+"Discard unsaved changes and reload?" = "未保存の変更を破棄して再読み込みしますか？";
+"Reload" = "再読み込み";
+"Save & Mark Resolved" = "保存して解決済みにする";
+"Save & Stage" = "保存してステージ";
+"Layout" = "レイアウト";
+"Two Columns" = "2列";
+"Three Columns" = "3列";
+"Patch" = "パッチ";
+"Baseline" = "比較元";
+"Index" = "インデックス";
+"Previous change" = "前の変更";
+"Next change" = "次の変更";
+"Use Version" = "バージョン全体を採用";
+"Display" = "表示";
+"Wrap Lines" = "折り返し";
+"Line Numbers" = "行番号";
+"Synchronized Scrolling" = "スクロール同期";
+"HEAD" = "HEAD";
+"Ours" = "自分のバージョン";
+"Theirs" = "相手のバージョン";
+"Base" = "共通祖先";
+"Working Tree / Result" = "作業ツリー／マージ結果";
+"Working Tree (Editable)" = "作業ツリー（編集可能）";
+"File does not exist in this version" = "このバージョンにファイルは存在しません";
+"Edit / Three-way Compare" = "編集／3列比較";
+"Files larger than 2 MB are read-only." = "2 MB を超えるファイルは編集できません。";
+"Binary files are read-only." = "バイナリファイルはテキスト編集できません。";
+"Only UTF-8 text can be edited." = "UTF-8 テキストのみ編集できます。";
+"Invalid repository file path." = "リポジトリ内のファイルパスが無効です。";
+"Paths through symbolic links cannot be compared or edited." = "シンボリックリンクを経由するパスは比較・編集できません。";
+"Symbolic links and non-regular files are read-only." = "シンボリックリンクと特殊ファイルは読み取り専用です。";
+"The file is read-only." = "ファイルは読み取り専用です。";
+"Directories and submodules are read-only." = "ディレクトリとサブモジュールは読み取り専用です。";
+"Symbolic links are read-only." = "シンボリックリンクは読み取り専用です。";
+"Submodules are read-only." = "サブモジュールは読み取り専用です。";
+"Only existing regular UTF-8 files can be edited." = "存在する通常の UTF-8 ファイルのみ編集できます。";
+"The file changed outside this comparison. Reload before saving or resolving." = "ファイルが外部で変更されました。保存・解決前に再読み込みしてください。";
+"Binary content cannot be saved by the text editor." = "テキストエディタでバイナリ内容は保存できません。";
+"Files larger than 2 MB cannot be saved by the text editor." = "テキストエディタで 2 MB を超えるファイルは保存できません。";
+"Remove the conflict markers before marking this file resolved." = "競合マーカーを削除してから解決済みにしてください。";
+"Files with mixed line endings are read-only." = "改行コードが混在するファイルは読み取り専用です。";
+"Working Tree (Read-only)" = "作業ツリー（読み取り専用）";
+
+"Auto Merge" = "自動マージ";
+
+"Changes" = "変更";
+
+"Unstaged" = "未ステージ";
+
+"Staged" = "ステージ済み";
+
+"Unstage Selected Lines" = "選択行のステージを解除";
+
+"Stage Selected Lines" = "選択行をステージ";
+
+"Unstage Hunk" = "ハンクのステージを解除";
+
+"Stage Hunk" = "ハンクをステージ";
+
+"Save drafts before partial staging" = "部分ステージの前に下書きを保存してください";
+
+"Renamed files must be staged or unstaged as a whole." = "名前変更したファイルは全体をステージまたは解除してください。";
+
+"New and deleted files must be staged or unstaged as a whole." = "新規・削除ファイルは全体をステージまたは解除してください。";
+
+"Files without a final newline must be staged or unstaged as a whole." = "末尾改行がないファイルは全体をステージまたは解除してください。";
+
+"Unstage File" = "ファイルのステージを解除";
+
+"Stage File" = "ファイルをステージ";

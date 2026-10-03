@@ -1,0 +1,10 @@
+"show" = "コミット詳細 / ログを表示";
+"copyHash" = "コミット ID をコピー";
+"copyMessage" = "コミットメッセージをコピー";
+"createBranch" = "ブランチを作成…";
+"createTag" = "タグを作成…";
+"checkout" = "コミットをチェックアウト（Detached HEAD）…";
+"cherryPick" = "チェリーピック…";
+"revert" = "取り消し…";
+"files" = "変更ファイル";
+"noFiles" = "変更ファイルはありません";

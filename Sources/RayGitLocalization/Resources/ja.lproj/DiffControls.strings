@@ -1,0 +1,10 @@
+"wrap" = "折り返し";
+"lineNumbers" = "行番号を表示";
+"syncScroll" = "スクロールを同期";
+"larger" = "文字を大きくする";
+"smaller" = "文字を小さくする";
+"resetFont" = "文字サイズをリセット";
+"display" = "表示オプション";
+"search" = "比較内容を検索";
+"previousMatch" = "前の一致";
+"nextMatch" = "次の一致";

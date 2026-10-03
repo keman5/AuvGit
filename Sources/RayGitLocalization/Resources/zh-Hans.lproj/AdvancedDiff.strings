@@ -1,0 +1,11 @@
+"acceptBlock" = "接受此块：%@";
+"index" = "暂存区";
+"worktree" = "工作区";
+"overlay" = "叠加 HEAD / 工作区";
+"noImage" = "此版本没有图片";
+"pagedReadOnly" = "只读分页 · 每页 500 行";
+"previousPage" = "上一页";
+"nextPage" = "下一页";
+"page" = "第 %d 页 · 从第 %d 行开始";
+"external" = "外部比较…";
+"chooseExternal" = "选择比较工具可执行文件或应用";

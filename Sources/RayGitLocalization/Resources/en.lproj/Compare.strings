@@ -1,0 +1,87 @@
+"Save changes before closing?" = "Save changes before closing?";
+"Save" = "Save";
+"Discard Draft" = "Discard Draft";
+"Cancel" = "Cancel";
+"Loaded from disk" = "Loaded from disk";
+"Saved to working tree; index unchanged" = "Saved to working tree; index unchanged";
+"File changed on disk. Reload before saving." = "File changed on disk. Reload before saving.";
+"Marked resolved and staged" = "Marked resolved and staged";
+"Staged working tree file" = "Staged working tree file";
+"Conflict: edit the result, save, then mark resolved" = "Conflict: edit the result, save, then mark resolved";
+"Show merge base" = "Show merge base";
+"Patch shows saved disk content; save to update it" = "Patch shows saved disk content; save to update it";
+"Find in files" = "Find in files";
+"Previous match" = "Previous match";
+"Next match" = "Next match";
+"No file loaded" = "No file loaded";
+"Unsaved changes" = "Unsaved changes";
+"Discard unsaved changes and reload?" = "Discard unsaved changes and reload?";
+"Reload" = "Reload";
+"Save & Mark Resolved" = "Save & Mark Resolved";
+"Save & Stage" = "Save & Stage";
+"Layout" = "Layout";
+"Two Columns" = "Two Columns";
+"Three Columns" = "Three Columns";
+"Patch" = "Patch";
+"Baseline" = "Baseline";
+"Index" = "Index";
+"Previous change" = "Previous change";
+"Next change" = "Next change";
+"Use Version" = "Use Version";
+"Display" = "Display";
+"Wrap Lines" = "Wrap Lines";
+"Line Numbers" = "Line Numbers";
+"Synchronized Scrolling" = "Synchronized Scrolling";
+"HEAD" = "HEAD";
+"Ours" = "Ours";
+"Theirs" = "Theirs";
+"Base" = "Base";
+"Working Tree / Result" = "Working Tree / Result";
+"Working Tree (Editable)" = "Working Tree (Editable)";
+"File does not exist in this version" = "File does not exist in this version";
+"Edit / Three-way Compare" = "Edit / Three-way Compare";
+"Files larger than 2 MB are read-only." = "Files larger than 2 MB are read-only.";
+"Binary files are read-only." = "Binary files are read-only.";
+"Only UTF-8 text can be edited." = "Only UTF-8 text can be edited.";
+"Invalid repository file path." = "Invalid repository file path.";
+"Paths through symbolic links cannot be compared or edited." = "Paths through symbolic links cannot be compared or edited.";
+"Symbolic links and non-regular files are read-only." = "Symbolic links and non-regular files are read-only.";
+"The file is read-only." = "The file is read-only.";
+"Directories and submodules are read-only." = "Directories and submodules are read-only.";
+"Symbolic links are read-only." = "Symbolic links are read-only.";
+"Submodules are read-only." = "Submodules are read-only.";
+"Only existing regular UTF-8 files can be edited." = "Only existing regular UTF-8 files can be edited.";
+"The file changed outside this comparison. Reload before saving or resolving." = "The file changed outside this comparison. Reload before saving or resolving.";
+"Binary content cannot be saved by the text editor." = "Binary content cannot be saved by the text editor.";
+"Files larger than 2 MB cannot be saved by the text editor." = "Files larger than 2 MB cannot be saved by the text editor.";
+"Remove the conflict markers before marking this file resolved." = "Remove the conflict markers before marking this file resolved.";
+"Files with mixed line endings are read-only." = "Files with mixed line endings are read-only.";
+"Working Tree (Read-only)" = "Working Tree (Read-only)";
+
+"Auto Merge" = "Auto Merge";
+
+"Changes" = "Changes";
+
+"Unstaged" = "Unstaged";
+
+"Staged" = "Staged";
+
+"Unstage Selected Lines" = "Unstage Selected Lines";
+
+"Stage Selected Lines" = "Stage Selected Lines";
+
+"Unstage Hunk" = "Unstage Hunk";
+
+"Stage Hunk" = "Stage Hunk";
+
+"Save drafts before partial staging" = "Save drafts before partial staging";
+
+"Renamed files must be staged or unstaged as a whole." = "Renamed files must be staged or unstaged as a whole.";
+
+"New and deleted files must be staged or unstaged as a whole." = "New and deleted files must be staged or unstaged as a whole.";
+
+"Files without a final newline must be staged or unstaged as a whole." = "Files without a final newline must be staged or unstaged as a whole.";
+
+"Unstage File" = "Unstage File";
+
+"Stage File" = "Stage File";

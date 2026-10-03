@@ -1,0 +1,87 @@
+"Save changes before closing?" = "关闭前保存修改？";
+"Save" = "保存";
+"Discard Draft" = "放弃草稿";
+"Cancel" = "取消";
+"Loaded from disk" = "已从磁盘加载";
+"Saved to working tree; index unchanged" = "已保存到工作区；索引未变更";
+"File changed on disk. Reload before saving." = "磁盘文件已改变，请重新加载后保存。";
+"Marked resolved and staged" = "已标记解决并暂存";
+"Staged working tree file" = "已暂存工作区文件";
+"Conflict: edit the result, save, then mark resolved" = "冲突：编辑结果、保存后标记解决";
+"Show merge base" = "显示共同祖先";
+"Patch shows saved disk content; save to update it" = "补丁视图显示磁盘内容；保存后更新";
+"Find in files" = "搜索文件内容";
+"Previous match" = "上一个匹配";
+"Next match" = "下一个匹配";
+"No file loaded" = "未加载文件";
+"Unsaved changes" = "有未保存的修改";
+"Discard unsaved changes and reload?" = "放弃未保存修改并重新加载？";
+"Reload" = "重新加载";
+"Save & Mark Resolved" = "保存并标记解决";
+"Save & Stage" = "保存并暂存";
+"Layout" = "布局";
+"Two Columns" = "双栏";
+"Three Columns" = "三栏";
+"Patch" = "补丁";
+"Baseline" = "基准";
+"Index" = "索引";
+"Previous change" = "上一个变更";
+"Next change" = "下一个变更";
+"Use Version" = "采用完整版本";
+"Display" = "显示";
+"Wrap Lines" = "自动换行";
+"Line Numbers" = "行号";
+"Synchronized Scrolling" = "同步滚动";
+"HEAD" = "HEAD";
+"Ours" = "我们的版本";
+"Theirs" = "他们的版本";
+"Base" = "共同祖先";
+"Working Tree / Result" = "工作区／合并结果";
+"Working Tree (Editable)" = "工作区（可编辑）";
+"File does not exist in this version" = "此版本中不存在该文件";
+"Edit / Three-way Compare" = "编辑／三栏对比";
+"Files larger than 2 MB are read-only." = "超过 2 MB 的文件不支持编辑。";
+"Binary files are read-only." = "二进制文件不支持文本编辑。";
+"Only UTF-8 text can be edited." = "仅支持编辑 UTF-8 文本。";
+"Invalid repository file path." = "仓库文件路径无效。";
+"Paths through symbolic links cannot be compared or edited." = "不支持比较或编辑经过符号链接的路径。";
+"Symbolic links and non-regular files are read-only." = "符号链接和非普通文件只读。";
+"The file is read-only." = "文件为只读。";
+"Directories and submodules are read-only." = "目录和子模块只读。";
+"Symbolic links are read-only." = "符号链接只读。";
+"Submodules are read-only." = "子模块只读。";
+"Only existing regular UTF-8 files can be edited." = "只能编辑已存在的普通 UTF-8 文件。";
+"The file changed outside this comparison. Reload before saving or resolving." = "文件已被外部修改，请重新加载后再保存或标记解决。";
+"Binary content cannot be saved by the text editor." = "文本编辑器不能保存二进制内容。";
+"Files larger than 2 MB cannot be saved by the text editor." = "文本编辑器不能保存超过 2 MB 的文件。";
+"Remove the conflict markers before marking this file resolved." = "请删除所有冲突标记后再标记解决。";
+"Files with mixed line endings are read-only." = "混合换行格式的文件只读。";
+"Working Tree (Read-only)" = "工作区（只读）";
+
+"Auto Merge" = "自动合并";
+
+"Changes" = "变更";
+
+"Unstaged" = "未暂存";
+
+"Staged" = "已暂存";
+
+"Unstage Selected Lines" = "取消暂存选中行";
+
+"Stage Selected Lines" = "暂存选中行";
+
+"Unstage Hunk" = "取消暂存此块";
+
+"Stage Hunk" = "暂存此块";
+
+"Save drafts before partial staging" = "逐块暂存前请保存草稿";
+
+"Renamed files must be staged or unstaged as a whole." = "重命名文件需整文件暂存或取消暂存。";
+
+"New and deleted files must be staged or unstaged as a whole." = "新增和删除文件需整文件暂存或取消暂存。";
+
+"Files without a final newline must be staged or unstaged as a whole." = "无末尾换行的文件需整文件暂存或取消暂存。";
+
+"Unstage File" = "取消暂存文件";
+
+"Stage File" = "暂存文件";

@@ -1,0 +1,11 @@
+"acceptBlock" = "このブロックを %@ から採用";
+"index" = "インデックス";
+"worktree" = "作業ツリー";
+"overlay" = "HEAD / 作業ツリーを重ねる";
+"noImage" = "このリビジョンに画像はありません";
+"pagedReadOnly" = "読み取り専用 · 1 ページ 500 行";
+"previousPage" = "前のページ";
+"nextPage" = "次のページ";
+"page" = "ページ %d · 行 %d から";
+"external" = "外部比較…";
+"chooseExternal" = "比較用の実行ファイルまたはアプリを選択";
