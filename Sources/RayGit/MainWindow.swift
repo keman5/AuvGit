@@ -186,7 +186,7 @@ struct MainWindow: View {
     var filesPane: some View {
         VStack(spacing: 0) {
             Picker(workflowText("Files view"), selection: $fileTree) { Text(workflowText("Status list")).tag(false); Text(workflowText("Directory tree")).tag(true) }.pickerStyle(.segmented).frame(width: 260).padding(6)
-            if fileTree, let repository = store.repository { WorkspaceTree(repository: repository, openFile: { path in ComparePresenter.show(title: path, repository: repository, target: .worktree(path: path, untracked: store.files.first(where: { $0.path == path })?.isUntracked ?? false)) }, isBusy: store.isBusy, setBusy: { store.isBusy = $0 }).id(repository.url) }
+            if fileTree, let repository = store.repository { WorkspaceTree(repository: repository, openFile: { path in ComparePresenter.show(title: path, repository: repository, target: .worktree(path: path, untracked: store.files.first(where: { $0.path == path })?.isUntracked ?? false)) }, isBusy: store.isBusy, setBusy: { store.isBusy = $0 }).id(repository.url.path + store.filesGeneration.uuidString) }
             else { WorkspaceFilesPane(files: store.files, selection: $store.selectedPaths, filter: $store.fileFilter, isBusy: store.isBusy, onAction: fileAction) }
         }
     }

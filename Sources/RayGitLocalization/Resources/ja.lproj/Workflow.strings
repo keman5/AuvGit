@@ -126,5 +126,13 @@
 "Directory tree" = "ディレクトリツリー";
 "Network" = "ネットワーク";
 "rebasePlan.help" = "最初の欄は基準リビジョンです。履歴を変更せずに計画を読み込みます。";
-"interactiveRebase.help" = "基準リビジョンを指定し計画を読み込み、pick/drop/squash/fixup と行順を編集します。クリーンな作業ツリーが必要です。マージコミットは対象外です。";
+"interactiveRebase.help" = "基準リビジョンを指定して計画を読み込み、pick/drop/squash/fixup/reword/edit と行順を編集します。reword のハッシュ後の文字列が新しい件名になります。edit は修正のため停止し、後でリベースを続行します。クリーンな作業ツリーが必要です。マージコミットと exec は拒否します。";
 "stashRename.help" = "最初の欄は stash@{N}、次の欄は新しいメッセージです。オブジェクト ID、順序、日時を保持します。";
+"Ungrouped" = "未分類";
+"Tag Management" = "タグ管理";
+"Signed tag" = "署名付きタグ";
+"Create tag" = "タグを作成";
+"Fetch tags" = "タグを取得";
+"Preview tag push" = "タグのプッシュをプレビュー";
+"Preview remote deletion" = "リモートの削除をプレビュー";
+"Delete local tag" = "ローカルタグを削除";

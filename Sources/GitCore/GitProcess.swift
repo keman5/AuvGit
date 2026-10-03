@@ -46,16 +46,20 @@ private final class GitCancellation: @unchecked Sendable {
 }
 
 enum GitProcess {
-    static func run(at directory: URL, arguments: [String], allowedCodes: Set<Int32> = [0], timeout: TimeInterval = 120, progress: (@Sendable (String) -> Void)? = nil) async throws -> GitOutput {
+    static func run(at directory: URL, arguments: [String], allowedCodes: Set<Int32> = [0], timeout: TimeInterval = 120, progress: (@Sendable (String) -> Void)? = nil, outputFile: URL? = nil) async throws -> GitOutput {
         let cancellation = GitCancellation()
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
             return try await Task.detached(priority: .userInitiated) {
-                try runBlocking(at: directory, arguments: arguments, allowedCodes: allowedCodes, timeout: timeout, progress: progress, cancellation: cancellation)
+                try runBlocking(at: directory, arguments: arguments, allowedCodes: allowedCodes, timeout: timeout, progress: progress, outputFile: outputFile, cancellation: cancellation)
             }.value
         } onCancel: { cancellation.cancel() }
     }
-    private static func runBlocking(at directory: URL, arguments: [String], allowedCodes: Set<Int32>, timeout: TimeInterval, progress: (@Sendable (String) -> Void)?, cancellation: GitCancellation) throws -> GitOutput {
+    static func runToFile(at directory: URL, arguments: [String], outputFile: URL) async throws {
+        do { _ = try await run(at: directory, arguments: arguments, outputFile: outputFile) }
+        catch { try? FileManager.default.removeItem(at: outputFile); throw error }
+    }
+    private static func runBlocking(at directory: URL, arguments: [String], allowedCodes: Set<Int32>, timeout: TimeInterval, progress: (@Sendable (String) -> Void)?, outputFile: URL?, cancellation: GitCancellation) throws -> GitOutput {
         if cancellation.isCancelled { throw CancellationError() }
         var environment = ProcessInfo.processInfo.environment
         environment["GIT_TERMINAL_PROMPT"] = "0"; environment["GIT_LITERAL_PATHSPECS"] = "1"
@@ -64,6 +68,12 @@ enum GitProcess {
         var searchPaths = (environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin").components(separatedBy: ":")
         for path in ["/opt/homebrew/bin", "/usr/local/bin"] where !searchPaths.contains(path) { searchPaths.append(path) }
         environment["PATH"] = searchPaths.joined(separator: ":"); environment["LC_ALL"] = "C"
+        var destinationFD: Int32 = -1
+        if let outputFile {
+            destinationFD = Darwin.open(outputFile.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+            guard destinationFD >= 0 else { throw GitError("Cannot create streaming export file.") }
+        }
+        defer { if destinationFD >= 0 { close(destinationFD) } }
         var stdoutFD = [Int32](repeating: 0, count: 2), stderrFD = [Int32](repeating: 0, count: 2)
         guard Darwin.pipe(&stdoutFD) == 0 else { throw GitError("Cannot create Git output pipe.") }
         guard Darwin.pipe(&stderrFD) == 0 else { close(stdoutFD[0]); close(stdoutFD[1]); throw GitError("Cannot create Git error pipe.") }
@@ -73,9 +83,10 @@ enum GitProcess {
         defer { posix_spawn_file_actions_destroy(&actions); posix_spawnattr_destroy(&attributes) }
         posix_spawn_file_actions_addchdir_np(&actions, directory.path)
         posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0)
-        posix_spawn_file_actions_adddup2(&actions, stdoutFD[1], STDOUT_FILENO)
+        posix_spawn_file_actions_adddup2(&actions, destinationFD >= 0 ? destinationFD : stdoutFD[1], STDOUT_FILENO)
         posix_spawn_file_actions_adddup2(&actions, stderrFD[1], STDERR_FILENO)
         for fd in stdoutFD + stderrFD { posix_spawn_file_actions_addclose(&actions, fd) }
+        if destinationFD >= 0 { posix_spawn_file_actions_addclose(&actions, destinationFD) }
         // The process group is installed atomically before exec, so descendants inherit it.
         posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT))
         posix_spawnattr_setpgroup(&attributes, 0)

@@ -37,22 +37,45 @@ public extension GitRepository {
         var picked = false
         for line in plan.split(separator: "\n") {
             let parts = line.split(separator: " ", maxSplits: 2)
-            guard parts.count >= 2, ["pick", "drop", "squash", "fixup"].contains(String(parts[0])) else { throw GitError("Use pick, drop, squash or fixup followed by a full commit hash") }
-            if parts[0] == "pick" { picked = true }
+            guard parts.count >= 2, ["pick", "drop", "squash", "fixup", "reword", "edit"].contains(String(parts[0])) else { throw GitError("Use pick, drop, squash, fixup, reword or edit followed by a full commit hash") }
+            if ["pick", "reword", "edit"].contains(String(parts[0])) { picked = true }
+            if parts[0] == "reword" { guard parts.count == 3, !parts[2].trimmingCharacters(in: .whitespaces).isEmpty else { throw GitError("Reword requires the new commit subject after its hash") } }
             if parts[0] == "squash" || parts[0] == "fixup" { guard picked else { throw GitError("Squash/fixup requires a preceding picked commit") } }
             let hash = String(parts[1]); guard available.contains(hash), seen.insert(hash).inserted else { throw GitError("Rebase plan contains an unknown or duplicate commit") }
         }
         guard seen == Set(available), !seen.isEmpty else { throw GitError("Plan must include every commit exactly once; use drop to remove a commit") }
-        guard let first = plan.split(separator: "\n").first?.split(separator: " ").first, first == "pick" || first == "drop" else { throw GitError("First plan command must be pick or drop") }
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        guard let first = plan.split(separator: "\n").first?.split(separator: " ").first, ["pick", "drop", "reword", "edit"].contains(String(first)) else { throw GitError("First plan command must be pick, reword, edit or drop") }
+        let directory = try await rebaseToolsDirectory()
+        try? FileManager.default.removeItem(at: directory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
         let todo = directory.appendingPathComponent("todo"), editor = directory.appendingPathComponent("editor")
         try plan.write(to: todo, atomically: true, encoding: .utf8)
         let quoted = "'" + todo.path.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
         try ("#!/bin/sh\n/bin/cp " + quoted + " \"$1\"\n").write(to: editor, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: editor.path)
-        return try await workflowRead(["-c", "sequence.editor=" + editor.path, "-c", "core.editor=true", "rebase", "-i", base])
+        let messageEditor = directory.appendingPathComponent("message-editor")
+        var messageScript = "#!/bin/sh\ndone_file=\"$(/usr/bin/git rev-parse --git-path rebase-merge/done)\"\noriginal_hash=\"$(/usr/bin/tail -n1 \"$done_file\" | /usr/bin/awk '{print $2}')\"\ncase \"$original_hash\" in\n"
+        for line in plan.split(separator: "\n") {
+            let parts = line.split(separator: " ", maxSplits: 2)
+            if parts[0] == "reword" {
+                let file = directory.appendingPathComponent(String(parts[1]))
+                try (String(parts[2]) + "\n").write(to: file, atomically: true, encoding: .utf8)
+                messageScript += String(parts[1]) + ") /bin/cp '" + file.path.replacingOccurrences(of: "'", with: "'\"'\"'") + "' \"$1\" ;;\n"
+            }
+        }
+        messageScript += "*) ;;\nesac\n"
+        try messageScript.write(to: messageEditor, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: messageEditor.path)
+        do { let result = try await workflowRead(["-c", "sequence.editor=" + editor.path, "-c", "core.editor=" + messageEditor.path, "rebase", "-i", base]); await cleanupRebaseToolsIfFinished(); return result } catch { await cleanupRebaseToolsIfFinished(); throw error }
+    }
+    private func rebaseToolsDirectory() async throws -> URL {
+        let path = try await workflowRead(["rev-parse", "--git-path", "raygit-rebase-tools"]).trimmingCharacters(in: .newlines)
+        return path.hasPrefix("/") ? URL(fileURLWithPath: path) : url.appendingPathComponent(path)
+    }
+    private func cleanupRebaseToolsIfFinished() async {
+        guard let path = try? await workflowRead(["rev-parse", "--git-path", "rebase-merge"]).trimmingCharacters(in: .newlines) else { return }
+        let active = path.hasPrefix("/") ? URL(fileURLWithPath: path) : url.appendingPathComponent(path)
+        if !FileManager.default.fileExists(atPath: active.path), let directory = try? await rebaseToolsDirectory() { try? FileManager.default.removeItem(at: directory) }
     }
     func renameStash(reference: String, message: String) async throws -> String {
         guard !message.isEmpty, !message.contains("\0"), !message.contains("\n"), !message.contains("\r"), reference.hasPrefix("stash@{"), reference.hasSuffix("}"), let index = Int(reference.dropFirst(7).dropLast()), index >= 0 else { throw GitError("Invalid stash reference or message") }
@@ -114,8 +137,12 @@ public extension GitRepository {
         case .resetSoft, .resetMixed, .resetHard: args = ["reset", operation == .resetSoft ? "--soft" : operation == .resetMixed ? "--mixed" : "--hard", try await workflowRevision(first)]
         case .mergeContinue: args = ["-c", "core.editor=true", "merge", "--continue"]
         case .mergeAbort: args = ["merge", "--abort"]
-        case .rebaseContinue: args = ["-c", "core.editor=true", "rebase", "--continue"]
-        case .rebaseAbort: args = ["rebase", "--abort"]
+        case .rebaseContinue:
+            let editor = try await rebaseToolsDirectory().appendingPathComponent("message-editor")
+            let result = try await workflowRead(["-c", "core.editor=" + (FileManager.default.fileExists(atPath: editor.path) ? editor.path : "true"), "rebase", "--continue"])
+            await cleanupRebaseToolsIfFinished(); return result
+        case .rebaseAbort:
+            let result = try await workflowRead(["rebase", "--abort"]); await cleanupRebaseToolsIfFinished(); return result
         case .cherryContinue: args = ["-c", "core.editor=true", "cherry-pick", "--continue"]
         case .cherryAbort: args = ["cherry-pick", "--abort"]
         case .revertContinue: args = ["-c", "core.editor=true", "revert", "--continue"]

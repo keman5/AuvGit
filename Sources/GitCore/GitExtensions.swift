@@ -72,6 +72,7 @@ public extension GitRepository {
     func startGitFlow(kind: GitFlowKind, name: String, main: String = "main", develop: String = "develop") async throws {
         guard try await status().isEmpty else { throw GitError("A clean worktree and index are required") }
         for base in [main, develop] { _ = try await GitProcess.run(at: url, arguments: ["check-ref-format", "--branch", base]) }
+        guard !name.isEmpty, !name.hasPrefix("-") else { throw GitError("Invalid Git Flow name.") }
         let branch = kind.rawValue + "/" + name
         guard main != develop, branch != main, branch != develop else { throw GitError("Git Flow main, develop and task branches must be distinct.") }
         _ = try await GitProcess.run(at: url, arguments: ["check-ref-format", "--branch", branch])
@@ -82,6 +83,7 @@ public extension GitRepository {
     func finishGitFlow(kind: GitFlowKind, name: String, main: String = "main", develop: String = "develop") async throws {
         guard try await status().isEmpty else { throw GitError("A clean worktree and index are required") }
         for base in [main, develop] { _ = try await GitProcess.run(at: url, arguments: ["check-ref-format", "--branch", base]) }
+        guard !name.isEmpty, !name.hasPrefix("-") else { throw GitError("Invalid Git Flow name.") }
         let branch = kind.rawValue + "/" + name
         guard main != develop, branch != main, branch != develop else { throw GitError("Git Flow main, develop and task branches must be distinct.") }
         guard try await currentBranch() == branch else { throw GitError("Check out the matching Git Flow branch before finishing.") }

@@ -89,7 +89,6 @@
 "revertContinue.help" = "繼續进行中的 Revert 操作。";
 "revertAbort" = "中止 Revert";
 "revertAbort.help" = "中止进行中的 Revert 操作。";
-
 "rebasePlan" = "讀取變基計划";
 "interactiveRebase" = "交互式變基";
 "stashRename" = "重命名貯藏";
@@ -127,5 +126,13 @@
 "Directory tree" = "目錄樹";
 "Network" = "網络";
 "rebasePlan.help" = "第一項：基准引用。讀取可编辑計划，不修改历史。";
-"interactiveRebase.help" = "第一項：基准引用。讀取計划后编辑 pick/drop/squash/fixup 并重排行。需要干净倉庫。拒绝包含合并提交的計划。";
+"interactiveRebase.help" = "第一項：基準引用。讀取計畫後編輯 pick/drop/squash/fixup/reword/edit 或重排行。reword 的 hash 後文字為新主旨；edit 停止供修訂，再繼續變基。需要乾淨倉庫。拒絕合併提交與 exec。";
 "stashRename.help" = "第一項：stash@{N}；第二項：新说明。保留對象 ID、順序和時间。";
+"Ungrouped" = "未分組";
+"Tag Management" = "標籤管理";
+"Signed tag" = "簽名標籤";
+"Create tag" = "建立標籤";
+"Fetch tags" = "取得標籤";
+"Preview tag push" = "預覽標籤推送";
+"Preview remote deletion" = "預覽遠端刪除";
+"Delete local tag" = "刪除本地標籤";

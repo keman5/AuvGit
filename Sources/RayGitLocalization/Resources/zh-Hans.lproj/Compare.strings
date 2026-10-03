@@ -205,3 +205,5 @@
 "Invalid release version." = "发布版本号无效。";
 
 "Git Flow main, develop and task branches must be distinct." = "Git Flow 的主分支、开发分支和任务分支必须不同。";
+
+"Invalid Git Flow name." = "Git Flow 名称无效。";

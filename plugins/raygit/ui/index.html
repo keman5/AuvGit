@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RayGit · Git 工作区</title><style>/* RAYGIT_STYLE */</style></head>
+<body>
+<header class="topbar"><div class="brand"><span class="brand-mark">⑂</span><b>RayGit</b><span class="pill">LOCAL</span></div><button id="refresh" class="ghost" title="刷新仓库">↻ <span>刷新</span></button></header>
+<section class="repo-bar"><form id="repo-form"><label for="repo-input">仓库</label><input id="repo-input" placeholder="输入本地仓库绝对路径" autocomplete="off" spellcheck="false" required><button type="submit">打开</button></form></section>
+<div id="notice" class="notice" role="status" hidden></div>
+<div id="error" class="notice error" role="alert" hidden></div>
+<div id="empty" class="welcome"><div class="welcome-icon">⑂</div><h1>你的代码，你的工作区。</h1><p>查看改动、追溯历史，在 Codex 中完成提交。</p><p class="muted">输入本地 Git 仓库路径，或让 Codex 打开当前项目。</p></div>
+<div id="workspace" hidden>
+  <section class="summary"><div><span class="eyebrow">REPOSITORY</span><h1 id="repo-name"></h1><div class="branch-label"><span>⑂</span><span id="branch-name"></span><span id="tracking" class="muted"></span></div></div><div class="metrics"><div><b id="changed-count">0</b><span>改动文件</span></div><div><b id="staged-count">0</b><span>已暂存</span></div></div></section>
+  <div class="shell">
+    <aside><div class="section-title">分支 <button id="new-branch" class="icon-button" title="新建分支">+</button></div><div id="branches" class="branch-list"></div><div class="aside-note"><span class="status-dot"></span> 本地 Git · 无需独立应用</div></aside>
+    <main><nav class="tabs"><button id="workspace-tab" class="active">工作区 <span id="tab-count"></span></button><button id="history-tab">提交历史</button><span id="busy-label" class="muted" aria-live="polite"></span></nav>
+      <div class="content-grid">
+        <section id="files-pane" class="list-pane"><div class="file-filter"><input id="filter" placeholder="筛选文件…" aria-label="筛选文件"><button id="stage-all" class="small ghost">全部暂存</button></div><div id="files" class="files"></div><form id="commit-form" class="commit-form"><label for="message">提交说明</label><textarea id="message" rows="3" placeholder="这次改动做了什么？"></textarea><div class="commit-footer"><span id="commit-hint" class="muted">仅提交已暂存改动</span><button id="commit-button" type="submit">创建提交</button></div></form></section>
+        <section id="history-pane" class="list-pane" hidden><div class="history-label"><span>所有分支 · 拓扑顺序</span><span id="history-count"></span></div><div id="history" class="history"></div><button id="more" class="ghost more">加载更多提交</button></section>
+        <section class="diff-pane"><div class="diff-header"><div><span id="diff-scope" class="eyebrow">DIFF</span><strong id="diff-title">选择文件查看差异</strong></div><button id="context-button" class="small ghost" disabled>提供给 Codex</button></div><div id="diff" class="diff"><div class="diff-empty"><span>±</span><p>每一次改动，都有迹可循。</p><small>选择左侧文件或提交，查看具体变化。</small></div></div></section>
+      </div>
+    </main>
+  </div>
+  <footer><span id="footer-status">就绪</span><span>RayGit 0.1 · 本地工作区</span></footer>
+</div>
+<dialog id="confirm-dialog"><form method="dialog"><h2 id="confirm-title">确认操作</h2><p id="confirm-copy"></p><pre id="confirm-details"></pre><div class="dialog-actions"><button value="cancel" class="ghost">取消</button><button value="confirm" id="confirm-button">确认</button></div></form></dialog>
+<dialog id="branch-dialog"><form id="branch-form"><h2>创建本地分支</h2><p class="muted">从当前 HEAD 创建，保持当前分支不变。</p><input id="branch-input" placeholder="feature/my-change" aria-label="新分支名称" required><div class="dialog-actions"><button type="button" id="cancel-branch" class="ghost">取消</button><button type="submit">创建分支</button></div></form></dialog>
+<script>/* RAYGIT_SCRIPT */</script>
+</body></html>

@@ -130,7 +130,7 @@ final class FileCompareSession: ObservableObject {
         isBusy = true; error = nil
         defer { isBusy = false }
         do {
-            if indexDraft != snapshot?.index.text, let index = snapshot?.index {
+            if let index = snapshot?.index, let indexText = index.text, indexDraft != indexText {
                 try await repository.saveIndex(path: path, text: indexDraft, expected: index)
                 snapshot = try await repository.fileComparison(path: path)
                 indexDraft = snapshot?.index.text ?? ""
@@ -216,6 +216,8 @@ private struct FileCompareContent: View {
             if layout == "patch" {
                 if session.isDirty { Text(compareText("Patch shows saved disk content; save to update it")).font(.caption).foregroundStyle(.orange).padding(6) }
                 PartialStagingPane(session: session)
+            } else if let snapshot = session.snapshot, snapshot.worktree.exists, snapshot.worktree.data == nil, snapshot.worktree.unavailableReason == "Files larger than 2 MB are read-only." {
+                StreamingComparisonView(repository: session.repository, path: session.path)
             } else if let snapshot = session.snapshot, MediaCompareView.supports(snapshot) {
                 MediaCompareView(snapshot: snapshot)
             } else if let snapshot = session.snapshot, [snapshot.head.data?.count ?? 0, snapshot.index.data?.count ?? 0, snapshot.worktree.data?.count ?? 0, snapshot.base?.data?.count ?? 0, snapshot.ours?.data?.count ?? 0, snapshot.theirs?.data?.count ?? 0].max()! > 2 * 1024 * 1024 {

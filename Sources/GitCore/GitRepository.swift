@@ -10,7 +10,7 @@ public actor GitRepository {
     private func run(_ args: [String], allowedCodes: Set<Int32> = [0]) async throws -> GitOutput { try await GitProcess.run(at: url, arguments: args, allowedCodes: allowedCodes) }
     private func fields(_ data: Data) -> [String] { data.split(separator: 0, omittingEmptySubsequences: false).map { String(decoding: $0, as: UTF8.self) } }
     public func status() async throws -> [GitFile] {
-        let tokens = fields(try await run(["status", "--porcelain=v1", "-z", "--untracked-files=all"]).data)
+        let tokens = fields(try await run(["--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all"]).data)
         var result: [GitFile] = [], i = 0
         while i < tokens.count {
             let token = tokens[i]; i += 1

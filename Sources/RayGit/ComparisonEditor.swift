@@ -82,7 +82,8 @@ struct ComparisonEditor: NSViewRepresentable {
             for (pane, column) in zip(panes, value.columns) {
                 pane.title.stringValue = column.title
                 pane.text.isEditable = column.isEditable && column.message == nil
-                pane.text.allowsUndo = column.isEditable
+                // Keep undo enabled during save/loading; changing this property clears native history.
+                if !pane.text.allowsUndo { pane.text.allowsUndo = true }
                 pane.message.stringValue = column.message ?? ""
                 pane.message.isHidden = column.message == nil
                 pane.scroll.isHidden = column.message != nil
@@ -112,6 +113,7 @@ struct ComparisonEditor: NSViewRepresentable {
                 lastNavigation = value.navigation
             }
         }
+        func undoManager(for view: NSTextView) -> UndoManager? { (view as? ComparisonTextView)?.editingUndoManager }
         func textDidBeginEditing(_ notification: Notification) { active = notification.object as? NSTextView }
         func textDidChange(_ notification: Notification) {
             guard !updating, let text = notification.object as? NSTextView, let pane = panes.first(where: { $0.text === text }) else { return }
@@ -308,6 +310,7 @@ private final class ComparisonTextView: NSTextView {
         return menu
     }
     @objc private func acceptBlock(_ sender: NSMenuItem) { if actions.indices.contains(sender.tag) { actions[sender.tag]() } }
+    var editingUndoManager: UndoManager { history }
     override var undoManager: UndoManager? { history }
 }
 
@@ -330,7 +333,7 @@ private final class Pane: NSView {
         text.string = column.text
         text.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         text.isRichText = false
-        text.allowsUndo = column.isEditable
+        text.allowsUndo = true
         text.isAutomaticQuoteSubstitutionEnabled = false
         text.isAutomaticDashSubstitutionEnabled = false
         text.isAutomaticTextReplacementEnabled = false

@@ -10,16 +10,16 @@
 
 | 功能域 | 已有可用实现与入口 | 外部依赖或明确限制 |
 | --- | --- | --- |
-| 仓库 | 打开/初始化/克隆、最近仓库、组名、security-scoped书签、标签切换及commit草稿、窗口激活和3秒变化刷新 | 组名目前为侧栏前缀；不是可折叠分组树；轮询非FSEvents，mtime/size完全不变的特殊覆盖可能漏检 |
+| 仓库 | 打开/初始化/克隆、最近仓库、组名、security-scoped书签、标签切换及commit草稿、窗口激活和3秒变化刷新 | 可折叠组默认展开；FSEvents递归事件驱动及轮询兜底 |
 | 工作区 | 状态列表、多选/过滤、完整目录树、ignore规则编辑/忽略列表、rename、系统废纸篓/持久化恢复、Finder与丢弃确认 | 详细入口及恢复限制见REMAINING_FEATURES和工作区验证 |
 | 暂存 | 全部/所选、hunk/逐行暂存取消、索引文本编辑器、冲突屏蔽 | 任意复杂diff编辑仍须真实临时repo验证；不改未选路径 |
 | 提交 | 模板加载/配置、Signed-off-by、签名key/开关、amend空说明填充、hooks | 真实签名依赖有效GPG/SSH工具与密钥；amend不覆盖已有草稿 |
-| 差异 | 并排/统一/三栏、同步/搜索/换行/字体、字符高亮、语法高亮、外部工具、任意两个引用差异、图片比较和编码解码 | 任意引用目前整个patch显示，尚无结构化文件列表联动；超大文件为受限预览，不宣称完整流式显示 |
+| 差异 | 并排/统一/三栏、同步/搜索/换行/字体、字符高亮、语法高亮、外部工具、任意两个引用差异、图片比较和编码解码 | 任意引用目前整个patch显示，结构化文件列表联动；超大文件为受限预览，不宣称完整流式显示 |
 | 历史 | 拓扑图/ref、分页、正文/作者筛选、hash跳转、文件rename-follow、详情、Blame/Reflog选中打开提交 | Blame以等宽记录显示，尚无单独作者/行号列 |
-| 分支/标签 | 本地操作、remote tracking创建、upstream设置、标签列表/附注创建/删除 | 标签管理目前工具操作，尚无专属refs管理列表窗口；远程标签同步未完成 |
+| 分支/标签 | 本地操作、remote tracking创建、upstream设置、标签列表/附注创建/删除 | 标签专属管理表格；远程推送/删除先dry-run后确认；签名标签需真实密钥 |
 | 同步 | Fetch/prune、FF-only Pull、Push、ahead/behind、remote增删、dry-run preview、force-with-lease；网络面板进度/取消/凭据配置 | 实际私有远端认证沿用系统；取消网络操作不撤销已经完成的远端写入 |
 | 贮藏 | 全部/指定路径stash、应用/查看/删除、指定记录rename | rename保留OID/order/date，非UTF8 reflog明确拒绝 |
-| 合并/重写 | merge入口、自动三方合并/结果编辑、reset三个模式、merge/rebase/cherry/revert继续/中止、交互式rebase计划编辑 | rebase支持pick/drop/squash/fixup/reorder；reword/edit/exec和merge拓扑保留未完成，merge计划明确拒绝 |
+| 合并/重写 | merge入口、自动三方合并/结果编辑、reset三个模式、merge/rebase/cherry/revert继续/中止、交互式rebase计划编辑 | rebase支持pick/drop/squash/fixup/reorder/reword/edit；exec与merge拓扑保留明确拒绝 |
 | 扩展 | submodule状态/add/init-update、LFS状态/install/track、GitFlow feature/release/hotfix start/finish、GitHub/GitLab网页入口、自定义快捷键、HTTPS更新manifest配置/检查 | LFS依赖本地git-lfs；PR/MR仅打开网页不代提交；正式签名公证依赖Developer ID/Apple凭据，可信签名更新分发基础设施尚未提供 |
 
 以上“实现”表示代码及真实Git工作流入口；编译通过不等同于原生UI、真实远端、签名或发布验收。每项的当前入口、未完成内容与外部前提见[REMAINING_FEATURES.md](REMAINING_FEATURES.md)。

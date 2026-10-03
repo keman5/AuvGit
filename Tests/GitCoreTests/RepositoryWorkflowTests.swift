@@ -125,3 +125,46 @@ extension RepositoryWorkflowTests {
         XCTAssertEqual(rows.count, 1); XCTAssertEqual(rows[0].subject, "commit 0")
     }
 }
+
+extension RepositoryWorkflowTests {
+    func testInteractiveRebaseRewordAndEditStopContinue() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repo = try await GitRepository.initialize(at: root)
+        _ = try await repo.workflowRead(["config", "user.name", "Tester"])
+        _ = try await repo.workflowRead(["config", "user.email", "test@example.invalid"])
+        for i in 0...2 { try "\(i)".write(to: root.appendingPathComponent("file\(i)"), atomically: true, encoding: .utf8); try await repo.stage(paths: ["file\(i)"]); try await repo.commit(message: "commit \(i)") }
+        let rows = try await repo.log(); let base = rows[2].hash
+        _ = try await repo.interactiveRebase(onto: base, plan: "reword \(rows[1].hash) rewritten subject\nedit \(rows[0].hash) stop\n")
+        let intermediate = try await repo.log(); XCTAssertTrue(intermediate.contains { $0.subject == "rewritten subject" })
+        try "amended".write(to: root.appendingPathComponent("file2"), atomically: true, encoding: .utf8)
+        try await repo.stage(paths: ["file2"]); try await repo.commit(message: "edited commit", amend: true)
+        _ = try await repo.advancedOperation(.rebaseContinue, first: "", second: "")
+        let final = try await repo.log(); XCTAssertEqual(final[0].subject, "edited commit")
+    }
+}
+
+extension RepositoryWorkflowTests {
+    func testTagManagementLocalBarePreviewPublishAndDelete() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bare = root.appendingPathComponent("remote.git")
+        _ = try await GitProcess.run(at: root, arguments: ["init", "--bare", bare.path])
+        let repo = try await GitRepository.initialize(at: root.appendingPathComponent("local"))
+        _ = try await repo.workflowRead(["config", "user.name", "Tester"])
+        _ = try await repo.workflowRead(["config", "user.email", "test@example.invalid"])
+        _ = try await repo.workflowRead(["remote", "add", "origin", bare.path])
+        _ = try await repo.workflowRead(["commit", "--allow-empty", "-m", "base"])
+        try await repo.createManagedTag(name: "v1", revision: "HEAD", message: "release", signed: false)
+        let tags = try await repo.managedTags(); XCTAssertEqual(tags.map(\.name), ["v1"]); XCTAssertEqual(tags[0].message, "release")
+        _ = try await repo.synchronizeTag(name: "v1", remote: "origin", delete: false, preview: true)
+        let absent = try await GitProcess.run(at: bare, arguments: ["show-ref", "--verify", "refs/tags/v1"], allowedCodes: [0, 128]); XCTAssertNotEqual(absent.code, 0)
+        _ = try await repo.synchronizeTag(name: "v1", remote: "origin", delete: false, preview: false)
+        _ = try await GitProcess.run(at: bare, arguments: ["show-ref", "--verify", "refs/tags/v1"])
+        _ = try await repo.synchronizeTag(name: "v1", remote: "origin", delete: true, preview: true)
+        _ = try await GitProcess.run(at: bare, arguments: ["show-ref", "--verify", "refs/tags/v1"])
+        _ = try await repo.synchronizeTag(name: "v1", remote: "origin", delete: true, preview: false)
+        let deleted = try await GitProcess.run(at: bare, arguments: ["show-ref", "--verify", "refs/tags/v1"], allowedCodes: [0, 128]); XCTAssertNotEqual(deleted.code, 0)
+    }
+}

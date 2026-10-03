@@ -1,0 +1,7 @@
+"title" = "Streaming Worktree Viewer";
+"historyLimit" = "HEAD/index blobs above 32 MB are not streamed here. This viewer reads only the worktree.";
+"reload" = "Reload";
+"previous" = "Previous page";
+"next" = "Next page";
+"position" = "Starts at line %d · byte %lld / %lld";
+"readonly" = "Read-only · bounded UTF-8 pages";

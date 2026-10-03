@@ -14,6 +14,7 @@ struct TagManagementView: View {
     @State private var remote = "origin"
     @State private var output = ""
     @State private var pending: TagRequest?
+    @State private var reloadID = UUID()
     struct TagRequest: Identifiable {
         let id = UUID()
         let repo: GitRepository
@@ -49,14 +50,14 @@ struct TagManagementView: View {
         }
     }
     private func reload() async {
-        guard let repo = store.repository else { return }
-        do { tags = try await repo.managedTags(); remotes = try await repo.workflowRead(["remote"]).split(separator: "\n").map(String.init); if !remotes.contains(remote) { remote = remotes.first ?? "" } } catch { output = error.localizedDescription }
+        guard let repo = store.repository else { return }; let token = UUID(); reloadID = token
+        do { let newTags = try await repo.managedTags(); let newRemotes = try await repo.workflowRead(["remote"]).split(separator: "\n").map(String.init); guard reloadID == token, store.repositoryURL == repo.url else { return }; tags = newTags; remotes = newRemotes; if let selection, !tags.contains(where: { $0.name == selection }) { self.selection = nil }; if !remotes.contains(remote) { remote = remotes.first ?? "" } } catch { output = error.localizedDescription }
     }
     private func create() {
         guard let repo = store.repository, !store.isBusy else { return }
         let tag = name, ref = revision, message = annotation, sign = signed
-        store.operation(workflowText("Create tag")) { repository in try await repository.createManagedTag(name: tag, revision: ref, message: message, signed: sign) }
-        Task { while store.isBusy { try? await Task.sleep(nanoseconds: 100_000_000) }; if store.repositoryURL == repo.url { await reload() } }
+        store.isBusy = true
+        Task { do { try await repo.createManagedTag(name: tag, revision: ref, message: message, signed: sign); output = workflowText("Completed") } catch { output = error.localizedDescription }; store.isBusy = false; await reload(); await store.refresh() }
     }
     private func fetch() {
         guard let repo = store.repository, !store.isBusy else { return }; let target = remote

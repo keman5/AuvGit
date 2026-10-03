@@ -64,6 +64,8 @@ final class RepositoryStore: ObservableObject {
     private var accessedURL: URL?
     private var fileObserver: RepositoryFileObserver?
     private var filesystemRefresh: Task<Void, Never>?
+    private var filesystemRefreshing = false
+    private var filesystemPending = false
     private var repositoryDrafts: [String: (String, Bool)] = [:]
     func closeRepositoryTab(_ path: String) {
         openRepositories.removeAll { $0 == path }
@@ -75,6 +77,7 @@ final class RepositoryStore: ObservableObject {
     func setGroup(path: String, group: String) { repositoryGroups[path] = group; UserDefaults.standard.set(repositoryGroups, forKey: "repositoryGroups") }
     @Published var recentPaths = UserDefaults.standard.stringArray(forKey: "recentRepositories") ?? []
     @Published var files: [GitFile] = []
+    @Published var filesGeneration = UUID()
     @Published var branches: [GitBranch] = []
     @Published var stashes: [GitStash] = []
     @Published var branch = ""
@@ -174,26 +177,34 @@ final class RepositoryStore: ObservableObject {
             }
             files = []; branches = []; commits = []; commitFiles = []; stashes = []
             selectedPaths = []; selectedCommit = nil; selectedCommitPath = nil; diffText = ""
-            commitMessage = repositoryDrafts[root.path]?.0 ?? ""; amend = repositoryDrafts[root.path]?.1 ?? false; historySearch = ""; historyPath = nil; historyRef = nil
+            commitMessage = repositoryDrafts[root.path]?.0 ?? ""; amend = repositoryDrafts[root.path]?.1 ?? false; historySearch = ""; historyAuthor = ""; historyPath = nil; historyRef = nil
             recentPaths.removeAll { $0 == root.path }; recentPaths.insert(root.path, at: 0)
             recentPaths = Array(recentPaths.prefix(12)); UserDefaults.standard.set(recentPaths, forKey: "recentRepositories")
             isBusy = false; await refresh()
         } catch { report(error); isBusy = false }
     }
     private func scheduleFilesystemRefresh(root: URL) {
+        guard repositoryURL == root else { return }
+        if filesystemRefreshing { filesystemPending = true; return }
+        // This reference belongs only to the sleeping debounce task. Clear it
+        // before starting Git so a new event never cancels an active refresh.
         filesystemRefresh?.cancel()
         filesystemRefresh = Task {
-            try? await Task.sleep(nanoseconds: 350_000_000)
+            do { try await Task.sleep(nanoseconds: 350_000_000) } catch { return }
             guard !Task.isCancelled, repositoryURL == root else { return }
-            // Existing write operations finish with refresh; otherwise read immediately.
-            if !isBusy { await refresh() }
+            filesystemRefresh = nil
+            if isBusy { return } // The active write ends with its own refresh.
+            filesystemRefreshing = true
+            await refresh()
+            filesystemRefreshing = false
+            if filesystemPending { filesystemPending = false; await refreshIfChanged() }
         }
     }
     private var lastObservedState = ""
     func refreshIfChanged() async {
         guard let repository, !isBusy else { return }
         do {
-            let status = try await repository.workflowRead(["status", "--porcelain=v1", "-z"])
+            let status = try await repository.workflowRead(["--no-optional-locks", "status", "--porcelain=v1", "-z"])
             let refs = (try? await repository.workflowRead(["show-ref", "--head"])) ?? ""
             let paths = try await repository.status().filter { $0.isUnstaged }.map(\.path)
             let stamps = paths.map { path -> String in
@@ -215,7 +226,7 @@ final class RepositoryStore: ObservableObject {
             async let newStashes = repository.stashes()
             let result = try await (newFiles, newBranches, newBranch, newStashes)
             guard version == repoVersion else { return }
-            files = result.0; branches = result.1; branch = result.2; stashes = result.3
+            files = result.0; filesGeneration = UUID(); branches = result.1; branch = result.2; stashes = result.3
             selectedPaths.formIntersection(Set(files.map(\.path)))
             setStatus("Refreshed · %@ changes · %@ staged", arguments: [String(files.count), String(stagedCount)])
             await loadHistory(reset: true)
@@ -297,6 +308,7 @@ final class RepositoryStore: ObservableObject {
         }
     }
     func report(_ error: Error) {
+        guard !(error is CancellationError) else { return }
         self.errorMessage = error.localizedDescription
         setStatus("Operation failed"); activityRecords.insert((nil, nil, error.localizedDescription), at: 0)
     }

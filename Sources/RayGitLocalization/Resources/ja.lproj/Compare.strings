@@ -205,3 +205,5 @@
 "Invalid release version." = "リリースのバージョン番号が無効です。";
 
 "Git Flow main, develop and task branches must be distinct." = "Git Flow のメイン・開発・作業ブランチには異なる名前が必要です。";
+
+"Invalid Git Flow name." = "Git Flow の名前が無効です。";

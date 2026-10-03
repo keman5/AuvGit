@@ -23,14 +23,14 @@ struct ReferenceChangesView: View {
     }
     private func load() async {
         loading = true
-        do { files = try await repository.referenceFiles(left: left, right: right); selection = files.first?.path; if files.isEmpty { diff = "" }; error = "" } catch { error = error.localizedDescription }
+        do { files = try await repository.referenceFiles(left: left, right: right); selection = files.first?.path; if files.isEmpty { diff = "" }; error = "" } catch { self.error = error.localizedDescription }
         loading = false
     }
     private func loadDiff() async {
         let token = UUID(); request = token
         guard let file = files.first(where: { $0.path == selection }) else { return }
         loading = true
-        do { let result = try await repository.referenceFileDiff(left: left, right: right, file: file); if request == token { diff = result; error = "" } } catch { if request == token { error = error.localizedDescription } }
+        do { let result = try await repository.referenceFileDiff(left: left, right: right, file: file); if request == token { diff = result; error = "" } } catch { if request == token { self.error = error.localizedDescription } }
         if request == token { loading = false }
     }
 }

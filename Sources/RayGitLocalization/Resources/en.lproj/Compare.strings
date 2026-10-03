@@ -205,3 +205,5 @@
 "Invalid release version." = "Invalid release version.";
 
 "Git Flow main, develop and task branches must be distinct." = "Git Flow main, develop and task branches must be distinct.";
+
+"Invalid Git Flow name." = "Invalid Git Flow name.";

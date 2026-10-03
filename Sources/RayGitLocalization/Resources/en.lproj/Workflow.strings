@@ -89,7 +89,6 @@
 "revertContinue.help" = "Continue the in-progress Revert operation.";
 "revertAbort" = "Abort Revert";
 "revertAbort.help" = "Abort the in-progress Revert operation.";
-
 "rebasePlan" = "Load rebase plan";
 "interactiveRebase" = "Interactive rebase";
 "stashRename" = "Rename stash";
@@ -127,5 +126,13 @@
 "Directory tree" = "Directory tree";
 "Network" = "Network";
 "rebasePlan.help" = "First: base revision. Reads the editable plan without changing history.";
-"interactiveRebase.help" = "First: base revision. Load plan, then edit pick/drop/squash/fixup and reorder lines. Clean repository required. Merge commits are rejected.";
+"interactiveRebase.help" = "First: base revision. Load the plan and edit pick/drop/squash/fixup/reword/edit or reorder lines. Reword text after the hash becomes the new subject. Edit stops for amendment, then Continue rebase. Clean repository required. Merge commits and exec are rejected.";
 "stashRename.help" = "First: stash@{N}. Second: new message. Preserves object IDs, order and timestamps.";
+"Ungrouped" = "Ungrouped";
+"Tag Management" = "Tag Management";
+"Signed tag" = "Signed tag";
+"Create tag" = "Create tag";
+"Fetch tags" = "Fetch tags";
+"Preview tag push" = "Preview tag push";
+"Preview remote deletion" = "Preview remote deletion";
+"Delete local tag" = "Delete local tag";

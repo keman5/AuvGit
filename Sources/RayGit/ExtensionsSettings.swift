@@ -59,7 +59,7 @@ struct ExtensionsSettings: View {
         }.formStyle(.grouped).frame(width: 620, height: 670)
             .onAppear { repairShortcuts() }
             .onChange(of: manifestURL) { _, _ in updateGeneration += 1; updateTask?.cancel(); checking = false; update = nil; checkedSource = nil; message = "" }
-            .onDisappear { updateGeneration += 1; updateTask?.cancel() }
+            .onDisappear { updateGeneration += 1; updateTask?.cancel(); checking = false }
 
     }
     private func shortcut(_ title: String, _ key: Binding<String>) -> some View {
@@ -97,9 +97,10 @@ struct ExtensionsSettings: View {
     }
     private func flow(finish: Bool) {
         guard !store.isBusy, let repository = store.repository else { return }
+        let selectedKind = kind, name = flowName, main = mainBranch, develop = developBranch
         store.isBusy = true
         Task {
-            do { if finish { try await repository.finishGitFlow(kind: kind, name: flowName, main: mainBranch, develop: developBranch) } else { try await repository.startGitFlow(kind: kind, name: flowName, main: mainBranch, develop: developBranch) }; message = compareText("Git Flow completed") }
+            do { if finish { try await repository.finishGitFlow(kind: selectedKind, name: name, main: main, develop: develop) } else { try await repository.startGitFlow(kind: selectedKind, name: name, main: main, develop: develop) }; message = compareText("Git Flow completed") }
             catch { message = compareText(error.localizedDescription) }
             store.isBusy = false; await store.refresh()
         }
