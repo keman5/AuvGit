@@ -31,7 +31,7 @@ for filename, helper, name in [('MainWindow.swift', 'mainText', 'Main'), ('DiffP
 # Helpers shared across UI files must be checked at every static call site.
 for path in (root / 'Sources/RayGit').glob('*.swift'):
     source = path.read_text()
-    for helper, name in [('historyActionText', 'HistoryActions'), ('interactionText', 'Interactions'), ('compareText', 'Compare'), ('diffControlText', 'DiffControls')]:
+    for helper, name in [('historyActionText', 'HistoryActions'), ('interactionText', 'Interactions'), ('compareText', 'Compare'), ('diffControlText', 'DiffControls'), ('terminalText', 'Terminal'), ('sessionText', 'SessionWorkflows'), ('workflowText', 'Workflow'), ('panelText', 'VisualPanels'), ('compareExtra', 'CompareExtras'), ('prefsText', 'Preferences'), ('gitPrefsText', 'GitPreferences'), ('editorPrefsText', 'EditorPreferences')]:
         for key in re.findall(r'\b' + helper + r'\("([^"\n]+)"', source):
             assert key in all_tables[name], f'{path.name}: missing {name}/{key}'
     if path.name == 'WorkspaceFilesPane.swift':
@@ -39,6 +39,11 @@ for path in (root / 'Sources/RayGit').glob('*.swift'):
             assert key in all_tables['Files'], f'{path.name}: missing Files/{key}'
     for key, name in re.findall(r'L10n\.text\("([^"\n]+)",\s*table:\s*"([^"\n]+)"', source):
         assert key in all_tables[name], f'{path.name}: missing {name}/{key}'
+preferences = (root / 'Sources/RayGit/PreferencesWindow.swift').read_text()
+for key in re.findall(r'choices\("([^"\n]+)"', preferences):
+    assert key in all_tables['Preferences'], f'PreferencesWindow.swift: missing Preferences/{key}'
+for key in re.findall(r'\("[^"\n]+", "([^"\n]+)"\)', preferences):
+    assert key in all_tables['Preferences'], f'PreferencesWindow.swift: missing picker label Preferences/{key}'
 source = (root / 'Sources/RayGit/RayGitApp.swift').read_text()
 for key in re.findall(r'\b(?:setStatus|setDiffTitle)\("([^"\n]+)"', source):
     assert key in all_tables['App'], f'RepositoryStore: missing {key}'

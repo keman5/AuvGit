@@ -110,7 +110,7 @@ public actor GitRepository {
         if head.code == 0 { _ = try await run(["reset", "--quiet", "HEAD", "--"] + targets) }
         else { _ = try await run(["rm", "--cached", "--quiet", "--ignore-unmatch", "--"] + targets) }
     }
-    public func commit(message: String, amend: Bool = false) async throws { _ = try await run(["commit"] + (amend ? ["--amend"] : []) + ["-m", message]) }
+    public func commit(message: String, amend: Bool = false) async throws { _ = try await run(["commit"] + (amend ? ["--amend"] : []) + (GitRuntimePreferences.shared.commitCleanup == "default" ? [] : ["--cleanup=" + GitRuntimePreferences.shared.commitCleanup]) + ["-m", message]) }
     public func checkout(branch: String) async throws { _ = try await run(["switch", "--", branch]) }
     public func createBranch(name: String) async throws { try await validateBranch(name); _ = try await run(["switch", "-c", name]) }
     private func validatedCommit(_ revision: String) async throws -> String {
@@ -163,15 +163,21 @@ public actor GitRepository {
         let commit = try await validatedCommit(hash)
         _ = try await run(["switch", "--detach", commit])
     }
-    private func applyCommit(_ revision: String, command: String) async throws {
+    private func applyCommit(_ revision: String, command: String, mainline: Int?) async throws {
         guard try await status().isEmpty else { throw GitError("A clean worktree and index are required") }
         let hash = try await validatedCommit(revision)
         let parents = try await run(["show", "-s", "--format=%P", hash]).text.split(whereSeparator: { $0.isWhitespace })
-        guard parents.count <= 1 else { throw GitError("Merge commits require a mainline parent and are unsupported") }
-        _ = try await run([command, "--no-edit", hash])
+        var arguments = [command, "--no-edit"]
+        if parents.count > 1 {
+            guard let mainline, (1...parents.count).contains(mainline) else { throw GitError("Select a valid mainline parent for the merge commit") }
+            arguments += ["--mainline", String(mainline)]
+        } else if mainline != nil {
+            throw GitError("Mainline parent is only valid for merge commits")
+        }
+        _ = try await run(arguments + [hash])
     }
-    public func cherryPick(hash: String) async throws { try await applyCommit(hash, command: "cherry-pick") }
-    public func revert(hash: String) async throws { try await applyCommit(hash, command: "revert") }
+    public func cherryPick(hash: String, mainline: Int? = nil) async throws { try await applyCommit(hash, command: "cherry-pick", mainline: mainline) }
+    public func revert(hash: String, mainline: Int? = nil) async throws { try await applyCommit(hash, command: "revert", mainline: mainline) }
     private func validateStash(_ ref: String) async throws {
         guard (try await stashes()).contains(where: { $0.ref == ref }) else { throw GitError("Unknown stash reference") }
     }
@@ -184,7 +190,7 @@ public actor GitRepository {
         return try await run(["stash", "show", "--patch", "--include-untracked", "--no-ext-diff", "--no-textconv", "--no-color", ref]).text
     }
 
-    public func fetch() async throws { _ = try await run(["fetch", "--all", "--prune"]) }
+    public func fetch() async throws { _ = try await run(["fetch", "--all"] + (GitRuntimePreferences.shared.fetchPrune ? ["--prune"] : ["--no-prune"])) }
     public func pull() async throws { _ = try await run(["pull", "--ff-only"]) }
     public func push() async throws { _ = try await run(["push"]) }
     public func stashes() async throws -> [GitStash] {

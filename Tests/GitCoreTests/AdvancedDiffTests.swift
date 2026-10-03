@@ -52,7 +52,7 @@ final class AdvancedDiffTests: XCTestCase {
             let result = ComparisonTextDecoder.decode(data)
             XCTAssertEqual(result.text, "hello 世界\n")
             XCTAssertFalse(result.isBinary)
-            XCTAssertNotNil(result.readOnlyReason)
+            XCTAssertNil(result.readOnlyReason)
         }
         XCTAssertTrue(ComparisonTextDecoder.decode(Data([0, 1, 2])).isBinary)
     }

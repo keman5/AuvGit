@@ -1,0 +1,11 @@
+"title" = "Terminal";
+"toggle" = "Toggle Terminal (⌘`)";
+"hide" = "Hide Terminal (keep session running)";
+"close" = "Close Terminal Session (stop shell and jobs)";
+"closeSession" = "Close session: %@";
+"sessions" = "%ld / %ld sessions";
+"limit" = "The limit is %ld terminal sessions. Close an existing session to start another.";
+"start" = "Start Terminal";
+"failed" = "Could not start the shell. Check the shell path and repository folder.";
+"exited" = "Shell exited (status %d).";
+"restart" = "Restart Shell";

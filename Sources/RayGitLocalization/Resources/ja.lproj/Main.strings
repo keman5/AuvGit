@@ -74,3 +74,8 @@
 "pull" = "プル";
 "push" = "プッシュ";
 "dismissError" = "エラーを閉じる";
+
+"customizeToolbar" = "ツールバーをカスタマイズ…";
+
+"toolbarFlexibleSpace" = "伸縮スペース";
+"toolbarSeparator" = "縦区切り線";

@@ -1,0 +1,3 @@
+"parent" = "主線父提交";
+"parentChoice" = "父提交 %ld · %@";
+"explanation" = "依 Git 父序號選擇主線父提交。Cherry-pick 套用合併提交相對於該父提交的變更；Revert 撤銷這些變更。父提交 1 通常屬於接收合併的分支。";

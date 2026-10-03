@@ -1,0 +1,18 @@
+"No unresolved conflicts" = "No unresolved conflicts";
+"Conflict %d of %d" = "Conflict %d of %d";
+"Previous conflict" = "Previous conflict";
+"Next conflict" = "Next conflict";
+"Use Ours" = "Use Ours";
+"Use Theirs" = "Use Theirs";
+"Ours → Theirs" = "Ours → Theirs";
+"Theirs → Ours" = "Theirs → Ours";
+"Use Base" = "Use Base";
+"Lines %d–%d" = "Lines %d–%d";
+"Apply to the current conflict only" = "Apply to the current conflict only";
+"Resolver layout" = "Resolver layout";
+"Ours + Result" = "Ours + Result";
+"All three" = "All three";
+"Result + Theirs" = "Result + Theirs";
+"Resolve Conflict" = "Resolve Conflict";
+"Incomplete conflict markers — repair the result manually" = "Incomplete conflict markers — repair the result manually";
+"Ours = Stage 2; Theirs = Stage 3. During rebase, Ours is the upstream side." = "Ours = Stage 2; Theirs = Stage 3. During rebase, Ours is the upstream side.";

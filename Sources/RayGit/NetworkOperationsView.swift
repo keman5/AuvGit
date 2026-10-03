@@ -18,45 +18,71 @@ struct NetworkOperationsView: View {
     @State private var keychainConfirm = false
     @State private var pushConfirm = false
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(networkText("title")).font(.headline)
-                Spacer()
-                Button(networkText("close")) { dismiss() }.disabled(task != nil)
-                Picker(networkText("operation"), selection: $operation) {
-                    Text(networkText("fetch")).tag(NetworkOperation.fetch)
-                    Text(networkText("pull")).tag(NetworkOperation.pull)
-                    Text(networkText("push")).tag(NetworkOperation.pushPreview)
-                }.labelsHidden().frame(width: 200).disabled(task != nil)
+        VStack(alignment: .leading, spacing: 16) {
+            Text(networkText("title")).font(.title2.weight(.semibold))
+            Picker(networkText("operation"), selection: $operation) {
+                Text(networkText("fetch")).tag(NetworkOperation.fetch)
+                Text(networkText("pull")).tag(NetworkOperation.pull)
+                Text(networkText("push")).tag(NetworkOperation.pushPreview)
+            }.fixedSize(horizontal: true, vertical: false).disabled(task != nil)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    if let latest = events.last {
+                        if let fraction = latest.fraction {
+                            ProgressView(value: fraction).frame(width: 180)
+                            Text("\(Int(fraction * 100))%").monospacedDigit()
+                        } else if task != nil { ProgressView().controlSize(.small) }
+                        Text(latest.message).font(.caption).lineLimit(2).textSelection(.enabled)
+                    } else {
+                        if task != nil { ProgressView().controlSize(.small) }
+                        Text(networkText("progressHint")).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                GroupBox(panelText("Results")) {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            if events.isEmpty && output.isEmpty {
+                                Text(panelText("Run an operation to view its result.")).foregroundStyle(.secondary)
+                            }
+                            ForEach(Array(events.enumerated()), id: \.offset) { _, event in Text(event.message) }
+                            if !output.isEmpty { Text(output) }
+                        }.font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                }.frame(minHeight: 180, maxHeight: .infinity)
             }
-            HStack {
-                if let latest = events.last {
-                    if let fraction = latest.fraction { ProgressView(value: fraction).frame(width: 180); Text("\(Int(fraction * 100))%") }
-                    Text(latest.message).font(.caption).lineLimit(2).textSelection(.enabled)
-                } else { Text(networkText("progressHint")).font(.caption).foregroundStyle(.secondary) }
-                Spacer()
-                if task != nil { Button(networkText("cancel")) { task?.cancel() } }
-            }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 3) {
-                    ForEach(Array(events.enumerated()), id: \.offset) { _, event in Text(event.message) }
-                    Text(output)
-                }.font(.system(.caption, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-            }.frame(minHeight: 180).background(.quaternary.opacity(0.2))
-            HStack {
-                Button(networkText(operation == .pushPreview ? "preview" : "run")) { run(operation) }.disabled(task != nil || store.isBusy || store.repository == nil)
-                if operation == .pushPreview && previewReady { Button(networkText("executePush")) { pushConfirm = true }.disabled(task != nil || store.isBusy) }
-                Spacer()
+            GroupBox(networkText("credentials")) {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let credentials {
+                        Text(networkText("helpers") + ": " + (credentials.helpers.isEmpty ? networkText("none") : credentials.helpers.joined(separator: ", "))).font(.callout)
+                        Text(networkText(credentials.sshAgentAvailable ? "sshAvailable" : "sshHint")).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text(networkText("credentialHint")).font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        Spacer()
+                        Button(networkText("configureKeychain")) { keychainConfirm = true }.disabled(task != nil || store.isBusy || store.repository == nil)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
             }
             Divider()
-            Text(networkText("credentials")).font(.headline)
-            if let credentials {
-                Text(networkText("helpers") + ": " + (credentials.helpers.isEmpty ? networkText("none") : credentials.helpers.joined(separator: ", "))).font(.caption)
-                Text(networkText(credentials.sshAgentAvailable ? "sshAvailable" : "sshHint")).font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Spacer()
+                if task != nil {
+                    Button(networkText("cancel")) { task?.cancel() }.keyboardShortcut(.cancelAction)
+                } else {
+                    Button(networkText("close")) { dismiss() }.keyboardShortcut(.cancelAction)
+                }
+                if operation == .pushPreview && previewReady {
+                    Button(networkText("preview")) { run(operation) }.disabled(task != nil || store.isBusy || store.repository == nil)
+                    Button(networkText("executePush")) { pushConfirm = true }.buttonStyle(.borderedProminent).disabled(task != nil || store.isBusy)
+                } else {
+                    Button(networkText(operation == .pushPreview ? "preview" : "run")) { run(operation) }
+                        .buttonStyle(.borderedProminent).disabled(task != nil || store.isBusy || store.repository == nil)
+                }
             }
-            Text(networkText("credentialHint")).font(.caption).foregroundStyle(.secondary)
-            Button(networkText("configureKeychain")) { keychainConfirm = true }.disabled(task != nil || store.isBusy || store.repository == nil)
-        }.padding(20).frame(minWidth: 680, minHeight: 480)
+        }.controlSize(.small).padding(20).frame(width: 760, height: 620)
+        .interactiveDismissDisabled(task != nil)
         .task { await loadCredentials() }
         .onChange(of: operation) { _, _ in previewReady = false; events = []; output = "" }
         .onDisappear { task?.cancel() }

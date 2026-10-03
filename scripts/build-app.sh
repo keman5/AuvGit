@@ -1,10 +1,11 @@
 #!/bin/zsh
 set -euo pipefail
 cd "${0:A:h:h}"
-swift build -c release
+swift build --build-system native -c release
 APP="$PWD/.artifacts/RayGit.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+cp Resources/THIRD_PARTY_NOTICES.txt "$APP/Contents/Resources/THIRD_PARTY_NOTICES.txt"
 cp .build/release/RayGit "$APP/Contents/MacOS/RayGit"
 RESOURCE_BUNDLE="$PWD/.build/release/RayGit_RayGitLocalization.bundle"
 if [[ ! -d "$RESOURCE_BUNDLE" ]]; then
@@ -14,6 +15,14 @@ fi
 # Keep translated resources self-contained in the distributable app.
 rm -rf "$APP/Contents/Resources/RayGit_RayGitLocalization.bundle"
 cp -R "$RESOURCE_BUNDLE" "$APP/Contents/Resources/"
+TERMINAL_RESOURCE_BUNDLE="$PWD/.build/release/SwiftTerm_SwiftTerm.bundle"
+if [[ ! -d "$TERMINAL_RESOURCE_BUNDLE" ]]; then
+  print -u2 "Missing terminal resource bundle: $TERMINAL_RESOURCE_BUNDLE"
+  exit 1
+fi
+rm -rf "$APP/Contents/Resources/SwiftTerm_SwiftTerm.bundle" "$APP/SwiftTerm_SwiftTerm.bundle"
+# SwiftTerm probes Contents/Resources directly without the generated Bundle.module accessor.
+cp -R "$TERMINAL_RESOURCE_BUNDLE" "$APP/Contents/Resources/"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

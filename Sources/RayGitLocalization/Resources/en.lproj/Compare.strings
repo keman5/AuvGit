@@ -207,3 +207,26 @@
 "Git Flow main, develop and task branches must be distinct." = "Git Flow main, develop and task branches must be distinct.";
 
 "Invalid Git Flow name." = "Invalid Git Flow name.";
+
+"Automatic" = "Automatic";
+"Ours (HEAD)" = "Ours (HEAD)";
+"Merge Result (Editable)" = "Merge Result (Editable)";
+"Merge Result (Read-only)" = "Merge Result (Read-only)";
+
+// Explicit draft-only conflict choices
+"Entire file draft:" = "Entire file draft:";
+"Take Ours (Stage 2)" = "Take Ours (Stage 2)";
+"Take Theirs (Stage 3)" = "Take Theirs (Stage 3)";
+"Take Base (Stage 1)" = "Take Base (Stage 1)";
+"Choices change the draft only. Save, then mark resolved to stage it." = "Choices change the draft only. Save, then mark resolved to stage it.";
+"Replace unsaved draft with selected version?" = "Replace unsaved draft with selected version?";
+"Replace Draft" = "Replace Draft";
+"This replaces the entire editor draft. Disk and index are unchanged until you save or mark resolved." = "This replaces the entire editor draft. Disk and index are unchanged until you save or mark resolved.";
+"Resolve Conflict Block" = "Resolve Conflict Block";
+"Conflict Block %d (Lines %d–%d)" = "Conflict Block %d (Lines %d–%d)";
+"Replace only the selected marker block; preserve the rest of the draft." = "Replace only the selected marker block; preserve the rest of the draft.";
+"Ours Then Theirs" = "Ours Then Theirs";
+"Theirs Then Ours" = "Theirs Then Ours";
+"Base (Stage 1)" = "Base (Stage 1)";
+"Ours (Stage 2)" = "Ours (Stage 2)";
+"Theirs (Stage 3)" = "Theirs (Stage 3)";

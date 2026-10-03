@@ -5,3 +5,13 @@
 "next" = "次のページ";
 "position" = "開始行 %d · バイト %lld / %lld";
 "readonly" = "読み取り専用 · UTF-8 分割読み込み";
+"historySupport" = "HEAD/インデックス/競合の不変 blob を一時ファイルに書き出し、分割して読み取ります。";
+"revision" = "リビジョン";
+"worktree" = "作業ツリー";
+"head" = "HEAD";
+"index" = "インデックス";
+"base" = "共通祖先";
+"ours" = "こちら";
+"theirs" = "相手";
+"cancel" = "キャンセル";
+"cancelled" = "ストリーミングをキャンセルしました。続けるには再読み込みしてください。";

@@ -68,4 +68,44 @@ final class StreamingComparisonTests: XCTestCase {
         let repository = GitRepository(url: directory)
         do { _ = try await repository.streamingWorktree(path: "link"); XCTFail("Must reject links") } catch {}
     }
+    func testImmutableHistoricalBlobAbove32MBAndCancelledExportCleanup() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for args in [["init", "-b", "main"], ["config", "user.name", "Test"], ["config", "user.email", "test@example.invalid"], ["config", "commit.gpgsign", "false"]] { _ = try await GitProcess.run(at: directory, arguments: args) }
+        let file = directory.appendingPathComponent("large.txt")
+        FileManager.default.createFile(atPath: file.path, contents: nil)
+        let writer = try FileHandle(forWritingTo: file)
+        let chunk = Data(repeating: 120, count: 1024 * 1024)
+        for _ in 0..<33 { try writer.write(contentsOf: chunk) }
+        try writer.close()
+        for args in [["add", "large.txt"], ["commit", "-m", "large history"]] { _ = try await GitProcess.run(at: directory, arguments: args) }
+        try Data("small worktree\n".utf8).write(to: file)
+        let repository = GitRepository(url: directory)
+        let available = try await repository.availableStreamingRevisions(path: "large.txt")
+        XCTAssertTrue(available.contains(.head)); XCTAssertTrue(available.contains(.index))
+        let headReader = try await repository.streamingContent(path: "large.txt", revision: .head)
+        let page = try await headReader.page()
+        XCTAssertEqual(page.totalBytes, 33 * 1024 * 1024)
+        XCTAssertEqual(page.text.utf8.count, 128 * 1024)
+        let indexReader = try await repository.streamingContent(path: "large.txt", revision: .index)
+        let indexPage = try await indexReader.page(maximumBytes: 16)
+        XCTAssertEqual(indexPage.text, String(repeating: "x", count: 16))
+        // Updating the live index after export cannot alter its immutable streamed snapshot.
+        _ = try await GitProcess.run(at: directory, arguments: ["add", "large.txt"])
+        let stillOriginal = try await indexReader.page(maximumBytes: 16)
+        XCTAssertEqual(stillOriginal.text, indexPage.text)
+        _ = try await GitProcess.run(at: directory, arguments: ["config", "alias.slowexport", "!printf partial; sleep 30"])
+        let export = directory.appendingPathComponent("cancelled-export")
+        let task = Task { try await GitProcess.runToFile(at: directory, arguments: ["slowexport"], outputFile: export) }
+        for _ in 0..<100 { if FileManager.default.fileExists(atPath: export.path) { break }; try await Task.sleep(nanoseconds: 20_000_000) }
+        task.cancel()
+        do { try await task.value; XCTFail("Expected export cancellation") } catch is CancellationError {}
+        XCTAssertFalse(FileManager.default.fileExists(atPath: export.path))
+        let existing = directory.appendingPathComponent("existing")
+        try Data("preserve".utf8).write(to: existing)
+        do { try await GitProcess.runToFile(at: directory, arguments: ["status"], outputFile: existing); XCTFail("Expected exclusive output rejection") } catch {}
+        XCTAssertEqual(try String(contentsOf: existing, encoding: .utf8), "preserve")
+    }
+
 }

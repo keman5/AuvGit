@@ -24,38 +24,38 @@ struct HistoryPane: View {
     var isBusy: Bool = false
     var onAction: (HistoryAction, GitCommit) -> Void = { _, _ in }
     var compact: Bool = false
+    var showsSearch: Bool = true
     var onJump: (String) -> Void = { _ in }
 
     @Binding var authorFilter: String
     @State private var jumpHash = ""
     @State private var authorWidth: CGFloat = 135
+    @AppStorage("preferences.dateStyle") private var dateStyle = "datetime"
     @State private var dateWidth: CGFloat = 125
     @State private var resizeOrigin: CGFloat?
     var body: some View {
+        GeometryReader { geometry in
         let visible = commits
         let graph = CommitGraph(commits: visible)
+        let showColumns = !compact && geometry.size.width >= 640
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField(historyText("history.searchPlaceholder"), text: $search)
-                    .textFieldStyle(.plain)
-                    .accessibilityLabel(historyText("history.searchAccessibility"))
-                if !search.isEmpty {
-                    Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
-                        .buttonStyle(.plain).foregroundStyle(.secondary)
-                        .accessibilityLabel(historyText("history.clearSearch"))
+            if showsSearch {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    searchControl
+                    if !compact { filterControls }
                 }
-                if !compact {
-                    TextField(workflowText("Author"), text: $authorFilter).textFieldStyle(.roundedBorder).frame(width: 155)
-                    TextField(workflowText("Commit hash"), text: $jumpHash).textFieldStyle(.roundedBorder).frame(width: 110).onSubmit { onJump(jumpHash) }
+                VStack(spacing: 8) {
+                    searchControl
+                    if !compact { filterControls.frame(maxWidth: .infinity, alignment: .leading) }
                 }
-                if isLoading { ProgressView().controlSize(.small) }
-            }.padding(.horizontal, 12).padding(.vertical, 9)
+            }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8).background(.bar)
             Divider()
+            }
             HStack(spacing: 8) {
                 Text(historyText("history.graph")).frame(width: graphWidth(graph), alignment: .leading)
                 Text(historyText("history.message")).frame(maxWidth: .infinity, alignment: .leading)
-                if !compact {
+                if showColumns {
                     columnHeader(historyText("history.author"), width: $authorWidth)
                     columnHeader(historyText("history.date"), width: $dateWidth)
                 }
@@ -79,14 +79,14 @@ struct HistoryPane: View {
                                     Text(ref).font(.system(size: 10, weight: .medium))
                                         .padding(.horizontal, 5).padding(.vertical, 2)
                                         .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: 3))
-                                        .frame(maxWidth: compact ? 90 : nil).lineLimit(1)
+                                        .frame(maxWidth: compact ? 90 : 120).lineLimit(1)
                                         .help(ref)
                                 }
                                 Text(commit.subject).lineLimit(1).help(commit.subject)
                             }.frame(maxWidth: .infinity, alignment: .leading)
-                            if !compact {
+                            if showColumns {
                             Text(commit.author).lineLimit(1).frame(width: authorWidth, alignment: .leading).help(commit.author)
-                            Text(commit.date, format: .dateTime.year().month(.twoDigits).day(.twoDigits).hour().minute().locale(L10n.locale))
+                            Text(preferencesDate(commit.date, style: dateStyle))
                                 .font(.system(size: 11)).foregroundStyle(.secondary)
                                 .lineLimit(1).frame(width: dateWidth, alignment: .leading)
                             }
@@ -105,7 +105,7 @@ struct HistoryPane: View {
                             Button(historyActionText("show")) { onAction(.show, commit) }
                             Divider()
                             ForEach([HistoryAction.cherryPick, .revert, .createBranch, .createTag, .checkout], id: \.self) { action in
-                                Button(historyActionText(action.rawValue)) { onAction(action, commit) }.disabled(isBusy || (commit.parents.count > 1 && (action == .cherryPick || action == .revert)))
+                                Button(historyActionText(action.rawValue)) { onAction(action, commit) }.disabled(isBusy)
                             }
                             Divider()
                             Button(historyActionText("copyHash")) { onAction(.copyHash, commit) }
@@ -127,11 +127,11 @@ struct HistoryPane: View {
             if !compact, let commit = commits.first(where: { $0.hash == selection }) {
                 Divider()
                 VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 12) {
-                        Text(commit.hash).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
-                        Spacer()
+                    Text(commit.hash).font(.system(size: 11, design: .monospaced)).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                    HStack(spacing: 8) {
                         Text(commit.author).lineLimit(1).textSelection(.enabled)
-                        Text(commit.date, format: .dateTime.year().month().day().hour().minute().second().locale(L10n.locale))
+                        Spacer(minLength: 8)
+                        Text(preferencesDate(commit.date, style: dateStyle))
                             .foregroundStyle(.secondary)
                     }.font(.caption)
                     ScrollView {
@@ -143,6 +143,14 @@ struct HistoryPane: View {
                     .accessibilityLabel(historyText("history.details"))
             }
         }.background(.background)
+        }
+    }
+    private var searchControl: some View { HistorySearchControl(search: $search) }
+    private var filterControls: some View {
+        HStack(spacing: 8) {
+            TextField(workflowText("Author"), text: $authorFilter).textFieldStyle(.roundedBorder).frame(width: 140)
+            TextField(workflowText("Commit hash"), text: $jumpHash).textFieldStyle(.roundedBorder).frame(width: 110).onSubmit { onJump(jumpHash) }
+        }
     }
     private func graphWidth(_ graph: CommitGraph) -> CGFloat { min(compact ? 80 : 180, CGFloat(graph.laneCount) * 14 + 8) }
     private func columnHeader(_ title: String, width: Binding<CGFloat>) -> some View {
@@ -177,5 +185,25 @@ private struct CommitGraphCell: View {
             let point = CGRect(x: 3 + CGFloat(row.nodeLane) * spacing, y: size.height / 2 - 4, width: 8, height: 8)
             context.fill(Path(ellipseIn: point), with: .color(colors[row.nodeLane % colors.count]))
         }.accessibilityHidden(true)
+    }
+}
+
+struct HistorySearchControl: View {
+    @Binding var search: String
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField(historyText("history.searchPlaceholder"), text: $search)
+                .textFieldStyle(.plain)
+                .accessibilityLabel(historyText("history.searchAccessibility"))
+            if !search.isEmpty {
+                Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                    .accessibilityLabel(historyText("history.clearSearch"))
+            }
+        }.padding(.horizontal, 8).padding(.vertical, 4)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 5))
+            .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color.secondary.opacity(0.2)))
+            .frame(minWidth: 160, maxWidth: .infinity)
     }
 }

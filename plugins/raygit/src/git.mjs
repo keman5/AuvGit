@@ -7,13 +7,14 @@ import path from 'node:path';
 const MAX_OUTPUT = 16 * 1024 * 1024;
 const locks = new Map();
 
-export function git(repo, args, { allowFailure = false, timeout = 30000 } = {}) {
+export function git(repo, args, { allowFailure = false, timeout = 30000, input, binary = false } = {}) {
   return new Promise((resolve, reject) => {
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
     Object.assign(env, { GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C', GIT_LITERAL_PATHSPECS: '1' });
     const child = spawn('git', ['--no-pager', '-c', 'color.ui=false', '-c', 'core.quotepath=false', '-C', repo, ...args], {
-      env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32',
+      env, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32',
     });
+    if (input !== undefined) { child.stdin.on('error', () => {}); child.stdin.end(input); }
     const out = [], err = [];
     let bytes = 0, failure;
     const stop = message => {
@@ -31,7 +32,7 @@ export function git(repo, args, { allowFailure = false, timeout = 30000 } = {}) 
     child.on('error', error => { clearTimeout(timer); reject(error); });
     child.on('close', code => {
       clearTimeout(timer);
-      const result = { code, stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8') };
+      const result = { code, stdout: binary ? Buffer.concat(out) : Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8') };
       if (failure) reject(failure);
       else if (code !== 0 && !allowFailure) reject(new Error(result.stderr.trim() || `Git 操作失败 (${code})`));
       else resolve(result);
@@ -110,7 +111,7 @@ export async function branches(repo) {
   }) };
 }
 
-function filePath(value) {
+export function filePath(value) {
   if (typeof value !== 'string' || !value || path.isAbsolute(value) || value.includes('\0') || value.split(/[\\/]/).some(part => part === '..' || part.toLowerCase() === '.git')) throw new Error('文件路径必须位于仓库内，不能包含 .. 或 .git。');
   return value;
 }
@@ -144,7 +145,7 @@ export async function diff(repo, { scope = 'working', file, commit } = {}) {
   return { repo, scope, file: file ?? null, commit: commit ?? null, text: result.stdout.slice(0, max), truncated: result.stdout.length > max };
 }
 
-async function exclusive(repo, action) {
+export async function exclusive(repo, action) {
   const previous = locks.get(repo) ?? Promise.resolve();
   let release;
   const current = new Promise(resolve => { release = resolve; });
@@ -166,7 +167,7 @@ export async function mutate(repo, operation, args) {
       const eligible = before.files.filter(file => operation === 'stage' ? file.unstaged : file.staged);
       const allowed = new Set(eligible.flatMap(file => [file.path, file.originalPath].filter(Boolean)));
       if (paths.some(name => !allowed.has(name))) throw new Error('所选文件状态已变化或不属于当前操作。请刷新。');
-      for (const file of eligible) if (file.originalPath && (paths.includes(file.path) || paths.includes(file.originalPath))) {
+      for (const file of eligible) if (file.originalPath && (operation === 'unstage' || ['R', 'C'].includes(file.worktree)) && (paths.includes(file.path) || paths.includes(file.originalPath))) {
         if (!paths.includes(file.path)) paths.push(file.path);
         if (!paths.includes(file.originalPath)) paths.push(file.originalPath);
       }
@@ -174,7 +175,7 @@ export async function mutate(repo, operation, args) {
         ? await git(repo, ['add', '--', ...paths])
         : before.head
           ? await git(repo, ['reset', '-q', 'HEAD', '--', ...paths])
-          : await git(repo, ['rm', '--cached', '-q', '--', ...paths]);
+          : await git(repo, ['rm', '--cached', '-f', '-q', '--', ...paths]);
     } else if (operation === 'commit') {
       if (!args.message?.trim()) throw new Error('提交说明不能为空。');
       if (before.files.some(file => file.conflict)) throw new Error('存在未解决的冲突。');

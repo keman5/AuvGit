@@ -15,49 +15,61 @@ struct DiffPane: View {
     let text: String
     let title: String
     let isLoading: Bool
-    @State private var sideBySide = true
+    @AppStorage("editor.defaultDiffSideBySide") private var sideBySide = true
     @State private var hunk = -1
-    @State private var wraps = false
-    @State private var lineNumbers = true
-    @State private var synchronized = true
-    @State private var fontSize: CGFloat = 12
+    @AppStorage("editor.wrapLines") private var wraps = false
+    @AppStorage("editor.showLineNumbers") private var lineNumbers = true
+    @AppStorage("editor.synchronizeScroll") private var synchronized = true
+    @AppStorage("editor.fontSize") private var fontSize: Double = 12
     @State private var query = ""
     @State private var searchStep = 0
     @State private var matchCount = 0
+    @State private var showSearch = false
+    @FocusState private var searchFocused: Bool
     @Environment(\.colorScheme) private var colorScheme
     private var parsed: ParsedDiff { DiffParser.parse(text) }
     var body: some View {
         let diff = parsed
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Image(systemName: "doc.text.magnifyingglass").foregroundStyle(.secondary)
-                Text(title.isEmpty ? diffText("diff.title") : title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                Spacer()
-                Text(diffText("diff.hunkCount", diff.hunks.count)).font(.caption).foregroundStyle(.secondary)
-                Button { hunk = max(0, hunk - 1) } label: { Image(systemName: "chevron.up") }.disabled(diff.hunks.isEmpty).help(diffText("diff.previousHunk")).accessibilityLabel(diffText("diff.previousHunk"))
-                Button { hunk = min(diff.hunks.count - 1, hunk + 1) } label: { Image(systemName: "chevron.down") }.disabled(diff.hunks.isEmpty).help(diffText("diff.nextHunk")).accessibilityLabel(diffText("diff.nextHunk"))
-                Picker(diffText("diff.view"), selection: $sideBySide) { Text(diffText("diff.sideBySide")).tag(true); Text(diffText("diff.unified")).tag(false) }.pickerStyle(.segmented).labelsHidden().frame(width: 175).accessibilityLabel(diffText("diff.view"))
-                Menu {
-                    Toggle(diffControlText("wrap"), isOn: $wraps)
-                    Toggle(diffControlText("lineNumbers"), isOn: $lineNumbers)
-                    Toggle(diffControlText("syncScroll"), isOn: $synchronized)
-                    Divider()
-                    Button(diffControlText("larger")) { fontSize = min(24, fontSize + 1) }
-                    Button(diffControlText("smaller")) { fontSize = max(9, fontSize - 1) }
-                    Button(diffControlText("resetFont")) { fontSize = 12 }
-                } label: { Image(systemName: "slider.horizontal.3") }
-                .menuStyle(.borderlessButton).fixedSize().help(diffControlText("display"))
-            }.padding(10).background(.bar)
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField(diffControlText("search"), text: $query).textFieldStyle(.plain)
-                    .onSubmit { searchStep += 1 }
-                if !query.isEmpty { Text("\(matchCount)").font(.caption).foregroundStyle(.secondary) }
-                Button { searchStep -= 1 } label: { Image(systemName: "chevron.up") }
-                    .help(diffControlText("previousMatch")).disabled(matchCount == 0)
-                Button { searchStep += 1 } label: { Image(systemName: "chevron.down") }
-                    .help(diffControlText("nextMatch")).disabled(matchCount == 0)
-            }.padding(.horizontal, 12).padding(.vertical, 6).background(.bar)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    titleLabel.frame(minWidth: 120, alignment: .leading)
+                    Spacer(minLength: 0)
+                    hunkControls(diff)
+                    displayControls
+                }
+                VStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        titleLabel
+                        Spacer(minLength: 0)
+                        hunkControls(diff)
+                    }
+                    HStack(spacing: 8) {
+                        displayControls
+                        Spacer(minLength: 0)
+                    }
+                }
+            }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 6).background(.bar)
+            if showSearch {
+                HStack(spacing: 8) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField(diffControlText("search"), text: $query).textFieldStyle(.plain)
+                            .focused($searchFocused)
+                            .onSubmit { searchStep += 1 }
+                        if !query.isEmpty { Text("\(matchCount)").font(.caption).foregroundStyle(.secondary) }
+                    }.padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 5))
+                        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color.secondary.opacity(0.2)))
+                        .frame(minWidth: 80, maxWidth: 260)
+                    Button { searchStep -= 1 } label: { Image(systemName: "chevron.up") }
+                        .help(diffControlText("previousMatch")).disabled(matchCount == 0)
+                    Button { searchStep += 1 } label: { Image(systemName: "chevron.down") }
+                        .help(diffControlText("nextMatch")).disabled(matchCount == 0)
+                    Button { closeSearch() } label: { Image(systemName: "xmark") }
+                    Spacer(minLength: 0)
+                }.controlSize(.small).padding(.horizontal, 12).padding(.bottom, 6).background(.bar)
+            }
             Divider()
             if isLoading { Spacer(); ProgressView(diffText("diff.loading")); Spacer() }
             else if text.isEmpty { Spacer(); Label(diffText("diff.empty"), systemImage: "checkmark.circle").foregroundStyle(.secondary); Spacer() }
@@ -71,9 +83,54 @@ struct DiffPane: View {
                     }.font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.vertical, 5).background(.bar)
                     Divider()
                 }
-                DiffTextSurface(diff: diff, languagePath: title, sideBySide: sideBySide, selectedHunk: hunk, dark: colorScheme == .dark, wraps: wraps, lineNumbers: lineNumbers, synchronized: synchronized, fontSize: fontSize, query: query, searchStep: searchStep, matchCount: $matchCount)
+                DiffTextSurface(diff: diff, languagePath: title, sideBySide: sideBySide, selectedHunk: hunk, dark: colorScheme == .dark, wraps: wraps, lineNumbers: lineNumbers, synchronized: synchronized, fontSize: CGFloat(fontSize), query: query, searchStep: searchStep, matchCount: $matchCount)
             }
         }.onChange(of: text) { _, _ in hunk = -1 }
+            .onExitCommand { closeSearch() }
+    }
+    private var titleLabel: some View {
+        Text(title.isEmpty ? diffText("diff.title") : title)
+            .font(.system(size: 12, weight: .semibold)).lineLimit(1).truncationMode(.middle).help(title)
+    }
+    private func hunkControls(_ diff: ParsedDiff) -> some View {
+        HStack(spacing: 8) {
+            Text(diffText("diff.hunkCount", diff.hunks.count)).font(.caption).foregroundStyle(.secondary).fixedSize()
+            Button { hunk = max(0, hunk - 1) } label: { Image(systemName: "chevron.up") }
+                .disabled(diff.hunks.isEmpty).help(diffText("diff.previousHunk")).accessibilityLabel(diffText("diff.previousHunk"))
+            Button { hunk = min(diff.hunks.count - 1, hunk + 1) } label: { Image(systemName: "chevron.down") }
+                .disabled(diff.hunks.isEmpty).help(diffText("diff.nextHunk")).accessibilityLabel(diffText("diff.nextHunk"))
+        }
+    }
+    private var displayControls: some View {
+        HStack(spacing: 8) {
+            Picker(diffText("diff.view"), selection: $sideBySide) {
+                Text(diffText("diff.sideBySide")).tag(true)
+                Text(diffText("diff.unified")).tag(false)
+            }.pickerStyle(.segmented).labelsHidden().fixedSize(horizontal: true, vertical: false).accessibilityLabel(diffText("diff.view"))
+            Menu {
+                Toggle(diffControlText("wrap"), isOn: $wraps)
+                Toggle(diffControlText("lineNumbers"), isOn: $lineNumbers)
+                Toggle(diffControlText("syncScroll"), isOn: $synchronized)
+                Divider()
+                Button(diffControlText("larger")) { fontSize = min(24, fontSize + 1) }
+                Button(diffControlText("smaller")) { fontSize = max(9, fontSize - 1) }
+                Button(diffControlText("resetFont")) { fontSize = 12 }
+            } label: { Image(systemName: "slider.horizontal.3") }
+                .menuStyle(.borderlessButton).fixedSize().help(diffControlText("display"))
+            Button {
+                if showSearch { closeSearch() }
+                else {
+                    showSearch = true
+                    DispatchQueue.main.async { searchFocused = true }
+                }
+            } label: { Image(systemName: "magnifyingglass") }
+                .help(diffControlText("search")).accessibilityLabel(diffControlText("search"))
+        }
+    }
+    private func closeSearch() {
+        query = ""
+        searchFocused = false
+        showSearch = false
     }
 }
 
@@ -85,6 +142,14 @@ private struct DiffTextSurface: NSViewRepresentable {
     let sideBySide: Bool
     let selectedHunk: Int
     let dark: Bool
+    @AppStorage("editor.additionColor") private var additionColor = ""
+    @AppStorage("editor.deletionColor") private var deletionColor = ""
+    @AppStorage("editor.modificationColor") private var modificationColor = ""
+    @AppStorage("editor.fontName") private var fontName = ""
+    @AppStorage("editor.syntaxHighlight") private var syntaxHighlight = true
+    @AppStorage("editor.characterDiff") private var characterDiff = true
+    @AppStorage("editor.tabWidth") private var tabWidth = 4
+    @AppStorage("editor.showWhitespace") private var showWhitespace = false
     let wraps: Bool
     let lineNumbers: Bool
     let synchronized: Bool
@@ -122,7 +187,10 @@ private struct DiffTextSurface: NSViewRepresentable {
         let signature = diff.lines.map { "\($0.kind):\($0.oldNumber ?? -1):\($0.newNumber ?? -1):\($0.text)" }.joined(separator: "\n")
         coordinator.synchronized = synchronized
         let changedDocument = coordinator.signature != signature
-        if changedDocument || coordinator.split != sideBySide || coordinator.dark != dark || coordinator.lineNumbers != lineNumbers || coordinator.fontSize != fontSize {
+        let style = "\(additionColor)|\(deletionColor)|\(modificationColor)|\(fontName)|\(syntaxHighlight)|\(characterDiff)|\(tabWidth)|\(showWhitespace)"
+        let changedStyle = coordinator.style != style
+        coordinator.style = style
+        if changedStyle || changedDocument || coordinator.split != sideBySide || coordinator.dark != dark || coordinator.lineNumbers != lineNumbers || coordinator.fontSize != fontSize {
             coordinator.syncing = true
             coordinator.lineNumbers = lineNumbers; coordinator.fontSize = fontSize
             coordinator.signature = signature; coordinator.split = sideBySide; coordinator.dark = dark
@@ -132,6 +200,7 @@ private struct DiffTextSurface: NSViewRepresentable {
             for (index, scroll) in coordinator.scrolls.enumerated() {
                 let view = scroll.documentView as! NSTextView
                 view.backgroundColor = .textBackgroundColor
+                view.layoutManager?.showsInvisibleCharacters = showWhitespace
                 let selection = view.selectedRange()
                 let position = scroll.contentView.bounds.origin
                 view.textStorage?.setAttributedString(documents.text[index])
@@ -198,14 +267,23 @@ private struct DiffTextSurface: NSViewRepresentable {
     private func render() -> (text: [NSAttributedString], ranges: [[NSRange]]) {
         let left = NSMutableAttributedString(), right = NSMutableAttributedString()
         var ranges: [[NSRange]] = []
-        let font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        func append(_ line: DiffLine?, to output: NSMutableAttributedString, number: Int?, prefix: String = "") {
+        let font = EditorPreferences.font(name: fontName, size: Double(fontSize))
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.tabStops = []
+        paragraph.defaultTabInterval = (" " as NSString).size(withAttributes: [.font: font]).width * CGFloat(min(16, max(1, tabWidth)))
+        func append(_ line: DiffLine?, to output: NSMutableAttributedString, number: Int?, prefix: String = "", modified: Bool = false) {
             let kind = line?.kind ?? .context
-            let background: NSColor = kind == .addition ? NSColor.systemGreen.withAlphaComponent(dark ? 0.19 : 0.11) : kind == .deletion ? NSColor.systemRed.withAlphaComponent(dark ? 0.19 : 0.10) : kind == .hunk ? NSColor.systemBlue.withAlphaComponent(0.12) : .textBackgroundColor
+            let background: NSColor = modified ? DiffVisualStyle.lineBackground(EditorPreferences.color(modificationColor, fallback: .systemOrange), dark: dark) : kind == .addition ? DiffVisualStyle.lineBackground(EditorPreferences.color(additionColor, fallback: .systemGreen), dark: dark) : kind == .deletion ? DiffVisualStyle.lineBackground(EditorPreferences.color(deletionColor, fallback: .systemRed), dark: dark) : kind == .hunk ? NSColor.systemBlue.withAlphaComponent(0.12) : .textBackgroundColor
             let gutter = lineNumbers ? ((number.map { String(format: "%6d", $0) } ?? "      ") + "  ") : ""
-            let contentOffset = output.length + gutter.utf16.count + prefix.utf16.count
-            output.append(NSAttributedString(string: gutter + prefix + (line?.text ?? "") + "\n", attributes: [.font: font, .foregroundColor: kind == .metadata || kind == .hunk ? NSColor.secondaryLabelColor : NSColor.textColor, .backgroundColor: background]))
-            if let line, [.context, .addition, .deletion].contains(line.kind) {
+            let rowOffset = output.length
+            let contentOffset = rowOffset + gutter.utf16.count + prefix.utf16.count
+            output.append(NSAttributedString(string: gutter + prefix + (line?.text ?? "") + "\n", attributes: [.font: font, .paragraphStyle: paragraph, .foregroundColor: kind == .metadata || kind == .hunk ? NSColor.secondaryLabelColor : NSColor.textColor, .backgroundColor: background]))
+            if lineNumbers {
+                // Style only the number columns; preserve the original text and offsets.
+                let numberColumnsLength = gutter.utf16.count + (sideBySide ? 0 : 7)
+                output.addAttributes([.font: DiffVisualStyle.lineNumberFont(codeSize: fontSize), .foregroundColor: DiffVisualStyle.lineNumberColor], range: NSRange(location: rowOffset, length: numberColumnsLength))
+            }
+            if syntaxHighlight, let line, [.context, .addition, .deletion].contains(line.kind) {
                 for token in SyntaxHighlighter.tokens(in: line.text, path: languagePath) {
                     let color: NSColor
                     switch token.kind { case .keyword: color = .systemPurple; case .string: color = .systemRed; case .comment: color = .secondaryLabelColor; case .number: color = .systemBlue }
@@ -213,9 +291,16 @@ private struct DiffTextSurface: NSViewRepresentable {
                 }
             }
         }
+        // The pane title already identifies a single file. Keep multi-file boundaries
+        // and meaningful metadata (rename, mode, binary, missing final newline).
+        let hasMultipleFiles = diff.lines.lazy.filter { $0.kind == .metadata && $0.text.hasPrefix("diff --git ") }.prefix(2).count > 1
         var index = 0
         while index < diff.lines.count {
             let line = diff.lines[index]
+            if line.kind == .metadata && ((!hasMultipleFiles && line.text.hasPrefix("diff --git ")) || line.text.hasPrefix("index ") || line.text.hasPrefix("--- ") || line.text.hasPrefix("+++ ")) {
+                index += 1
+                continue
+            }
             if line.kind == .hunk { ranges.append([NSRange(location: left.length, length: 1), NSRange(location: right.length, length: 1)]) }
             if sideBySide && (line.kind == .deletion || line.kind == .addition) {
                 var removed: [DiffLine] = [], added: [DiffLine] = []
@@ -225,11 +310,11 @@ private struct DiffTextSurface: NSViewRepresentable {
                 for row in 0..<max(removed.count, added.count) {
                     let a = row < removed.count ? removed[row] : nil, b = row < added.count ? added[row] : nil
                     let leftOffset = left.length + (lineNumbers ? 8 : 0), rightOffset = right.length + (lineNumbers ? 8 : 0)
-                    append(a, to: left, number: a?.oldNumber); append(b, to: right, number: b?.newNumber)
-                    if let a, let b {
+                    append(a, to: left, number: a?.oldNumber, modified: a != nil && b != nil); append(b, to: right, number: b?.newNumber, modified: a != nil && b != nil)
+                    if characterDiff, let a, let b {
                         let character = CharacterDiff(source: a.text, target: b.text)
-                        for range in character.source { left.addAttribute(.backgroundColor, value: NSColor.systemRed.withAlphaComponent(0.3), range: NSRange(location: leftOffset + range.location, length: range.length)) }
-                        for range in character.target { right.addAttribute(.backgroundColor, value: NSColor.systemGreen.withAlphaComponent(0.3), range: NSRange(location: rightOffset + range.location, length: range.length)) }
+                        for range in character.source { left.addAttribute(.backgroundColor, value: DiffVisualStyle.characterBackground(EditorPreferences.color(deletionColor, fallback: .systemRed), dark: dark), range: NSRange(location: leftOffset + range.location, length: range.length)) }
+                        for range in character.target { right.addAttribute(.backgroundColor, value: DiffVisualStyle.characterBackground(EditorPreferences.color(additionColor, fallback: .systemGreen), dark: dark), range: NSRange(location: rightOffset + range.location, length: range.length)) }
                     }
                 }
                 continue
@@ -244,6 +329,7 @@ private struct DiffTextSurface: NSViewRepresentable {
         return ([left, right], ranges)
     }
     final class Coordinator {
+        var style = ""
         var scrolls: [NSScrollView] = [], observers: [NSObjectProtocol] = []
         var syncing = false, split = true, dark = false
         var synchronized = true, lineNumbers = true

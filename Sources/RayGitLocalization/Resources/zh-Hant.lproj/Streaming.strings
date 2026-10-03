@@ -5,3 +5,13 @@
 "next" = "下一頁";
 "position" = "從第 %d 行開始 · 位元組 %lld / %lld";
 "readonly" = "唯讀 · 按區塊讀取 UTF-8";
+"historySupport" = "HEAD/索引/衝突版本依不可變 blob 匯出暫存檔，再按區塊讀取。";
+"revision" = "版本";
+"worktree" = "工作區";
+"head" = "HEAD";
+"index" = "索引";
+"base" = "共同祖先";
+"ours" = "我們的版本";
+"theirs" = "他們的版本";
+"cancel" = "取消";
+"cancelled" = "已取消串流讀取。請重新載入以繼續。";

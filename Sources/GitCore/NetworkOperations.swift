@@ -57,7 +57,7 @@ extension GitRepository {
     public func runNetwork(_ operation: NetworkOperation, progress: @escaping @Sendable (NetworkProgress) -> Void) async throws -> NetworkOperationResult {
         let args: [String]
         switch operation {
-        case .fetch: args = ["fetch", "--all", "--prune", "--progress"]
+        case .fetch: args = ["fetch", "--all", "--progress"] + (GitRuntimePreferences.shared.fetchPrune ? ["--prune"] : ["--no-prune"])
         case .pull: args = ["pull", "--ff-only", "--progress"]
         case .pushPreview: args = ["push", "--dry-run", "--porcelain", "--progress"]
         case .push: args = ["push", "--porcelain", "--progress"]

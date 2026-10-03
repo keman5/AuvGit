@@ -109,7 +109,7 @@ extension RepositoryWorkflowTests {
         let rows = try await repo.log(); XCTAssertEqual(rows[0].parents.count, 2)
         let base = rows.last!.hash
         let plan = try await repo.advancedOperation(.rebasePlan, first: base, second: "")
-        do { _ = try await repo.interactiveRebase(onto: base, plan: plan); XCTFail("Merge plan silently flattened") } catch { }
+        XCTAssertTrue(plan.contains("merge -C"))
     }
     func testAuthorFilterPrecedesPagination() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -166,5 +166,34 @@ extension RepositoryWorkflowTests {
         _ = try await GitProcess.run(at: bare, arguments: ["show-ref", "--verify", "refs/tags/v1"])
         _ = try await repo.synchronizeTag(name: "v1", remote: "origin", delete: true, preview: false)
         let deleted = try await GitProcess.run(at: bare, arguments: ["show-ref", "--verify", "refs/tags/v1"], allowedCodes: [0, 128]); XCTAssertNotEqual(deleted.code, 0)
+    }
+}
+
+extension RepositoryWorkflowTests {
+    func testManagedTagsSeparateCommitHashesFromTagObjects() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repo = try await GitRepository.initialize(at: root)
+        _ = try await repo.workflowRead(["config", "user.name", "Tester"])
+        _ = try await repo.workflowRead(["config", "user.email", "test@example.invalid"])
+        try "content".write(to: root.appendingPathComponent("file"), atomically: true, encoding: .utf8)
+        try await repo.stage(paths: ["file"]); try await repo.commit(message: "base")
+        let head = try await repo.workflowRevision("HEAD")
+        try await repo.createManagedTag(name: "annotated", revision: "HEAD", message: "annotation", signed: false)
+        try await repo.createManagedTag(name: "lightweight", revision: "HEAD", message: "", signed: false)
+        _ = try await repo.workflowRead(["tag", "-a", "nested", "-m", "nested annotation", "annotated"])
+        let blob = try await repo.workflowRead(["rev-parse", "HEAD:file"]).trimmingCharacters(in: .newlines)
+        _ = try await repo.workflowRead(["tag", "blob", blob])
+        let tags = try await repo.managedTags()
+        let annotated = try XCTUnwrap(tags.first { $0.name == "annotated" })
+        XCTAssertEqual(annotated.commitHash, head)
+        XCTAssertNotEqual(annotated.objectHash, head)
+        let tagObject = try await repo.workflowRead(["rev-parse", "refs/tags/annotated"]).trimmingCharacters(in: .newlines)
+        XCTAssertEqual(annotated.objectHash, tagObject)
+        let lightweight = try XCTUnwrap(tags.first { $0.name == "lightweight" })
+        XCTAssertEqual(lightweight.commitHash, head); XCTAssertEqual(lightweight.objectHash, head)
+        XCTAssertEqual(tags.first { $0.name == "nested" }?.commitHash, head)
+        let blobTag = try XCTUnwrap(tags.first { $0.name == "blob" })
+        XCTAssertNil(blobTag.commitHash); XCTAssertEqual(blobTag.objectHash, blob)
     }
 }

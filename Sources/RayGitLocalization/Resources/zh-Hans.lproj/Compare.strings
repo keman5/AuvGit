@@ -207,3 +207,26 @@
 "Git Flow main, develop and task branches must be distinct." = "Git Flow 的主分支、开发分支和任务分支必须不同。";
 
 "Invalid Git Flow name." = "Git Flow 名称无效。";
+
+"Automatic" = "自动";
+"Ours (HEAD)" = "我方（HEAD）";
+"Merge Result (Editable)" = "合并结果（可编辑）";
+"Merge Result (Read-only)" = "合并结果（只读）";
+
+// Explicit draft-only conflict choices
+"Entire file draft:" = "整个文件草稿：";
+"Take Ours (Stage 2)" = "采用我们的版本（阶段 2）";
+"Take Theirs (Stage 3)" = "采用他们的版本（阶段 3）";
+"Take Base (Stage 1)" = "采用共同祖先（阶段 1）";
+"Choices change the draft only. Save, then mark resolved to stage it." = "选择仅修改草稿。保存后，标记为已解决才会暂存。";
+"Replace unsaved draft with selected version?" = "用所选版本替换未保存的草稿？";
+"Replace Draft" = "替换草稿";
+"This replaces the entire editor draft. Disk and index are unchanged until you save or mark resolved." = "这将替换整个编辑器草稿。保存或标记为已解决之前，磁盘和暂存区不会改变。";
+"Resolve Conflict Block" = "解决指定冲突块";
+"Conflict Block %d (Lines %d–%d)" = "冲突块 %d（第 %d–%d 行）";
+"Replace only the selected marker block; preserve the rest of the draft." = "仅替换选中的冲突标记块，保留草稿的其他内容。";
+"Ours Then Theirs" = "先我们的，再他们的";
+"Theirs Then Ours" = "先他们的，再我们的";
+"Base (Stage 1)" = "共同祖先（阶段 1）";
+"Ours (Stage 2)" = "我们的版本（阶段 2）";
+"Theirs (Stage 3)" = "他们的版本（阶段 3）";

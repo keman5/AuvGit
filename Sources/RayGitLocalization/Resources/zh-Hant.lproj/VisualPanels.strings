@@ -1,0 +1,10 @@
+"Results" = "結果";
+"Running operation…" = "正在執行操作…";
+"Run an operation to view its result." = "執行操作後將在此顯示結果。";
+"Rebase plan" = "變基計畫";
+"Load a base revision to edit its rebase plan." = "載入基準版本後可編輯變基計畫。";
+"Loading tags…" = "正在載入標籤…";
+"No local tags" = "沒有本機標籤";
+"Tag synchronization" = "標籤同步";
+"No configured remotes" = "未設定遠端倉庫";
+"Select a tag to synchronize or delete." = "選擇要同步或刪除的標籤。";

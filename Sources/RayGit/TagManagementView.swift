@@ -15,6 +15,7 @@ struct TagManagementView: View {
     @State private var output = ""
     @State private var pending: TagRequest?
     @State private var reloadID = UUID()
+    @State private var loading = true
     struct TagRequest: Identifiable {
         let id = UUID()
         let repo: GitRepository
@@ -24,32 +25,97 @@ struct TagManagementView: View {
         let local: Bool
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack { Text(workflowText("Tag Management")).font(.title2); Spacer(); Button(workflowText("Close")) { dismiss() }.disabled(store.isBusy) }
-            Table(tags, selection: $selection) {
-                TableColumn(workflowText("Tag name"), value: \.name)
-                TableColumn(workflowText("Commit hash"), value: \.hash)
-                TableColumn(workflowText("Annotation"), value: \.message)
-            }.frame(minHeight: 180)
-            HStack { TextField(workflowText("Tag name"), text: $name); TextField(workflowText("Target revision"), text: $revision) }
-            TextField(workflowText("Annotation"), text: $annotation)
-            HStack { Toggle(workflowText("Signed tag"), isOn: $signed); Spacer(); Button(workflowText("Create tag")) { create() }.disabled(name.isEmpty || revision.isEmpty) }
-            Divider()
-            HStack {
-                Picker(workflowText("Remote name"), selection: $remote) { ForEach(remotes, id: \.self) { Text($0).tag($0) } }.frame(width: 180)
-                Button(workflowText("Fetch tags")) { fetch() }.disabled(remotes.isEmpty)
-                Button(workflowText("Preview tag push")) { preview(delete: false) }.disabled(selection == nil || remotes.isEmpty)
-                Button(workflowText("Preview remote deletion")) { preview(delete: true) }.disabled(selection == nil || remotes.isEmpty)
-                Button(workflowText("Delete local tag")) { if let repo = store.repository, let selected = selection { pending = TagRequest(repo: repo, name: selected, remote: "", delete: true, local: true) } }.disabled(selection == nil)
+        VStack(alignment: .leading, spacing: 16) {
+            Text(workflowText("Tag Management")).font(.title2.weight(.semibold))
+            Group {
+                if loading || tags.isEmpty {
+                    VStack(spacing: 12) {
+                        if loading {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "tag").font(.title2).foregroundStyle(.tertiary)
+                        }
+                        Text(panelText(loading ? "Loading tags…" : "No local tags")).font(.callout).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(nsColor: .separatorColor)))
+                } else {
+                    Table(tags, selection: $selection) {
+                        TableColumn(workflowText("Tag name"), value: \.name).width(min: 130, ideal: 190)
+                        TableColumn(workflowText("Commit hash")) { tag in
+                            Text(tag.commitHash ?? "—").font(.system(.caption, design: .monospaced)).lineLimit(1)
+                        }.width(min: 140, ideal: 190)
+                        TableColumn(workflowText("Annotation"), value: \.message)
+                    }
+                }
+            }.frame(minHeight: 150, maxHeight: .infinity)
+            GroupBox(workflowText("Create tag")) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top, spacing: 12) {
+                        field("Tag name", text: $name)
+                        field("Target revision", text: $revision)
+                        field("Annotation", text: $annotation)
+                    }
+                    HStack(spacing: 8) {
+                        Toggle(workflowText("Signed tag"), isOn: $signed)
+                        Spacer()
+                        Button(workflowText("Create tag")) { create() }.buttonStyle(.borderedProminent).disabled(name.isEmpty || revision.isEmpty)
+                    }
+                }.padding(8)
             }
-            ScrollView { Text(output).font(.system(.caption, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(height: 120)
-        }.disabled(store.isBusy).interactiveDismissDisabled(store.isBusy).padding(20).frame(width: 940, height: 650)
+            GroupBox(panelText("Tag synchronization")) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 8) {
+                        HStack(spacing: 8) {
+                            Text(workflowText("Remote name")).font(.callout)
+                            if remotes.isEmpty {
+                                Text(panelText("No configured remotes")).font(.caption).foregroundStyle(.secondary)
+                            } else {
+                                Picker(workflowText("Remote name"), selection: $remote) { ForEach(remotes, id: \.self) { Text($0).tag($0) } }
+                                    .labelsHidden().fixedSize(horizontal: true, vertical: false)
+                            }
+                        }
+                        Spacer()
+                        Button(workflowText("Fetch tags")) { fetch() }.disabled(remotes.isEmpty)
+                        Button(workflowText("Preview tag push")) { preview(delete: false) }.disabled(selection == nil || remotes.isEmpty)
+                    }
+                    Divider()
+                    HStack(spacing: 8) {
+                        Text(selection ?? panelText("Select a tag to synchronize or delete.")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        Spacer()
+                        Button(workflowText("Delete local tag"), role: .destructive) {
+                            if let repo = store.repository, let selected = selection { pending = TagRequest(repo: repo, name: selected, remote: "", delete: true, local: true) }
+                        }.disabled(selection == nil)
+                        Button(workflowText("Preview remote deletion"), role: .destructive) { preview(delete: true) }.disabled(selection == nil || remotes.isEmpty)
+                    }
+                }.padding(8)
+            }
+            if !output.isEmpty {
+                ScrollView { Text(output).font(.system(.caption, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+                    .frame(maxHeight: 72)
+            }
+            Divider()
+            HStack(spacing: 8) {
+                if store.isBusy { ProgressView().controlSize(.small) }
+                Spacer()
+                Button(workflowText("Close")) { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+        }.controlSize(.small).disabled(store.isBusy).interactiveDismissDisabled(store.isBusy).padding(20).frame(width: 940, height: 640)
         .task { await reload() }
         .alert(item: $pending) { request in
             Alert(title: Text(workflowText("Confirm repository change")), message: Text(request.name + "\n" + request.remote + "\n" + output), primaryButton: .destructive(Text(workflowText("Continue"))) { publish(request) }, secondaryButton: .cancel(Text(workflowText("Cancel"))))
         }
     }
+    private func field(_ label: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(workflowText(label)).font(.callout)
+            TextField(workflowText(label), text: text).textFieldStyle(.roundedBorder)
+        }
+    }
     private func reload() async {
+        loading = true
+        defer { loading = false }
         guard let repo = store.repository else { return }; let token = UUID(); reloadID = token
         do { let newTags = try await repo.managedTags(); let newRemotes = try await repo.workflowRead(["remote"]).split(separator: "\n").map(String.init); guard reloadID == token, store.repositoryURL == repo.url else { return }; tags = newTags; remotes = newRemotes; if let selection, !tags.contains(where: { $0.name == selection }) { self.selection = nil }; if !remotes.contains(remote) { remote = remotes.first ?? "" } } catch { output = error.localizedDescription }
     }

@@ -5,3 +5,13 @@
 "next" = "下一页";
 "position" = "从第 %d 行开始 · 字节 %lld / %lld";
 "readonly" = "只读 · 按块读取 UTF-8";
+"historySupport" = "HEAD/索引/冲突版本按不可变 blob 导出临时文件，再按块读取。";
+"revision" = "版本";
+"worktree" = "工作区";
+"head" = "HEAD";
+"index" = "索引";
+"base" = "共同祖先";
+"ours" = "我们的版本";
+"theirs" = "他们的版本";
+"cancel" = "取消";
+"cancelled" = "已取消流式读取。请重新加载以继续。";

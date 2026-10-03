@@ -3,6 +3,7 @@ import GitCore
 import RayGitLocalization
 
 func workflowText(_ key: String) -> String { L10n.text(key, table: "Workflow") }
+func panelText(_ key: String) -> String { L10n.text(key, table: "VisualPanels") }
 
 struct RepositoryTools: View {
     @ObservedObject var store: RepositoryStore
@@ -11,33 +12,111 @@ struct RepositoryTools: View {
     @State private var first = "HEAD~1"
     @State private var second = "HEAD"
     @State private var output = ""
+    @State private var resultFailed = false
     @State private var busy = false
     @State private var confirm = false
     @State private var compared: (String, String)?
+    @State private var inspected: (String?, String)?
     @State private var pending: (GitRepository, RepositoryWorkflow, String, String)?
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack { Text(workflowText("Repository Tools")).font(.title2); Spacer(); Button(workflowText("Close")) { dismiss() }.disabled(busy) }
-            Picker(workflowText("Operation"), selection: $operation) {
-                Section(workflowText("Inspect")) { ForEach(RepositoryWorkflow.allCases.filter { !$0.writes }) { item in Text(workflowText(item.rawValue)).tag(item) } }
-                Section(workflowText("Change")) { ForEach(RepositoryWorkflow.allCases.filter { $0.writes }) { item in Text(workflowText(item.rawValue)).tag(item) } }
-            }.disabled(busy).onChange(of: operation) { _, _ in output = ""; compared = nil; first = operation == .compare ? "HEAD~1" : ""; second = operation == .compare || operation == .blame ? "HEAD" : "" }
-            Text(workflowText(operation.rawValue + ".help")).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-            if !firstLabel.isEmpty, operation != .partialStash { TextField(workflowText(firstLabel), text: $first).textFieldStyle(.roundedBorder).disabled(busy) }
-            if !secondLabel.isEmpty { TextField(workflowText(secondLabel), text: $second).textFieldStyle(.roundedBorder).disabled(busy) }
-            if operation == .partialStash || operation == .interactiveRebase { TextEditor(text: operation == .interactiveRebase ? $second : $first).font(.system(.caption, design: .monospaced)).frame(height: operation == .interactiveRebase ? 180 : 90).disabled(busy) }
-            HStack { if busy { ProgressView().controlSize(.small) }; Spacer(); Button(workflowText(operation.writes ? "Run change…" : "Read")) { if operation.writes, let repo = store.repository { pending = (repo, operation, first, second); confirm = true } else if let repo = store.repository { run(repo, operation, first, second) } }.disabled(busy || store.isBusy || store.repository == nil || (!firstLabel.isEmpty && first.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) || (operation == .partialStash && first.isEmpty) || (operation == .interactiveRebase && second.isEmpty)) }
-            if operation == .interactiveRebase { Button(workflowText("Load rebase plan")) { loadPlan() }.disabled(busy || store.isBusy || first.isEmpty) }
-            Divider()
-            if operation == .compare, let refs = compared, let repo = store.repository { ReferenceChangesView(repository: repo, left: refs.0, right: refs.1).id(refs.0 + "\0" + refs.1) } else if operation == .compare { Text(output).textSelection(.enabled) } else if operation == .reflog || operation == .blame { HistoricalRecordsView(text: output, repository: store.repository) } else { ScrollView([.vertical, .horizontal]) { Text(output).font(.system(size: 12, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) } }
-        }.onChange(of: confirm) { _, value in if !value { pending = nil } }.interactiveDismissDisabled(busy).padding(20).frame(width: 850, height: 650)
-        .alert(workflowText("Confirm repository change"), isPresented: $confirm) { Button(workflowText("Cancel"), role: .cancel) { pending = nil }; Button(workflowText("Continue"), role: operation == .resetHard ? .destructive : nil) { if let request = pending { pending = nil; run(request.0, request.1, request.2, request.3) } } } message: { Text(workflowText(operation.rawValue) + "\n" + first + "\n" + second + "\n" + workflowText(operation.rawValue + ".help")) }
+        VStack(alignment: .leading, spacing: 16) {
+            Text(workflowText("Repository Tools")).font(.title2.weight(.semibold))
+            VStack(alignment: .leading, spacing: 12) {
+                Picker(workflowText("Operation"), selection: $operation) {
+                    Section(workflowText("Inspect")) { ForEach(RepositoryWorkflow.allCases.filter { !$0.writes }) { item in Text(workflowText(item.rawValue)).tag(item) } }
+                    Section(workflowText("Change")) { ForEach(RepositoryWorkflow.allCases.filter { $0.writes }) { item in Text(workflowText(item.rawValue)).tag(item) } }
+                }
+                .fixedSize(horizontal: true, vertical: false)
+                .disabled(busy || store.isBusy)
+                .onChange(of: operation) { _, _ in
+                    output = ""; resultFailed = false; compared = nil; inspected = nil
+                    first = operation == .compare ? "HEAD~1" : ""
+                    second = operation == .compare || operation == .blame ? "HEAD" : ""
+                }
+                if operation == .interactiveRebase {
+                    RebaseWorkflowView(store: store, onClose: { dismiss() })
+                } else {
+                    Text(workflowText(operation.rawValue + ".help"))
+                        .font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                    if !firstLabel.isEmpty, operation != .partialStash { field(firstLabel, text: $first) }
+                    if !secondLabel.isEmpty { field(secondLabel, text: $second) }
+                    if operation == .partialStash {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(workflowText("File path")).font(.callout)
+                            TextEditor(text: $first).font(.system(.caption, design: .monospaced))
+                                .frame(height: 88).overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor)))
+                                .disabled(busy || store.isBusy)
+                        }
+                    }
+                }
+            }
+            if operation != .interactiveRebase {
+                GroupBox(resultFailed ? L10n.text("Operation failed") : panelText("Results")) { results.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading) }
+                    .frame(maxHeight: .infinity)
+            }
+            if operation != .interactiveRebase {
+                Divider()
+                HStack(spacing: 8) {
+                    if busy || store.isBusy { ProgressView().controlSize(.small) }
+                    Spacer()
+                    Button(workflowText("Close")) { dismiss() }
+                        .keyboardShortcut(.cancelAction).disabled(busy || store.isBusy)
+                    Button(workflowText(operation.writes ? "Run change…" : "Read")) {
+                        if operation.writes, let repo = store.repository { pending = (repo, operation, first, second); confirm = true }
+                        else if let repo = store.repository { run(repo, operation, first, second) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(busy || store.isBusy || store.repository == nil || (!firstLabel.isEmpty && first.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) || (operation == .partialStash && first.isEmpty))
+                }
+            }
+        }
+        .controlSize(.small)
+        .onChange(of: confirm) { _, value in if !value { pending = nil } }
+        .interactiveDismissDisabled(busy || store.isBusy).padding(20).frame(width: 850, height: 640)
+        .alert(workflowText("Confirm repository change"), isPresented: $confirm) {
+            Button(workflowText("Cancel"), role: .cancel) { pending = nil }
+            Button(workflowText("Continue"), role: operation == .resetHard ? .destructive : nil) {
+                if let request = pending { pending = nil; run(request.0, request.1, request.2, request.3) }
+            }
+        } message: { Text(workflowText(operation.rawValue) + "\n" + first + "\n" + second + "\n" + workflowText(operation.rawValue + ".help")) }
+    }
+    private func field(_ label: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(workflowText(label)).font(.callout)
+            TextField(workflowText(label), text: text).textFieldStyle(.roundedBorder)
+                .disabled(busy || store.isBusy)
+        }
+    }
+    @ViewBuilder private var results: some View {
+        if busy {
+            VStack(spacing: 12) { ProgressView().controlSize(.small); Text(panelText("Running operation…")).foregroundStyle(.secondary) }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if resultFailed {
+            ScrollView {
+                Text(output).font(.system(size: 12, design: .monospaced)).foregroundStyle(.orange).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+            }
+        } else if operation == .compare, let refs = compared, let repo = store.repository {
+            ReferenceChangesView(repository: repo, left: refs.0, right: refs.1).id(refs.0 + "\0" + refs.1)
+        } else if (operation == .reflog || operation == .blame), let inspection = inspected, let repo = store.repository {
+            StructuredHistoryView(repository: repo, blamePath: inspection.0, revision: inspection.1).id((inspection.0 ?? "") + inspection.1)
+        } else if output.isEmpty {
+            VStack(spacing: 8) {
+                Image(systemName: "doc.text.magnifyingglass").font(.title2).foregroundStyle(.tertiary)
+                Text(panelText("Run an operation to view its result.")).font(.callout).foregroundStyle(.secondary)
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView([.vertical, .horizontal]) {
+                Text(output).font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+            }
+        }
     }
     private func loadPlan() {
         guard let repo = store.repository, !store.isBusy else { return }; let base = first
         busy = true; store.isBusy = true
         Task {
-            do { let plan = try await repo.advancedOperation(.rebasePlan, first: base, second: ""); if operation == .interactiveRebase && first == base && store.repositoryURL == repo.url { second = plan } } catch { output = error.localizedDescription }
+            do { let plan = try await repo.advancedOperation(.rebasePlan, first: base, second: ""); if operation == .interactiveRebase && first == base && store.repositoryURL == repo.url { second = plan } } catch { resultFailed = true; output = error.localizedDescription }
             busy = false; store.isBusy = false
         }
     }
@@ -75,10 +154,10 @@ struct RepositoryTools: View {
     }
     private func run(_ repository: GitRepository, _ op: RepositoryWorkflow, _ a: String, _ b: String) {
         guard !store.isBusy, store.repositoryURL == repository.url else { return }
-        busy = true; store.isBusy = true; output = ""
+        busy = true; store.isBusy = true; output = ""; resultFailed = false
         Task {
-            do { output = try await repository.advancedOperation(op, first: a, second: b); if op == .compare { compared = (a, b) }; if output.isEmpty { output = workflowText("Completed") };  }
-            catch { output = error.localizedDescription }
+            do { if op == .blame || op == .reflog { inspected = (op == .blame ? a : nil, b.isEmpty ? "HEAD" : b); output = "" } else { output = try await repository.advancedOperation(op, first: a, second: b) }; if op == .compare { compared = (a, b) }; if output.isEmpty { output = workflowText("Completed") };  }
+            catch { resultFailed = true; output = error.localizedDescription }
             busy = false; store.isBusy = false; if op.writes { await store.refresh() }
         }
     }
@@ -93,14 +172,37 @@ struct CreateRepositorySheet: View {
     @State private var busy = false
     @State private var error = ""
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(workflowText("Create Repository")).font(.headline)
-            Toggle(workflowText("Clone existing repository"), isOn: $clone)
-            if clone { TextField(workflowText("Clone URL or local path"), text: $source) }
-            HStack { TextField(workflowText("Destination folder"), text: $destination); Button(workflowText("Choose…")) { let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true; if panel.runModal() == .OK { destination = panel.url?.path ?? "" } } }
-            Text(error).foregroundStyle(.orange).textSelection(.enabled)
-            HStack { if busy { ProgressView().controlSize(.small) }; Spacer(); Button(workflowText("Cancel")) { dismiss() }.disabled(busy); Button(workflowText("Create")) { create() }.disabled(busy || destination.isEmpty || (clone && source.isEmpty)) }
-        }.disabled(busy).interactiveDismissDisabled(busy).padding(24).frame(width: 600)
+        VStack(alignment: .leading, spacing: 16) {
+            Text(workflowText("Create Repository")).font(.title2.weight(.semibold))
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle(workflowText("Clone existing repository"), isOn: $clone)
+                if clone {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(workflowText("Clone URL or local path")).font(.callout)
+                        TextField(workflowText("Clone URL or local path"), text: $source).textFieldStyle(.roundedBorder)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(workflowText("Destination folder")).font(.callout)
+                    HStack(spacing: 8) {
+                        TextField(workflowText("Destination folder"), text: $destination).textFieldStyle(.roundedBorder)
+                        Button(workflowText("Choose…")) {
+                            let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
+                            if panel.runModal() == .OK { destination = panel.url?.path ?? "" }
+                        }
+                    }
+                }
+            }.disabled(busy)
+            if !error.isEmpty { Text(error).font(.callout).foregroundStyle(.orange).textSelection(.enabled) }
+            Divider()
+            HStack(spacing: 8) {
+                if busy { ProgressView().controlSize(.small) }
+                Spacer()
+                Button(workflowText("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
+                Button(workflowText("Create")) { create() }.buttonStyle(.borderedProminent)
+                    .disabled(busy || destination.isEmpty || (clone && source.isEmpty))
+            }
+        }.controlSize(.small).interactiveDismissDisabled(busy).padding(20).frame(width: 600)
     }
     private func create() {
         let cloning = clone, cloneSource = source, target = destination

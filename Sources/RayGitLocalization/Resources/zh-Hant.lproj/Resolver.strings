@@ -1,0 +1,18 @@
+"No unresolved conflicts" = "沒有未解決的衝突";
+"Conflict %d of %d" = "衝突 %d / %d";
+"Previous conflict" = "上一個衝突";
+"Next conflict" = "下一個衝突";
+"Use Ours" = "採用我方（Stage 2）";
+"Use Theirs" = "採用對方（Stage 3）";
+"Ours → Theirs" = "我方 → 對方";
+"Theirs → Ours" = "對方 → 我方";
+"Use Base" = "採用基準";
+"Lines %d–%d" = "第 %d–%d 行";
+"Apply to the current conflict only" = "只套用到目前衝突區塊";
+"Resolver layout" = "衝突檢視佈局";
+"Ours + Result" = "我方 + 結果";
+"All three" = "全部三欄";
+"Result + Theirs" = "結果 + 對方";
+"Resolve Conflict" = "解決衝突";
+"Incomplete conflict markers — repair the result manually" = "衝突標記不完整，請手動修復合併結果";
+"Ours = Stage 2; Theirs = Stage 3. During rebase, Ours is the upstream side." = "我方 = Stage 2；對方 = Stage 3。變基時，我方指上游版本。";

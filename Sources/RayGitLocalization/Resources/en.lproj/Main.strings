@@ -74,3 +74,8 @@
 "pull" = "Pull";
 "push" = "Push";
 "dismissError" = "Dismiss Error";
+
+"customizeToolbar" = "Customize Toolbar…";
+
+"toolbarFlexibleSpace" = "Flexible Space";
+"toolbarSeparator" = "Vertical Separator";

@@ -74,3 +74,8 @@
 "pull" = "Pull";
 "push" = "Push";
 "dismissError" = "關閉錯誤提示";
+
+"customizeToolbar" = "自訂工具列…";
+
+"toolbarFlexibleSpace" = "彈性空白";
+"toolbarSeparator" = "垂直分隔線";

@@ -1,0 +1,10 @@
+"Results" = "Results";
+"Running operation…" = "Running operation…";
+"Run an operation to view its result." = "Run an operation to view its result.";
+"Rebase plan" = "Rebase plan";
+"Load a base revision to edit its rebase plan." = "Load a base revision to edit its rebase plan.";
+"Loading tags…" = "Loading tags…";
+"No local tags" = "No local tags";
+"Tag synchronization" = "Tag synchronization";
+"No configured remotes" = "No configured remotes";
+"Select a tag to synchronize or delete." = "Select a tag to synchronize or delete.";

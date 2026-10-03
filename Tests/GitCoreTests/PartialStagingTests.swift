@@ -2,6 +2,42 @@ import XCTest
 @testable import GitCore
 
 final class PartialStagingTests: XCTestCase {
+    func testMultipleHunksCRLFModeAndNewFileWithoutFinalNewline() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        for args in [["init"], ["config", "user.name", "Test"], ["config", "user.email", "test@example.invalid"], ["config", "core.autocrlf", "false"], ["config", "core.filemode", "true"]] { _ = try await GitProcess.run(at: dir, arguments: args) }
+        let repo = GitRepository(url: dir), file = dir.appendingPathComponent("crlf")
+        let original = (1...50).map { "line\($0)" }
+        try Data((original.joined(separator: "\r\n") + "\r\n").utf8).write(to: file)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path)
+        try await repo.stage(paths: ["crlf"]); try await repo.commit(message: "base")
+        var working = original.filter { $0 != "line45" }
+        working.insert("not selected", at: 25); working.insert("chosen", at: 0)
+        try Data((working.joined(separator: "\r\n") + "\r\n").utf8).write(to: file)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
+        let partial = try await repo.partialStaging(path: "crlf", unstage: false)
+        XCTAssertGreaterThanOrEqual(partial.hunks.count, 3)
+        let selected = partial.hunks.flatMap(\.lines).filter { $0.text == "+chosen\r" || $0.text == "-line45\r" }
+        XCTAssertEqual(selected.count, 2)
+        try await repo.applyPartialStaging(partial, selectedLines: Set(selected.map(\.id)))
+        let expected = (["chosen"] + original.filter { $0 != "line45" }).joined(separator: "\r\n") + "\r\n"
+        var state = try await repo.fileComparison(path: "crlf")
+        XCTAssertEqual(state.index.data, Data(expected.utf8)); XCTAssertTrue(state.worktree.text?.contains("not selected") == true)
+        let mode = try await GitProcess.run(at: dir, arguments: ["ls-files", "--stage", "--", "crlf"]).text
+        XCTAssertTrue(mode.hasPrefix("100644 "), "selected content must not stage chmod")
+        try await repo.saveIndex(path: "crlf", text: "saved\r\nindex\r\n", expected: state.index)
+        state = try await repo.fileComparison(path: "crlf"); XCTAssertEqual(state.index.data, Data("saved\r\nindex\r\n".utf8))
+        let newFile = dir.appendingPathComponent("no final newline")
+        try Data("first\nlast".utf8).write(to: newFile)
+        let newPartial = try await repo.partialStaging(path: "no final newline", unstage: false)
+        let last = newPartial.hunks.flatMap(\.lines).first { $0.text == "+last" }!
+        try await repo.applyPartialStaging(newPartial, selectedLines: [last.id])
+        state = try await repo.fileComparison(path: "no final newline"); XCTAssertEqual(state.index.data, Data("last".utf8))
+        let delete = try await repo.partialStaging(path: "no final newline", unstage: true)
+        try await repo.applyPartialStaging(delete, selectedLines: Set(delete.hunks.flatMap(\.lines).filter(\.isChange).map(\.id)))
+        state = try await repo.fileComparison(path: "no final newline"); XCTAssertFalse(state.index.exists); XCTAssertEqual(state.worktree.data, Data("first\nlast".utf8))
+    }
     func testStagedRenameKeepsRenameAndPartiallyStagesContent() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -20,7 +56,15 @@ final class PartialStagingTests: XCTestCase {
         XCTAssertEqual(state.index.text, base + "selected\n"); XCTAssertEqual(state.worktree.text, base + "selected\nunstaged\n")
         let status = try await repo.status(); XCTAssertEqual(status.first { $0.path == "new name" }?.originalPath, "old")
         XCTAssertFalse(FileManager.default.fileExists(atPath: old.path))
-        let undo = try await repo.partialStaging(path: "new name", unstage: true); XCTAssertNotNil(undo.unavailableReason)
+        let undo = try await repo.partialStaging(path: "new name", unstage: true)
+        XCTAssertNil(undo.unavailableReason)
+        let undoSelected = undo.hunks.flatMap(\.lines).first { $0.text == "-selected" }!
+        try await repo.applyPartialStaging(undo, selectedLines: [undoSelected.id])
+        let unstaged = try await repo.fileComparison(path: "new name")
+        XCTAssertEqual(unstaged.index.text, base)
+        XCTAssertEqual(unstaged.worktree.text, base + "selected\nunstaged\n")
+        let identity = try await repo.status()
+        XCTAssertEqual(identity.first { $0.path == "new name" }?.originalPath, "old", "partial unstage retains rename identity")
     }
     func testNewDeletedAndPartiallyUnstagedNewFile() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

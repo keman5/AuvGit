@@ -1,14 +1,29 @@
 import Foundation
 public struct ManagedTag: Identifiable, Sendable {
     public let name: String
-    public let hash: String
+    public let objectHash: String
+    public let commitHash: String?
     public let message: String
     public var id: String { name }
 }
 public extension GitRepository {
     func managedTags() async throws -> [ManagedTag] {
-        let text = try await workflowRead(["for-each-ref", "--format=%(refname:short)%00%(objectname)%00%(contents:subject)", "refs/tags"])
-        return text.split(separator: "\n").compactMap { line in let parts = line.split(separator: "\0", maxSplits: 2, omittingEmptySubsequences: false).map(String.init); guard parts.count == 3 else { return nil }; return ManagedTag(name: parts[0], hash: parts[1], message: parts[2]) }
+        let text = try await workflowRead(["for-each-ref", "--format=%(refname:short)%00%(objectname)%00%(objecttype)%00%(contents:subject)", "refs/tags"])
+        var tags: [ManagedTag] = []
+        for line in text.split(separator: "\n") {
+            let parts = line.split(separator: "\0", maxSplits: 3, omittingEmptySubsequences: false).map(String.init)
+            guard parts.count == 4 else { continue }
+            let commitHash: String?
+            if parts[2] == "commit" { commitHash = parts[1] }
+            else if parts[2] == "tag" {
+                // Peel the captured immutable object, including nested annotated
+                // tags. A blob/tree tag is valid, but has no commit to display.
+                let result = try await GitProcess.run(at: url, arguments: ["rev-parse", "--verify", "--end-of-options", parts[1] + "^{commit}"], allowedCodes: [0, 128])
+                commitHash = result.code == 0 ? result.text.trimmingCharacters(in: .newlines) : nil
+            } else { commitHash = nil }
+            tags.append(ManagedTag(name: parts[0], objectHash: parts[1], commitHash: commitHash, message: parts[3]))
+        }
+        return tags
     }
     func createManagedTag(name: String, revision: String, message: String, signed: Bool) async throws {
         try await validateManagedTag(name)

@@ -207,3 +207,26 @@
 "Git Flow main, develop and task branches must be distinct." = "Git Flow のメイン・開発・作業ブランチには異なる名前が必要です。";
 
 "Invalid Git Flow name." = "Git Flow の名前が無効です。";
+
+"Automatic" = "自動";
+"Ours (HEAD)" = "自分側（HEAD）";
+"Merge Result (Editable)" = "マージ結果（編集可）";
+"Merge Result (Read-only)" = "マージ結果（読み取り専用）";
+
+// Explicit draft-only conflict choices
+"Entire file draft:" = "ファイル全体の下書き：";
+"Take Ours (Stage 2)" = "Ours を採用（ステージ 2）";
+"Take Theirs (Stage 3)" = "Theirs を採用（ステージ 3）";
+"Take Base (Stage 1)" = "共通祖先を採用（ステージ 1）";
+"Choices change the draft only. Save, then mark resolved to stage it." = "選択は下書きだけを変更します。保存後、解決済みにするとステージされます。";
+"Replace unsaved draft with selected version?" = "未保存の下書きを選択した版で置き換えますか？";
+"Replace Draft" = "下書きを置き換える";
+"This replaces the entire editor draft. Disk and index are unchanged until you save or mark resolved." = "エディタの下書き全体を置き換えます。保存または解決済みにするまで、ディスクとインデックスは変更されません。";
+"Resolve Conflict Block" = "競合ブロックを解決";
+"Conflict Block %d (Lines %d–%d)" = "競合ブロック %d（%d–%d 行）";
+"Replace only the selected marker block; preserve the rest of the draft." = "選択した競合マーカーブロックだけを置き換え、下書きの他の部分を保持します。";
+"Ours Then Theirs" = "Ours の後に Theirs";
+"Theirs Then Ours" = "Theirs の後に Ours";
+"Base (Stage 1)" = "共通祖先（ステージ 1）";
+"Ours (Stage 2)" = "Ours（ステージ 2）";
+"Theirs (Stage 3)" = "Theirs（ステージ 3）";

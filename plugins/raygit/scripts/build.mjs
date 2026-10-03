@@ -6,11 +6,11 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 process.chdir(root);
 await mkdir('dist', { recursive: true });
 const ui = await build({ entryPoints: ['ui/app.mjs'], bundle: true, minify: true, format: 'iife', platform: 'browser', target: 'es2022', write: false, legalComments: 'inline' });
-const css = await readFile('ui/style.css', 'utf8');
+const css = await readFile('node_modules/@xterm/xterm/css/xterm.css', 'utf8') + '\n' + await readFile('ui/style.css', 'utf8');
 const template = await readFile('ui/index.html', 'utf8');
-const html = template.replace('/* RAYGIT_STYLE */', css).replace('/* RAYGIT_SCRIPT */', ui.outputFiles[0].text.replace(/<\/script/gi, '<\\/script'));
+const html = template.replace('/* RAYGIT_STYLE */', () => css).replace('/* RAYGIT_SCRIPT */', () => ui.outputFiles[0].text.replace(/<\/script/gi, '<\\/script'));
 await writeFile('dist/app.html', html);
-await build({ entryPoints: ['src/main.mjs'], outfile: 'dist/server.cjs', bundle: true, minify: true, platform: 'node', target: 'node22', format: 'cjs', define: { RAYGIT_HTML: JSON.stringify(html) }, legalComments: 'inline' });
+await build({ entryPoints: ['src/main.mjs'], outfile: 'dist/server.cjs', bundle: true, minify: true, platform: 'node', target: 'node22', format: 'cjs', external: ['node-pty'], define: { RAYGIT_HTML: JSON.stringify(html) }, legalComments: 'inline' });
 const manifest = JSON.parse(await readFile('plugin.json', 'utf8'));
 const compatibility = { name: manifest.name, version: manifest.version, description: manifest.description, author: manifest.author,
   interface: manifest.extensions['com.openai'].interface, skills: './skills/', mcpServers: './.mcp.json' };

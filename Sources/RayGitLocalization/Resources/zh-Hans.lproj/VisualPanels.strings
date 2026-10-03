@@ -1,0 +1,10 @@
+"Results" = "结果";
+"Running operation…" = "正在执行操作…";
+"Run an operation to view its result." = "执行操作后将在此显示结果。";
+"Rebase plan" = "变基计划";
+"Load a base revision to edit its rebase plan." = "加载基准版本后可编辑变基计划。";
+"Loading tags…" = "正在加载标签…";
+"No local tags" = "没有本地标签";
+"Tag synchronization" = "标签同步";
+"No configured remotes" = "未配置远程仓库";
+"Select a tag to synchronize or delete." = "选择要同步或删除的标签。";

@@ -46,7 +46,10 @@ public enum L10n {
     public static func text(_ key: String, table: String = "App", language: AppLanguage, arguments: [CVarArg]) -> String {
         let resolved = language == .system ? self.language : language
         func lookup(_ code: String) -> String? {
-            guard let path = resourceBundle.path(forResource: code, ofType: "lproj"), let bundle = Bundle(path: path) else { return nil }
+            // Native SwiftPM lowercases locale resource directories; Xcode preserves case.
+            let path = resourceBundle.path(forResource: code, ofType: "lproj")
+                ?? resourceBundle.path(forResource: code.lowercased(), ofType: "lproj")
+            guard let path, let bundle = Bundle(path: path) else { return nil }
             let sentinel = "__RAYGIT_MISSING__"
             let value = bundle.localizedString(forKey: key, value: sentinel, table: table)
             return value == sentinel ? nil : value

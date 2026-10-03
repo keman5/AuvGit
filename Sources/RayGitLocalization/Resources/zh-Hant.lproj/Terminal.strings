@@ -1,0 +1,11 @@
+"title" = "終端機";
+"toggle" = "顯示或隱藏終端機（⌘`）";
+"hide" = "隱藏終端機（保留執行中的工作階段）";
+"close" = "關閉終端機工作階段（停止 Shell 和工作）";
+"closeSession" = "關閉工作階段：%@";
+"sessions" = "%ld / %ld 個工作階段";
+"limit" = "最多可執行 %ld 個終端機工作階段。請先關閉現有工作階段再啟動新的工作階段。";
+"start" = "啟動終端機";
+"failed" = "無法啟動 Shell，請檢查 Shell 路徑與儲存庫目錄。";
+"exited" = "Shell 已結束（狀態 %d）。";
+"restart" = "重新啟動 Shell";

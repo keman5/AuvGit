@@ -1,0 +1,11 @@
+"title" = "终端";
+"toggle" = "显示或隐藏终端（⌘`）";
+"hide" = "隐藏终端（保留运行中的会话）";
+"close" = "关闭终端会话（停止 Shell 和任务）";
+"closeSession" = "关闭会话：%@";
+"sessions" = "%ld / %ld 个会话";
+"limit" = "最多可运行 %ld 个终端会话。请先关闭已有会话再启动新会话。";
+"start" = "启动终端";
+"failed" = "无法启动 Shell，请检查 Shell 路径和仓库目录。";
+"exited" = "Shell 已退出（状态 %d）。";
+"restart" = "重新启动 Shell";

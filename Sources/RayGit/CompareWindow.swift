@@ -8,7 +8,8 @@ func interactionText(_ key: String, _ arguments: CVarArg...) -> String {
     L10n.text(key, table: "Interactions", arguments: arguments)
 }
 func compareText(_ key: String, _ arguments: CVarArg...) -> String {
-    L10n.text(key, table: "Compare", arguments: arguments)
+    let text = L10n.text(key, table: "Compare", arguments: arguments)
+    return text == key ? L10n.text(key, table: "CompareExtras", arguments: arguments) : text
 }
 extension Notification.Name { static let rayGitWorktreeChanged = Notification.Name("RayGitWorktreeChanged") }
 
@@ -100,7 +101,10 @@ final class FileCompareSession: ObservableObject {
     @Published var status = ""
     @Published var patch = ""
     @Published var ignoreWhitespace = false
-    var isDirty: Bool { (savedWorktree?.text != nil && draft != savedWorktree?.text) || (snapshot?.index.text != nil && indexDraft != snapshot?.index.text) }
+    @Published var preferredEncoding: ComparisonEncoding?
+    @Published var pendingExternalResult: String?
+    var displayIndex: FileRevisionContent? { snapshot.map { value in preferredEncoding.map { value.index.reinterpreting(as: $0) } ?? value.index } }
+    var isDirty: Bool { savedWorktree?.text != nil && draft != savedWorktree?.text }
     var canEdit: Bool { savedWorktree?.isEditable == true }
     init(repository: GitRepository, path: String) { self.repository = repository; self.path = path }
     func reload() async {
@@ -109,7 +113,10 @@ final class FileCompareSession: ObservableObject {
         defer { isBusy = false }
         do {
             let snapshot = try await repository.fileComparison(path: path)
-            self.snapshot = snapshot; savedWorktree = snapshot.worktree; draft = snapshot.worktree.text ?? ""; indexDraft = snapshot.index.text ?? ""
+            self.snapshot = snapshot
+            let working = preferredEncoding.map { snapshot.worktree.reinterpreting(as: $0) } ?? snapshot.worktree
+            let indexed = preferredEncoding.map { snapshot.index.reinterpreting(as: $0) } ?? snapshot.index
+            savedWorktree = working; draft = working.text ?? ""; indexDraft = indexed.text ?? ""
             await reloadPatch(); status = compareText("Loaded from disk")
         } catch { self.error = compareText(error.localizedDescription) }
     }
@@ -130,18 +137,12 @@ final class FileCompareSession: ObservableObject {
         isBusy = true; error = nil
         defer { isBusy = false }
         do {
-            if let index = snapshot?.index, let indexText = index.text, indexDraft != indexText {
-                try await repository.saveIndex(path: path, text: indexDraft, expected: index)
-                snapshot = try await repository.fileComparison(path: path)
-                indexDraft = snapshot?.index.text ?? ""
-                NotificationCenter.default.post(name: .rayGitWorktreeChanged, object: repository.url)
-            }
             if draft != expected.text && canEdit {
-                let saved = try await repository.saveWorktree(path: path, text: draft, expected: expected)
+                let saved = try await repository.saveWorktree(path: path, text: draft, expected: expected, format: preferredEncoding.map { ComparisonTextFormat(encoding: $0, lineEnding: ComparisonTextDecoder.format(of: expected.data ?? Data(), encoding: preferredEncoding).lineEnding) })
                 savedWorktree = saved; draft = saved.text ?? ""
             }
             snapshot = try await repository.fileComparison(path: path)
-            indexDraft = snapshot?.index.text ?? ""
+            indexDraft = displayIndex?.text ?? ""
             await reloadPatch(); status = compareText("Saved editor drafts")
             NotificationCenter.default.post(name: .rayGitWorktreeChanged, object: repository.url)
             return true
@@ -177,7 +178,7 @@ final class FileCompareSession: ObservableObject {
         guard let expected = savedWorktree else { return }
         isBusy = true; error = nil
         do {
-            if resolve || snapshot?.isConflict == true { try await repository.markResolved(path: path, expected: expected) }
+            if resolve || snapshot?.isConflict == true { try await repository.markResolved(path: path, expected: expected, encoding: preferredEncoding) }
             else {
                 let current = try await repository.fileComparison(path: path)
                 guard current.worktree.data == expected.data, current.index.data == snapshot?.index.data else { throw GitError("The index or working tree changed. Reload before partial staging.") }
@@ -192,61 +193,95 @@ final class FileCompareSession: ObservableObject {
 private struct FileCompareContent: View {
     @ObservedObject var session: FileCompareSession
     @AppStorage(L10n.preferenceKey) private var language = "system"
-    @State private var layout = "three"
+    @State private var layout = "automatic"
     @State private var baseline = "index"
-    @State private var wrapLines = false
-    @State private var showNumbers = true
-    @State private var synchronize = true
+    @AppStorage("editor.wrapLines") private var wrapLines = false
+    @AppStorage("editor.showLineNumbers") private var showNumbers = true
+    @AppStorage("editor.synchronizeScroll") private var synchronize = true
     @State private var search = ""
     @State private var navigation = 0
     @State private var changeNavigation = 0
     @State private var confirmReload = false
     @State private var showBase = false
+    @StateObject private var resolver = ComparisonResolverState()
+    @State private var conflictLayout = "all"
     @State private var confirmMerge = false
+    @State private var pendingVersion: String?
+    @State private var confirmVersion = false
+    init(session: FileCompareSession) {
+        self.session = session
+        let preference = UserDefaults.standard.string(forKey: "editor.comparisonLayoutMode") ?? "automatic"
+        _layout = State(initialValue: ["automatic", "two", "three", "patch"].contains(preference) ? preference : "automatic")
+    }
+    private var resolvedLayout: String {
+        layout == "automatic" ? (session.snapshot?.presentation.layout == .three ? "three" : "two") : layout
+    }
     var body: some View {
         VStack(spacing: 0) {
             controls
             Divider()
             if let error = session.error {
-                HStack { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange); Text(error).textSelection(.enabled); Spacer(); Button { session.error = nil } label: { Image(systemName: "xmark") } }.font(.caption).padding(10).background(Color.orange.opacity(0.1))
+                HStack { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange); Text(error).textSelection(.enabled); Spacer(); Button { session.error = nil } label: { Image(systemName: "xmark") } }.font(.caption).controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8).background(Color.orange.opacity(0.1))
             }
             if session.snapshot?.isConflict == true {
-                HStack { Label(compareText("Conflict: edit the result, save, then mark resolved"), systemImage: "arrow.triangle.merge"); Spacer(); Toggle(compareText("Show merge base"), isOn: $showBase).toggleStyle(.checkbox) }.font(.caption).padding(8).background(Color.orange.opacity(0.1))
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Label(compareText("Conflict: edit the result, save, then mark resolved"), systemImage: "arrow.triangle.merge")
+                        Spacer()
+                        Toggle(compareText("Show merge base"), isOn: $showBase).toggleStyle(.checkbox)
+                    }
+                    ConflictResolverToolbar(state: resolver, blocks: ConflictDraft.blocks(in: session.draft), enabled: session.canEdit && !session.isBusy && layout != "patch", malformed: ConflictDraft.blocks(in: session.draft).isEmpty && ConflictDraft.hasConflictMarkers(in: session.draft))
+                    HStack {
+                        Picker(resolverText("Resolver layout"), selection: $conflictLayout) {
+                            Text(resolverText("Ours + Result")).tag("left")
+                            Text(resolverText("All three")).tag("all")
+                            Text(resolverText("Result + Theirs")).tag("right")
+                        }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 420)
+                        Spacer()
+                    }
+                    Text(resolverText("Ours = Stage 2; Theirs = Stage 3. During rebase, Ours is the upstream side.")).foregroundStyle(.secondary)
+                    Text(compareText("Choices change the draft only. Save, then mark resolved to stage it.")).foregroundStyle(.secondary)
+                }.font(.caption).controlSize(.small).padding(8).background(Color.orange.opacity(0.1))
             }
             if layout == "patch" {
                 if session.isDirty { Text(compareText("Patch shows saved disk content; save to update it")).font(.caption).foregroundStyle(.orange).padding(6) }
                 PartialStagingPane(session: session)
-            } else if let snapshot = session.snapshot, snapshot.worktree.exists, snapshot.worktree.data == nil, snapshot.worktree.unavailableReason == "Files larger than 2 MB are read-only." {
+            } else if let snapshot = session.snapshot, [snapshot.head, snapshot.index, snapshot.worktree, snapshot.base, snapshot.ours, snapshot.theirs].compactMap({ $0 }).contains(where: { $0.exists && $0.data == nil && $0.unavailableReason == "Files larger than 2 MB are read-only." }) {
                 StreamingComparisonView(repository: session.repository, path: session.path)
             } else if let snapshot = session.snapshot, MediaCompareView.supports(snapshot) {
                 MediaCompareView(snapshot: snapshot)
             } else if let snapshot = session.snapshot, [snapshot.head.data?.count ?? 0, snapshot.index.data?.count ?? 0, snapshot.worktree.data?.count ?? 0, snapshot.base?.data?.count ?? 0, snapshot.ours?.data?.count ?? 0, snapshot.theirs?.data?.count ?? 0].max()! > 2 * 1024 * 1024 {
-                PagedComparisonView(snapshot: snapshot)
+                PagedComparisonView(snapshot: snapshot, layout: layout, baseline: baseline, showBase: showBase)
             } else if session.snapshot != nil {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField(compareText("Find in files"), text: $search).textFieldStyle(.plain)
+                    TextField(compareText("Find in files"), text: $search).textFieldStyle(.roundedBorder).frame(maxWidth: 260)
+                        .onSubmit { navigation += 1 }
                     Button { navigation -= 1 } label: { Image(systemName: "chevron.up") }.help(compareText("Previous match")).disabled(search.isEmpty)
                     Button { navigation += 1 } label: { Image(systemName: "chevron.down") }.help(compareText("Next match")).disabled(search.isEmpty)
                     if !search.isEmpty { Button { search = "" } label: { Image(systemName: "xmark.circle") } }
-                }.padding(8)
+                    Spacer(minLength: 0)
+                }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 6).background(.bar)
                 Divider()
-                ComparisonEditor(columns: columns, wrapLines: wrapLines, showLineNumbers: showNumbers, synchronizeScroll: synchronize, search: search, navigation: navigation, changeNavigation: changeNavigation, onEdit: { id, text in if id == "worktree" { session.draft = text }; if id == "index" { session.indexDraft = text } }, languagePath: session.path)
+                ComparisonEditor(columns: columns, wrapLines: wrapLines, showLineNumbers: showNumbers, synchronizeScroll: synchronize, search: search, navigation: navigation, changeNavigation: changeNavigation, onEdit: { id, text in if id == "worktree" { session.draft = text } }, languagePath: session.path, resolver: session.snapshot?.isConflict == true ? resolver : nil)
             } else { Spacer(); if session.isBusy { ProgressView() } else { Text(compareText("No file loaded")).foregroundStyle(.secondary) }; Spacer() }
             Divider()
             HStack {
                 if session.isBusy { ProgressView().controlSize(.mini) }
                 Text(session.isDirty ? compareText("Unsaved changes") : session.savedWorktree?.unavailableReason.map { compareText($0) } ?? session.status)
                 Spacer()
-                Text(session.path).lineLimit(1).truncationMode(.middle)
-                Text("UTF-8").foregroundStyle(.secondary).opacity(session.canEdit ? 1 : 0)
-            }.font(.caption).padding(.horizontal, 10).frame(height: 28)
+                Text(session.preferredEncoding?.rawValue ?? session.savedWorktree?.data.map { ComparisonTextDecoder.format(of: $0).encoding.rawValue } ?? "").foregroundStyle(.secondary)
+            }.font(.caption).padding(.horizontal, 12).frame(height: 28)
         }.environment(\.locale, L10n.locale)
             .task { await session.reload() }
             .alert(compareText("Replace working tree draft with auto merge?"), isPresented: $confirmMerge) {
                 Button(compareText("Auto Merge"), role: .destructive) { Task { await session.autoMerge() } }
                 Button(compareText("Cancel"), role: .cancel) {}
             }
+            .alert(compareText("Replace unsaved draft with selected version?"), isPresented: $confirmVersion) {
+                Button(compareText("Replace Draft"), role: .destructive) { if let pendingVersion { session.draft = pendingVersion }; pendingVersion = nil }
+                Button(compareText("Cancel"), role: .cancel) { pendingVersion = nil }
+            } message: { Text(compareText("This replaces the entire editor draft. Disk and index are unchanged until you save or mark resolved.")) }
             .alert(compareText("Discard unsaved changes and reload?"), isPresented: $confirmReload) {
                 Button(compareText("Reload"), role: .destructive) { Task { await session.reload() } }
                 Button(compareText("Cancel"), role: .cancel) {}
@@ -254,60 +289,75 @@ private struct FileCompareContent: View {
     }
     private var controls: some View {
         VStack(spacing: 8) {
-            HStack(spacing: 10) {
-                Text(session.path).font(.headline).lineLimit(1).truncationMode(.middle)
+            HStack(spacing: 8) {
+                Text(session.path).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.middle).help(session.path)
                 if session.isDirty { Circle().fill(.orange).frame(width: 7, height: 7) }
                 Spacer()
                 if session.snapshot?.isConflict == true { Button(compareText("Auto Merge")) { if session.draft != session.savedWorktree?.text { confirmMerge = true } else { Task { await session.autoMerge() } } }.disabled(session.isBusy) }
                 Button(compareText("Reload")) { if session.isDirty { confirmReload = true } else { Task { await session.reload() } } }.disabled(session.isBusy)
                 Button(compareText("Save")) { Task { await session.save() } }.keyboardShortcut("s").disabled(!session.isDirty || session.isBusy)
-                Button(compareText(session.snapshot?.isConflict == true ? "Save & Mark Resolved" : "Save & Stage")) { Task { await session.stage(resolve: session.snapshot?.isConflict == true) } }.disabled(session.isBusy || !session.canEdit)
+                Button(compareText(session.snapshot?.isConflict == true ? "Save & Mark Resolved" : "Save & Stage")) { Task { await session.stage(resolve: session.snapshot?.isConflict == true) } }.buttonStyle(.borderedProminent).disabled(session.isBusy || !session.canEdit)
             }
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Picker(compareText("Layout"), selection: $layout) {
+                    Text(compareText("Automatic")).tag("automatic")
                     Text(compareText("Two Columns")).tag("two")
                     Text(compareText("Three Columns")).tag("three")
                     Text(compareText("Patch")).tag("patch")
-                }.pickerStyle(.segmented).labelsHidden().frame(width: 310)
+                }.pickerStyle(.segmented).labelsHidden().fixedSize(horizontal: true, vertical: false)
                 if layout == "two" && session.snapshot?.isConflict != true {
-                    Picker(compareText("Baseline"), selection: $baseline) { Text("HEAD").tag("head"); Text(compareText("Index")).tag("index") }.frame(width: 155)
+                    Picker(compareText("Baseline"), selection: $baseline) { Text("HEAD").tag("head"); Text(compareText("Index")).tag("index") }.labelsHidden().fixedSize(horizontal: true, vertical: false)
                 }
                 Button { changeNavigation -= 1 } label: { Image(systemName: "arrow.up") }.help(compareText("Previous change")).disabled(layout == "patch")
                 Button { changeNavigation += 1 } label: { Image(systemName: "arrow.down") }.help(compareText("Next change")).disabled(layout == "patch")
-                Spacer()
                 Menu(compareText("Use Version")) {
                     if let snapshot = session.snapshot {
                         if snapshot.isConflict {
                             versionButton("Ours", snapshot.ours); versionButton("Theirs", snapshot.theirs); versionButton("Base", snapshot.base)
                         } else { versionButton("HEAD", snapshot.head); versionButton("Index", snapshot.index) }
                     }
-                }.disabled(!session.canEdit || session.isBusy || layout == "patch")
-                if let snapshot = session.snapshot { ExternalComparisonButton(snapshot: snapshot) }
+                }.menuStyle(.borderlessButton).fixedSize().disabled(!session.canEdit || session.isBusy || layout == "patch")
+                if let snapshot = session.snapshot { ExternalComparisonButton(snapshot: snapshot, resultText: session.draft, resultEncoding: session.preferredEncoding, onResult: { session.pendingExternalResult = $0 }) }
+                ComparisonExtrasMenu(session: session)
                 Menu(compareText("Display")) {
                     Toggle(compareText("Wrap Lines"), isOn: $wrapLines)
                     Toggle(compareText("Line Numbers"), isOn: $showNumbers)
                     Toggle(compareText("Synchronized Scrolling"), isOn: $synchronize)
-                }
-
+                }.menuStyle(.borderlessButton).fixedSize()
+                Spacer(minLength: 0)
             }
-        }.padding(10).background(.bar)
+        }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8).background(.bar)
     }
     private func versionButton(_ name: String, _ version: FileRevisionContent?) -> some View {
-        Button(compareText(name)) { if let text = version?.text { session.draft = text } }.disabled(version?.text == nil)
+        Button(compareText(name)) {
+            let revision = session.preferredEncoding.flatMap { version?.reinterpreting(as: $0) } ?? version
+            if let text = revision?.text {
+                if session.isDirty { pendingVersion = text; confirmVersion = true } else { session.draft = text }
+            }
+        }.disabled((session.preferredEncoding.flatMap { version?.reinterpreting(as: $0) } ?? version)?.text == nil)
     }
     private func column(_ id: String, _ name: String, _ revision: FileRevisionContent?, editable: Bool = false) -> ComparisonEditorColumn {
+        let revision = session.preferredEncoding.flatMap { encoding in revision?.reinterpreting(as: encoding) } ?? revision
         let message = revision?.text != nil ? nil : (revision?.unavailableReason.map { compareText($0) } ?? (revision?.exists == true ? nil : compareText("File does not exist in this version")))
-        return ComparisonEditorColumn(id: id, title: compareText(name), text: id == "index" ? session.indexDraft : editable ? session.draft : (revision?.text ?? ""), isEditable: (id == "index" ? revision?.isEditable == true : editable && session.canEdit) && !session.isBusy, message: message)
+        return ComparisonEditorColumn(id: id, title: compareText(name), text: editable ? session.draft : (revision?.text ?? ""), isEditable: editable && id == "worktree" && session.canEdit && !session.isBusy, message: message)
     }
     private var columns: [ComparisonEditorColumn] {
         guard let snapshot = session.snapshot else { return [] }
         if snapshot.isConflict {
-            let left = column(showBase ? "base" : "ours", showBase ? "Base" : "Ours", showBase ? snapshot.base : snapshot.ours)
-            let result = column("worktree", "Working Tree / Result", session.savedWorktree, editable: true)
-            return layout == "two" ? [left, result] : [left, result, column("theirs", "Theirs", snapshot.theirs)]
+            let left = column(showBase ? "base" : "ours", showBase ? "Base (Stage 1)" : "Ours (Stage 2)", showBase ? snapshot.base : snapshot.ours)
+            let result = column("worktree", session.canEdit ? "Merge Result (Editable)" : "Merge Result (Read-only)", session.savedWorktree, editable: true)
+            let right = column("theirs", "Theirs (Stage 3)", snapshot.theirs)
+            if conflictLayout == "left" { return [left, result] }
+            if conflictLayout == "right" { return [result, right] }
+            return [left, result, right]
         }
-        let working = column("worktree", session.canEdit ? "Working Tree (Editable)" : "Working Tree (Read-only)", session.savedWorktree, editable: true)
-        return layout == "two" ? [baseline == "head" ? column("head", "HEAD", snapshot.head) : column("index", "Index", snapshot.index), working] : [column("head", "HEAD", snapshot.head), column("index", "Index", snapshot.index), working]
+        let title = resolvedLayout == "three" ? (session.canEdit ? "Merge Result (Editable)" : "Merge Result (Read-only)") : (session.canEdit ? "Working Tree (Editable)" : "Working Tree (Read-only)")
+        let working = column("worktree", title, session.savedWorktree, editable: true)
+        if resolvedLayout == "two" {
+            let useHead = layout == "automatic" ? snapshot.presentation.leftRevision == .head : baseline == "head"
+            return [useHead ? column("head", "HEAD", snapshot.head) : column("index", "Index", snapshot.index), working]
+        }
+        return [column("head", "HEAD", snapshot.head), working, column("index", "Index", snapshot.index)]
     }
 }
 

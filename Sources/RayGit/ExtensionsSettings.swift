@@ -3,6 +3,8 @@ import AppKit
 import GitCore
 
 struct ExtensionsSettings: View {
+    enum Page { case all, shortcuts, workflow, updates }
+    var page: Page = .all
     @ObservedObject var store: RepositoryStore
     @AppStorage("shortcut.open") private var openKey = "o"
     @AppStorage("shortcut.refresh") private var refreshKey = "r"
@@ -25,51 +27,86 @@ struct ExtensionsSettings: View {
     private var validKeys: Bool { keys.allSatisfy { ShortcutRules.isValid($0) } && Set(keys.map { $0.lowercased() }).count == 4 }
     var body: some View {
         Form {
+            if page == .all || page == .shortcuts {
             Section(compareText("Keyboard Shortcuts")) {
-                shortcut("Open Repository", $openKey); shortcut("Refresh", $refreshKey); shortcut("Stage", $stageKey); shortcut("Commit", $commitKey)
-                if let shortcutError { Text(shortcutError).foregroundStyle(.orange) }
-                if !validKeys { Text(compareText("Use four distinct single letters; shortcuts use Command.")).foregroundStyle(.orange) }
+                shortcut("Open Repository", $openKey)
+                shortcut("Refresh", $refreshKey)
+                shortcut("Stage", $stageKey)
+                shortcut("Commit", $commitKey)
+                if let shortcutError { Text(shortcutError).font(.caption).foregroundStyle(.orange) }
+                if !validKeys { Text(compareText("Use four distinct single letters; shortcuts use Command.")).font(.caption).foregroundStyle(.orange) }
             }
+            }
+            if page == .all || page == .workflow {
             Section("Git Flow") {
                 Picker(compareText("Kind"), selection: $kind) { ForEach(GitFlowKind.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
-                TextField(compareText("Name"), text: $flowName)
-                TextField(compareText("Main Branch"), text: $mainBranch)
-                TextField(compareText("Develop Branch"), text: $developBranch)
-                HStack {
+                field("Name", text: $flowName)
+                field("Main Branch", text: $mainBranch)
+                field("Develop Branch", text: $developBranch)
+                Text(compareText("Finish merges locally and removes only a merged branch. Release and hotfix create a tag named after the branch suffix."))
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Spacer()
                     Button(compareText("Start Git Flow")) { flow(finish: false) }
                     Button(compareText("Finish Git Flow")) { flow(finish: true) }
                 }.disabled(store.repository == nil || store.isBusy || flowName.isEmpty)
-                Text(compareText("Finish merges locally and removes only a merged branch. Release and hotfix create a tag named after the branch suffix.")).font(.caption)
             }
             Section(compareText("Pull / Merge Request")) {
-                TextField(compareText("Target Branch"), text: $reviewTarget)
-                Button(compareText("Open Review Page")) {
-                    guard let repository = store.repository else { return }
-                    Task { do { NSWorkspace.shared.open(try await repository.reviewURL(target: reviewTarget)) } catch { message = compareText(error.localizedDescription) } }
-                }.disabled(store.repository == nil || reviewTarget.isEmpty)
+                field("Target Branch", text: $reviewTarget)
+                HStack {
+                    Spacer()
+                    Button(compareText("Open Review Page")) {
+                        guard let repository = store.repository else { return }
+                        Task { do { NSWorkspace.shared.open(try await repository.reviewURL(target: reviewTarget)) } catch { message = compareText(error.localizedDescription) } }
+                    }.disabled(store.repository == nil || reviewTarget.isEmpty)
+                }
             }
+            }
+            if page == .all || page == .updates {
             Section(compareText("Updates")) {
-                TextField(compareText("Trusted HTTPS Manifest URL"), text: $manifestURL)
-                Button(compareText("Check for Updates")) { checkUpdates() }.disabled(checking || manifestURL.isEmpty)
-                if checking { ProgressView() }
-                if let checkedSource { Text(checkedSource.absoluteString).font(.caption).textSelection(.enabled) }
-                if let update { Text(compareText("Available Version") + ": " + update.version); if let notes = update.notes { Text(notes).font(.caption) }; Link(compareText("Download Release"), destination: update.downloadURL) }
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(compareText("Trusted HTTPS Manifest URL"))
+                    TextField(compareText("Trusted HTTPS Manifest URL"), text: $manifestURL).labelsHidden().textFieldStyle(.roundedBorder)
+                }
+                HStack(spacing: 8) {
+                    if checking { ProgressView().controlSize(.small) }
+                    Spacer()
+                    Button(compareText("Check for Updates")) { checkUpdates() }.disabled(checking || manifestURL.isEmpty)
+                }
+                if let checkedSource { Text(checkedSource.absoluteString).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
+                if let update {
+                    LabeledContent(compareText("Available Version"), value: update.version)
+                    if let notes = update.notes { Text(notes).font(.caption).foregroundStyle(.secondary) }
+                    HStack { Spacer(); Link(compareText("Download Release"), destination: update.downloadURL) }
+                }
             }
-            if !message.isEmpty { Text(message).foregroundStyle(.orange).textSelection(.enabled) }
-        }.formStyle(.grouped).frame(width: 620, height: 670)
+            }
+            if !message.isEmpty {
+                Section(panelText("Results")) { Text(message).font(.callout).foregroundStyle(.orange).textSelection(.enabled) }
+            }
+        }.formStyle(.grouped).controlSize(.small)
             .onAppear { repairShortcuts() }
             .onChange(of: manifestURL) { _, _ in updateGeneration += 1; updateTask?.cancel(); checking = false; update = nil; checkedSource = nil; message = "" }
             .onDisappear { updateGeneration += 1; updateTask?.cancel(); checking = false }
-
+    }
+    private func field(_ title: String, text: Binding<String>) -> some View {
+        LabeledContent(compareText(title)) {
+            TextField(compareText(title), text: text).labelsHidden().textFieldStyle(.roundedBorder).frame(maxWidth: 280)
+        }
     }
     private func shortcut(_ title: String, _ key: Binding<String>) -> some View {
-        TextField(compareText(title), text: Binding(get: { key.wrappedValue }, set: { new in
-            let value = new.lowercased()
-            let index = ["Open Repository", "Refresh", "Stage", "Commit"].firstIndex(of: title) ?? 0
-            let other = keys.enumerated().filter { $0.offset != index }.map(\.element)
-            if ShortcutRules.isValid(value), !other.map({ $0.lowercased() }).contains(value) { key.wrappedValue = value; shortcutError = nil }
-            else { shortcutError = compareText("Shortcut conflicts with another action or a macOS command.") }
-        }))
+        LabeledContent(compareText(title)) {
+            HStack(spacing: 8) {
+                Text("⌘").foregroundStyle(.secondary)
+                TextField(compareText(title), text: Binding(get: { key.wrappedValue }, set: { new in
+                    let value = new.lowercased()
+                    let index = ["Open Repository", "Refresh", "Stage", "Commit"].firstIndex(of: title) ?? 0
+                    let other = keys.enumerated().filter { $0.offset != index }.map(\.element)
+                    if ShortcutRules.isValid(value), !other.map({ $0.lowercased() }).contains(value) { key.wrappedValue = value; shortcutError = nil }
+                    else { shortcutError = compareText("Shortcut conflicts with another action or a macOS command.") }
+                })).labelsHidden().textFieldStyle(.roundedBorder).multilineTextAlignment(.center).frame(width: 44)
+            }
+        }
     }
     private func repairShortcuts() {
         let repaired = ShortcutRules.normalized(keys)

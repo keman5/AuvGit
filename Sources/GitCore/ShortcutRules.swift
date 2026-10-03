@@ -2,7 +2,7 @@ import Foundation
 
 public enum ShortcutRules {
     public static let defaults = ["o", "r", "t", "k"]
-    public static let reserved = Set("qwhm,cvxzafs".map(String.init))
+    public static let reserved = Set("qwhm,cvxzafs`".map(String.init))
     public static func isValid(_ key: String) -> Bool {
         key.count == 1 && key.first?.isASCII == true && key.first?.isLetter == true && !reserved.contains(key.lowercased())
     }

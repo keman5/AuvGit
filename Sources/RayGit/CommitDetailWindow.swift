@@ -36,6 +36,7 @@ private final class CommitDetailWindowController: NSWindowController, NSWindowDe
 }
 
 private struct CommitDetailView: View {
+    @AppStorage("preferences.dateStyle") private var dateStyle = "datetime"
     let commit: GitCommit
     let repository: GitRepository
     @AppStorage(L10n.preferenceKey) private var language = AppLanguage.system.rawValue
@@ -50,23 +51,24 @@ private struct CommitDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(commit.hash).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                HStack(spacing: 8) {
+                    Text(commit.subject).font(.system(size: 13, weight: .semibold)).lineLimit(1).help(commit.subject)
                     Spacer()
                     Button(historyActionText("copyHash")) { copy(commit.hash) }
                     Button(historyActionText("copyMessage")) { copy(commit.body.isEmpty ? commit.subject : commit.body) }
                 }
-                HStack {
-                    Text(commit.author).textSelection(.enabled)
+                Text(commit.hash).font(.system(.caption, design: .monospaced)).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                HStack(spacing: 8) {
+                    Text(commit.author).lineLimit(1).textSelection(.enabled)
                     Spacer()
-                    Text(commit.date, format: .dateTime.year().month().day().hour().minute().second().locale(L10n.locale)).foregroundStyle(.secondary)
+                    Text(preferencesDate(commit.date, style: dateStyle)).foregroundStyle(.secondary)
                 }.font(.caption)
-                ScrollView { Text(commit.body.isEmpty ? commit.subject : commit.body).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }.frame(maxHeight: 130)
-            }.padding(12)
+                if !messageBody.isEmpty { CommitMessageBody(text: messageBody) }
+            }.controlSize(.small).padding(12).background(.bar)
             Divider()
             HSplitView {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(historyActionText("files")).font(.headline).padding(10)
+                    Text(historyActionText("files")).font(.system(size: 12, weight: .semibold)).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 8).background(.bar)
                     Divider()
                     if loadingFiles { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
                     else if let filesError { Text(filesError).foregroundStyle(.red).textSelection(.enabled).padding() }
@@ -75,11 +77,11 @@ private struct CommitDetailView: View {
                         List(files, selection: $selection) { file in
                             HStack(spacing: 8) {
                                 Text(file.status).font(.system(.caption, design: .monospaced))
-                                Text(file.path).font(.system(size: 12)).lineLimit(2)
+                                Text(file.path).font(.system(size: 12)).lineLimit(2).truncationMode(.middle)
                             }.tag(file.path).help(file.originalPath.map { $0 + " → " + file.path } ?? file.path)
                         }.listStyle(.plain)
                     }
-                }.frame(minWidth: 180, idealWidth: 250, maxWidth: 330)
+                }.frame(minWidth: 180, idealWidth: 210, maxWidth: 260)
                 VStack(spacing: 0) {
                     if let diffError { Text(diffError).foregroundStyle(.red).textSelection(.enabled).padding() }
                     DiffPane(text: diff, title: selection ?? historyActionText("show"), isLoading: loadingDiff)
@@ -110,5 +112,34 @@ private struct CommitDetailView: View {
                 loadingDiff = false
             }
     }
+    private var messageBody: String {
+        let message = commit.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if message == commit.subject { return "" }
+        if message.hasPrefix(commit.subject + "\n") {
+            return String(message.dropFirst(commit.subject.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return message
+    }
     private func copy(_ value: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(value, forType: .string) }
+}
+
+private struct CommitMessageBody: View {
+    let text: String
+    @State private var contentHeight: CGFloat = 16
+    var body: some View {
+        ScrollView {
+            Text(text).font(.system(size: 12)).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(GeometryReader { geometry in
+                    Color.clear.preference(key: CommitMessageHeight.self, value: geometry.size.height)
+                })
+        }.frame(height: min(100, max(16, contentHeight)))
+            .onPreferenceChange(CommitMessageHeight.self) { contentHeight = $0 }
+    }
+}
+
+private struct CommitMessageHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 16
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }

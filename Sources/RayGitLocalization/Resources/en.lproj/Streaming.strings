@@ -5,3 +5,13 @@
 "next" = "Next page";
 "position" = "Starts at line %d · byte %lld / %lld";
 "readonly" = "Read-only · bounded UTF-8 pages";
+"historySupport" = "Immutable HEAD/index/conflict blobs are exported to a temporary file and read in bounded pages.";
+"revision" = "Revision";
+"worktree" = "Worktree";
+"head" = "HEAD";
+"index" = "Index";
+"base" = "Base";
+"ours" = "Ours";
+"theirs" = "Theirs";
+"cancel" = "Cancel";
+"cancelled" = "Streaming cancelled. Reload to continue.";
