@@ -49,7 +49,7 @@ struct DiffPane: View {
                         Spacer(minLength: 0)
                     }
                 }
-            }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 6).background(.bar)
+            }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 6).rayGitChrome()
             if showSearch {
                 HStack(spacing: 8) {
                     HStack(spacing: 6) {
@@ -59,8 +59,7 @@ struct DiffPane: View {
                             .onSubmit { searchStep += 1 }
                         if !query.isEmpty { Text("\(matchCount)").font(.caption).foregroundStyle(.secondary) }
                     }.padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 5))
-                        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color.secondary.opacity(0.2)))
+                        .rayGitInputSurface()
                         .frame(minWidth: 80, maxWidth: 260)
                     Button { searchStep -= 1 } label: { Image(systemName: "chevron.up") }
                         .help(diffControlText("previousMatch")).disabled(matchCount == 0)
@@ -68,11 +67,11 @@ struct DiffPane: View {
                         .help(diffControlText("nextMatch")).disabled(matchCount == 0)
                     Button { closeSearch() } label: { Image(systemName: "xmark") }
                     Spacer(minLength: 0)
-                }.controlSize(.small).padding(.horizontal, 12).padding(.bottom, 6).background(.bar)
+                }.controlSize(.small).padding(.horizontal, 12).padding(.bottom, 6).rayGitChrome()
             }
             Divider()
             if isLoading { Spacer(); ProgressView(diffText("diff.loading")); Spacer() }
-            else if text.isEmpty { Spacer(); Label(diffText("diff.empty"), systemImage: "checkmark.circle").foregroundStyle(.secondary); Spacer() }
+            else if text.isEmpty { RayGitEmptyState(title: diffText("diff.empty"), systemImage: "checkmark.circle") }
             else {
                 if diff.isBinary { Label(diffText("diff.binary"), systemImage: "doc.zipper").font(.caption).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(Color.orange.opacity(0.1)) }
                 if diff.isTruncated { Text(diffText("diff.truncated", 20000)).font(.caption).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(Color.orange.opacity(0.15)) }
@@ -80,21 +79,21 @@ struct DiffPane: View {
                     HStack(spacing: 1) {
                         Text(diffText("diff.original")).frame(maxWidth: .infinity, alignment: .leading)
                         Text(diffText("diff.modified")).frame(maxWidth: .infinity, alignment: .leading)
-                    }.font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.vertical, 5).background(.bar)
+                    }.font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.vertical, 5).rayGitChrome()
                     Divider()
                 }
                 DiffTextSurface(diff: diff, languagePath: title, sideBySide: sideBySide, selectedHunk: hunk, dark: colorScheme == .dark, wraps: wraps, lineNumbers: lineNumbers, synchronized: synchronized, fontSize: CGFloat(fontSize), query: query, searchStep: searchStep, matchCount: $matchCount)
             }
-        }.onChange(of: text) { _, _ in hunk = -1 }
+        }.background(RayGitStyle.canvas).onChange(of: text) { _, _ in hunk = -1 }
             .onExitCommand { closeSearch() }
     }
     private var titleLabel: some View {
-        Text(title.isEmpty ? diffText("diff.title") : title)
+        Label(title.isEmpty ? diffText("diff.title") : title, systemImage: "doc.text")
             .font(.system(size: 12, weight: .semibold)).lineLimit(1).truncationMode(.middle).help(title)
     }
     private func hunkControls(_ diff: ParsedDiff) -> some View {
         HStack(spacing: 8) {
-            Text(diffText("diff.hunkCount", diff.hunks.count)).font(.caption).foregroundStyle(.secondary).fixedSize()
+            RayGitBadge(diffText("diff.hunkCount", diff.hunks.count), tint: .secondary).fixedSize()
             Button { hunk = max(0, hunk - 1) } label: { Image(systemName: "chevron.up") }
                 .disabled(diff.hunks.isEmpty).help(diffText("diff.previousHunk")).accessibilityLabel(diffText("diff.previousHunk"))
             Button { hunk = min(diff.hunks.count - 1, hunk + 1) } label: { Image(systemName: "chevron.down") }

@@ -11,19 +11,22 @@ struct RepositorySidebar: View {
     var body: some View {
         VSplitView {
             VStack(spacing: 0) {
-                header("Repositories", icon: "externaldrive")
+                RayGitPaneHeader(title: interactionText("Repositories"), systemImage: "externaldrive", count: store.recentPaths.count)
                 List {
                     ForEach(store.recentPaths, id: \.self) { path in repositoryRow(path) }
                     Button { store.chooseRepository() } label: { Label(interactionText("Add Repository…"), systemImage: "plus") }.buttonStyle(.plain).disabled(store.isBusy)
-                }.listStyle(.sidebar).font(.system(size: 12))
+                }.listStyle(.sidebar).font(.system(size: 12)).scrollContentBackground(.hidden)
             }.frame(minHeight: 110, idealHeight: 240)
             VStack(spacing: 0) {
-                header("Branches", icon: "arrow.triangle.branch")
+                RayGitPaneHeader(title: interactionText("Branches"), systemImage: "arrow.triangle.branch", count: store.branches.count)
                 List(selection: $branchSelection) {
                     Section(interactionText("Local Branches")) {
                         ForEach(store.branches.filter { !$0.isRemote }) { branch in
-                            Label(branch.name, systemImage: branch.isCurrent ? "play.fill" : "arrow.triangle.branch")
-                                .foregroundStyle(branch.isCurrent ? Color.accentColor : .primary).fontWeight(branch.isCurrent ? .semibold : .regular)
+                            HStack(spacing: 6) {
+                                Label(branch.name, systemImage: "arrow.triangle.branch").lineLimit(1).truncationMode(.middle)
+                                if branch.isCurrent { Spacer(minLength: 0); Image(systemName: "checkmark.circle.fill").font(.system(size: 11)).accessibilityHidden(true) }
+                            }
+                                .fontWeight(branch.isCurrent ? .semibold : .regular)
                                 .tag("branch:" + branch.name)
                         }
                     }
@@ -33,7 +36,7 @@ struct RepositorySidebar: View {
                     Section(interactionText("Stashes")) {
                         ForEach(store.stashes) { stash in Label(stash.subject, systemImage: "archivebox").lineLimit(2).tag("stash:" + stash.ref) }
                     }
-                }.listStyle(.sidebar).font(.system(size: 12))
+                }.listStyle(.sidebar).font(.system(size: 12)).scrollContentBackground(.hidden)
                     .contextMenu(forSelectionType: String.self) { items in
                         if let item = items.first, items.count == 1 {
                             let target = String(item.dropFirst(item.firstIndex(of: ":").map { item.distance(from: item.startIndex, to: $0) + 1 } ?? 0))
@@ -64,22 +67,24 @@ struct RepositorySidebar: View {
             }.frame(minHeight: 170)
         }
         .controlSize(.small)
+        .background(RayGitStyle.sidebar)
     }
     private func repositoryRow(_ path: String) -> some View {
         let active = path == store.repositoryURL?.path
         return Button { onAction(.openRepository, path) } label: {
             HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "externaldrive").foregroundStyle(active ? Color.accentColor : .secondary)
-                    .frame(width: 16).padding(.top, 2)
+                Image(systemName: active ? "folder.fill" : "folder").foregroundStyle(active ? Color.accentColor : .secondary)
+                    .frame(width: 20, height: 24)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(URL(fileURLWithPath: path).lastPathComponent).fontWeight(active ? .semibold : .regular)
                         .lineLimit(1).truncationMode(.middle)
                     if active, !store.branch.isEmpty {
-                        Text(store.branch).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        Label(store.branch, systemImage: "arrow.triangle.branch").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     }
                 }
                 Spacer(minLength: 0)
-            }.padding(.vertical, 3).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                if active { Circle().fill(Color.accentColor).frame(width: 5, height: 5).accessibilityHidden(true) }
+            }.padding(.vertical, 5).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
         }.buttonStyle(.plain).help(path).disabled(store.isBusy)
             .listRowBackground(active ? Color.accentColor.opacity(0.10) : Color.clear)
             .contextMenu {
@@ -89,8 +94,5 @@ struct RepositorySidebar: View {
                 Divider()
                 Button(interactionText("Remove from Recent")) { onAction(.removeRecent, path) }
             }
-    }
-    private func header(_ title: String, icon: String) -> some View {
-        HStack { Label(interactionText(title), systemImage: icon).font(.system(size: 12, weight: .semibold)); Spacer() }.padding(.horizontal, 12).frame(height: 32).background(.bar)
     }
 }

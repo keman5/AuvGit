@@ -49,7 +49,7 @@ struct HistoryPane: View {
                     searchControl
                     if !compact { filterControls.frame(maxWidth: .infinity, alignment: .leading) }
                 }
-            }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8).background(.bar)
+            }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8).rayGitChrome()
             Divider()
             }
             HStack(spacing: 8) {
@@ -60,7 +60,7 @@ struct HistoryPane: View {
                     columnHeader(historyText("history.date"), width: $dateWidth)
                 }
                 Text(historyText("history.hash")).frame(width: 75, alignment: .leading)
-            }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.vertical, 6)
+            }.font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.vertical, 6).rayGitChrome()
             Divider()
             if visible.isEmpty {
                 ContentUnavailableView {
@@ -78,7 +78,7 @@ struct HistoryPane: View {
                                 ForEach(compact ? Array(commit.refs.prefix(1)) : commit.refs, id: \.self) { ref in
                                     Text(ref).font(.system(size: 10, weight: .medium))
                                         .padding(.horizontal, 5).padding(.vertical, 2)
-                                        .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: 3))
+                                        .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
                                         .frame(maxWidth: compact ? 90 : 120).lineLimit(1)
                                         .help(ref)
                                 }
@@ -87,11 +87,11 @@ struct HistoryPane: View {
                             if showColumns {
                             Text(commit.author).lineLimit(1).frame(width: authorWidth, alignment: .leading).help(commit.author)
                             Text(preferencesDate(commit.date, style: dateStyle))
-                                .font(.system(size: 11)).foregroundStyle(.secondary)
+                                .font(.system(size: 11)).foregroundStyle(selection == commit.hash ? .primary : .secondary)
                                 .lineLimit(1).frame(width: dateWidth, alignment: .leading)
                             }
                             Text(commit.shortHash).font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.secondary).frame(width: 75, alignment: .leading)
+                                .foregroundStyle(selection == commit.hash ? .primary : .secondary).frame(width: 75, alignment: .leading)
                         }.font(.system(size: 12))
                             .padding(.horizontal, 12)
                             .tag(commit.hash)
@@ -99,7 +99,7 @@ struct HistoryPane: View {
                             .accessibilityElement(children: .combine)
                             .accessibilityLabel(historyText("history.commitAccessibility", commit.subject, commit.author, commit.shortHash))
                     }
-                }.listStyle(.plain).environment(\.defaultMinListRowHeight, 28)
+                }.listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, RayGitStyle.rowHeight)
                     .contextMenu(forSelectionType: String.self) { hashes in
                         if let hash = hashes.first, let commit = commits.first(where: { $0.hash == hash }) {
                             Button(historyActionText("show")) { onAction(.show, commit) }
@@ -139,17 +139,17 @@ struct HistoryPane: View {
                             Text(commit.body.isEmpty ? commit.subject : commit.body).font(.system(size: 12))
                         }.frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
                     }.frame(minHeight: 45, maxHeight: 115)
-                }.padding(.horizontal, 12).padding(.vertical, 8)
+                }.padding(.horizontal, 12).padding(.vertical, 10).rayGitChrome()
                     .accessibilityLabel(historyText("history.details"))
             }
-        }.background(.background)
+        }.background(RayGitStyle.canvas)
         }
     }
     private var searchControl: some View { HistorySearchControl(search: $search) }
     private var filterControls: some View {
         HStack(spacing: 8) {
-            TextField(workflowText("Author"), text: $authorFilter).textFieldStyle(.roundedBorder).frame(width: 140)
-            TextField(workflowText("Commit hash"), text: $jumpHash).textFieldStyle(.roundedBorder).frame(width: 110).onSubmit { onJump(jumpHash) }
+            HStack(spacing: 6) { Image(systemName: "person").foregroundStyle(.secondary); TextField(workflowText("Author"), text: $authorFilter).textFieldStyle(.plain) }.padding(.horizontal, 8).padding(.vertical, 4).rayGitInputSurface().frame(width: 140)
+            HStack(spacing: 6) { Image(systemName: "number").foregroundStyle(.secondary); TextField(workflowText("Commit hash"), text: $jumpHash).textFieldStyle(.plain).onSubmit { onJump(jumpHash) } }.padding(.horizontal, 8).padding(.vertical, 4).rayGitInputSurface().frame(width: 110)
         }
     }
     private func graphWidth(_ graph: CommitGraph) -> CGFloat { min(compact ? 80 : 180, CGFloat(graph.laneCount) * 14 + 8) }
@@ -202,8 +202,7 @@ struct HistorySearchControl: View {
                     .accessibilityLabel(historyText("history.clearSearch"))
             }
         }.padding(.horizontal, 8).padding(.vertical, 4)
-            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 5))
-            .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color.secondary.opacity(0.2)))
+            .rayGitInputSurface()
             .frame(minWidth: 160, maxWidth: .infinity)
     }
 }

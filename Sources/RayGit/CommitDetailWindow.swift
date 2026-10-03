@@ -57,29 +57,28 @@ private struct CommitDetailView: View {
                     Button(historyActionText("copyHash")) { copy(commit.hash) }
                     Button(historyActionText("copyMessage")) { copy(commit.body.isEmpty ? commit.subject : commit.body) }
                 }
-                Text(commit.hash).font(.system(.caption, design: .monospaced)).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                Label(commit.hash, systemImage: "number").font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                 HStack(spacing: 8) {
-                    Text(commit.author).lineLimit(1).textSelection(.enabled)
+                    Label(commit.author, systemImage: "person.crop.circle").lineLimit(1).textSelection(.enabled)
                     Spacer()
                     Text(preferencesDate(commit.date, style: dateStyle)).foregroundStyle(.secondary)
                 }.font(.caption)
                 if !messageBody.isEmpty { CommitMessageBody(text: messageBody) }
-            }.controlSize(.small).padding(12).background(.bar)
+            }.controlSize(.small).padding(12).rayGitChrome()
             Divider()
             HSplitView {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(historyActionText("files")).font(.system(size: 12, weight: .semibold)).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 8).background(.bar)
-                    Divider()
+                    RayGitPaneHeader(title: historyActionText("files"), systemImage: "doc.on.doc", count: files.count)
                     if loadingFiles { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
                     else if let filesError { Text(filesError).foregroundStyle(.red).textSelection(.enabled).padding() }
-                    else if files.isEmpty { Text(historyActionText("noFiles")).foregroundStyle(.secondary).padding() }
+                    else if files.isEmpty { RayGitEmptyState(title: historyActionText("noFiles"), systemImage: "doc.on.doc") }
                     else {
                         List(files, selection: $selection) { file in
                             HStack(spacing: 8) {
                                 Text(file.status).font(.system(.caption, design: .monospaced))
                                 Text(file.path).font(.system(size: 12)).lineLimit(2).truncationMode(.middle)
                             }.tag(file.path).help(file.originalPath.map { $0 + " → " + file.path } ?? file.path)
-                        }.listStyle(.plain)
+                        }.listStyle(.plain).scrollContentBackground(.hidden)
                     }
                 }.frame(minWidth: 180, idealWidth: 210, maxWidth: 260)
                 VStack(spacing: 0) {
@@ -87,7 +86,7 @@ private struct CommitDetailView: View {
                     DiffPane(text: diff, title: selection ?? historyActionText("show"), isLoading: loadingDiff)
                 }.frame(minWidth: 420)
             }
-        }.environment(\.locale, L10n.locale).id(language)
+        }.background(RayGitStyle.canvas).environment(\.locale, L10n.locale).id(language)
             .task {
                 loadingFiles = true
                 do {

@@ -66,12 +66,12 @@ struct MainWindow: View {
                 else { Circle().fill(store.error == nil ? Color.green : .orange).frame(width: 6, height: 6) }
                 Text(store.status).lineLimit(1)
                 Spacer()
-                if !store.branch.isEmpty { Label(store.branch, systemImage: "arrow.triangle.branch") }
+                if !store.branch.isEmpty { Label(store.branch, systemImage: "arrow.triangle.branch").font(.system(size: 11, weight: .medium)) }
                 Button { terminals.toggle(for: store.repositoryURL, store: store) } label: { Image(systemName: "terminal") }.buttonStyle(.plain).help(terminalText("toggle")).accessibilityLabel(terminalText("toggle")).disabled(store.repository == nil)
                 Button { showActivity = true } label: { Image(systemName: "list.bullet.rectangle") }.buttonStyle(.plain).help(mainText("activity"))
-            }.font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 12).frame(height: 28)
+            }.font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 12).frame(height: 30).rayGitChrome()
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(RayGitStyle.canvas)
         .controlSize(.small)
         .frame(minHeight: terminals.visible ? 750 : 680)
         .navigationTitle(store.repositoryURL?.lastPathComponent ?? "RayGit")
@@ -246,7 +246,7 @@ struct MainWindow: View {
                 Picker(mainText("view"), selection: $store.mode) { Text(mainText("workspaceCount", store.files.count)).tag("workspace"); Text(mainText("history")).tag("history") }.pickerStyle(.segmented).labelsHidden().accessibilityLabel(mainText("view")).fixedSize(horizontal: true, vertical: false).controlSize(.small)
                 Spacer()
                 Text(store.repositoryURL?.path ?? "").font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
-            }.padding(.horizontal, 12).padding(.vertical, 8)
+            }.padding(.horizontal, 12).padding(.vertical, 9).rayGitChrome()
             if store.historyPath != nil || store.historyRef != nil {
                 HStack { Label(store.historyPath ?? store.historyRef ?? "", systemImage: "line.3.horizontal.decrease.circle").lineLimit(1); Spacer(); Button(interactionText("Show All History")) { store.showHistory(path: nil, ref: nil) } }.font(.caption).padding(.horizontal, 12).padding(.bottom, 8)
             }
@@ -306,7 +306,8 @@ struct MainWindow: View {
                 Spacer()
                 if store.mode == "workspace", store.selectedPaths.count == 1 { Button(compareText("Edit / Three-way Compare")) { fileAction(.compare, store.selectedPaths) }.disabled(store.isBusy) }
                 Toggle(mainText("ignoreWhitespace"), isOn: $store.ignoreWhitespace).toggleStyle(.checkbox).font(.caption)
-            }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8)
+            }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 7).rayGitChrome()
+            Divider()
             DiffPane(text: store.diffText, title: store.diffTitle, isLoading: store.loadingDiff)
         }
     }
@@ -326,20 +327,19 @@ struct MainWindow: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(store.isBusy || store.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (!store.amend && store.stagedCount == 0) || store.files.contains(where: \.isConflict))
             }
-        }.controlSize(.small).padding(12)
+        }.controlSize(.small).padding(12).background(RayGitStyle.chrome)
     }
     private var commitForm: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Label(mainText("commit"), systemImage: "checkmark.circle").font(.system(size: 12, weight: .semibold))
                 Spacer(minLength: 0)
-                Text(mainText("stagedCount", store.stagedCount)).font(.caption).foregroundStyle(.secondary)
+                RayGitBadge(mainText("stagedCount", store.stagedCount), tint: .secondary)
             }
             TextEditor(text: $store.commitMessage)
                 .focused($commitFocused).font(.system(size: 13))
                 .scrollContentBackground(.hidden).padding(4)
-                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(0.12)))
+                .rayGitInputSurface()
                 .overlay(alignment: .topLeading) {
                     if store.commitMessage.isEmpty {
                         Text(mainText("commitPlaceholder")).foregroundStyle(.tertiary).font(.system(size: 13))
@@ -391,7 +391,7 @@ struct MainWindow: View {
 extension MainWindow {
     private func historyPane(compact: Bool) -> some View {
         VStack(spacing: 0) {
-            if compact { HStack { Text(interactionText("Log")).font(.system(size: 12, weight: .semibold)); HistorySearchControl(search: $store.historySearch).frame(maxWidth: .infinity); Button { store.mode = "history" } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }.buttonStyle(.plain).help(interactionText("Expand History")) }.padding(.horizontal, 12).frame(height: 32).background(.bar) }
+            if compact { HStack { Label(interactionText("Log"), systemImage: "clock.arrow.circlepath").font(.system(size: 12, weight: .semibold)); HistorySearchControl(search: $store.historySearch).frame(maxWidth: .infinity); Button { store.mode = "history" } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }.buttonStyle(.plain).help(interactionText("Expand History")) }.padding(.horizontal, 12).frame(height: 36).rayGitChrome() }
             HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch, isLoading: store.loadingHistory, hasMore: store.hasMore, onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy, onAction: historyAction, compact: compact, showsSearch: !compact, onJump: jumpToCommit, authorFilter: $store.historyAuthor)
         }
     }

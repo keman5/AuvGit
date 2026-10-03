@@ -56,7 +56,10 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
                     Text(workflowText("Directory tree")).tag(true)
                 }.pickerStyle(.segmented).labelsHidden().accessibilityLabel(workflowText("Files view")).fixedSize(horizontal: true, vertical: false)
                 if !treeMode {
-                    TextField(text("filter"), text: $filter).textFieldStyle(.roundedBorder).frame(minWidth: 80, maxWidth: 220)
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
+                        TextField(text("filter"), text: $filter).textFieldStyle(.plain)
+                    }.padding(.horizontal, 8).padding(.vertical, 5).rayGitInputSurface().frame(minWidth: 80, maxWidth: 220)
                     Spacer(minLength: 0)
                     actionButton("stage", .stage, selection)
                     actionButton("unstage", .unstage, selection)
@@ -72,15 +75,11 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
                     actionButton("unstageAll", .unstageAll, Set(files.map(\.path)))
                 } label: { Image(systemName: "ellipsis.circle") }
                 .menuStyle(.borderlessButton).frame(width: 24).help(text("allActions")).accessibilityLabel(text("allActions"))
-            }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8)
+            }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 7).rayGitChrome()
             Divider()
             if treeMode { treeContent }
             else if visibleFiles.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: files.isEmpty ? "checkmark.circle" : "magnifyingglass").font(.system(size: 28, weight: .light))
-                    Text(text(files.isEmpty ? "clean" : "noFiles")).font(.system(size: 12))
-                }.foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(nsColor: .textBackgroundColor))
+                RayGitEmptyState(title: text(files.isEmpty ? "clean" : "noFiles"), systemImage: files.isEmpty ? "checkmark.circle" : "magnifyingglass")
             } else { fileTable }
         }
     }
@@ -93,8 +92,8 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
                         Text((file.path as NSString).lastPathComponent).lineLimit(1).truncationMode(.middle)
                     }
                 }.width(min: 120, ideal: 220)
-                TableColumn(text("index")) { file in status(file.indexStatus) }.width(min: 65, ideal: 85)
-                TableColumn(text("workspace")) { file in status(file.worktreeStatus) }.width(min: 65, ideal: 85)
+                TableColumn(text("index")) { file in status(file.indexStatus, selected: selection.contains(file.path)) }.width(min: 65, ideal: 85)
+                TableColumn(text("workspace")) { file in status(file.worktreeStatus, selected: selection.contains(file.path)) }.width(min: 65, ideal: 85)
                 TableColumn(text("directory")) { file in
                     let directory = (file.path as NSString).deletingLastPathComponent
                     Text(directory.isEmpty ? "—" : directory).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
@@ -123,9 +122,13 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
             } primaryAction: { paths in performCompare(paths) }
     }
 
-    private func status(_ value: String) -> some View {
+    private func status(_ value: String, selected: Bool) -> some View {
         let key = [" ": "none", "?": "untracked", "M": "modified", "A": "added", "D": "deleted", "R": "renamed", "C": "copied", "U": "conflict", "T": "type"][value]
         let color: Color = value == "A" || value == "?" ? .green : value == "D" ? .red : ["M", "R", "U"].contains(value) ? .orange : .secondary
-        return Text(key.map(text) ?? value).foregroundStyle(color).lineLimit(1)
+        return Group {
+            if selected { Text(key.map(text) ?? value).font(.system(size: 10, weight: .medium)).lineLimit(1) }
+            else if value == " " { Text(text("none")).foregroundStyle(.tertiary).font(.system(size: 11)) }
+            else { RayGitBadge(key.map(text) ?? value, tint: color) }
+        }
     }
 }

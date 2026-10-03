@@ -206,6 +206,7 @@ private struct FileCompareContent: View {
     @StateObject private var resolver = ComparisonResolverState()
     @State private var conflictLayout = "all"
     @State private var confirmMerge = false
+    @State private var showConflictHelp = false
     @State private var pendingVersion: String?
     @State private var confirmVersion = false
     init(session: FileCompareSession) {
@@ -224,24 +225,31 @@ private struct FileCompareContent: View {
                 HStack { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange); Text(error).textSelection(.enabled); Spacer(); Button { session.error = nil } label: { Image(systemName: "xmark") } }.font(.caption).controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8).background(Color.orange.opacity(0.1))
             }
             if session.snapshot?.isConflict == true {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Label(compareText("Conflict: edit the result, save, then mark resolved"), systemImage: "arrow.triangle.merge")
-                        Spacer()
-                        Toggle(compareText("Show merge base"), isOn: $showBase).toggleStyle(.checkbox)
-                    }
+                VStack(alignment: .leading, spacing: 8) {
                     ConflictResolverToolbar(state: resolver, blocks: ConflictDraft.blocks(in: session.draft), enabled: session.canEdit && !session.isBusy && layout != "patch", malformed: ConflictDraft.blocks(in: session.draft).isEmpty && ConflictDraft.hasConflictMarkers(in: session.draft))
-                    HStack {
+                    HStack(spacing: 12) {
                         Picker(resolverText("Resolver layout"), selection: $conflictLayout) {
                             Text(resolverText("Ours + Result")).tag("left")
                             Text(resolverText("All three")).tag("all")
                             Text(resolverText("Result + Theirs")).tag("right")
-                        }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 420)
-                        Spacer()
+                        }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 370)
+                        Toggle(compareText("Show merge base"), isOn: $showBase).toggleStyle(.checkbox)
+                        Spacer(minLength: 0)
+                        Button { showConflictHelp.toggle() } label: {
+                            Label(compareText("Conflict: edit the result, save, then mark resolved"), systemImage: "info.circle")
+                                .lineLimit(1)
+                        }.buttonStyle(.plain).foregroundStyle(.secondary)
+                            .help(compareText("Choices change the draft only. Save, then mark resolved to stage it."))
+                            .popover(isPresented: $showConflictHelp, arrowEdge: .bottom) {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text(compareText("Conflict: edit the result, save, then mark resolved")).fontWeight(.semibold)
+                                    Text(resolverText("Ours = Stage 2; Theirs = Stage 3. During rebase, Ours is the upstream side."))
+                                    Text(compareText("Choices change the draft only. Save, then mark resolved to stage it."))
+                                }.font(.callout).padding(16).frame(width: 340)
+                            }
                     }
-                    Text(resolverText("Ours = Stage 2; Theirs = Stage 3. During rebase, Ours is the upstream side.")).foregroundStyle(.secondary)
-                    Text(compareText("Choices change the draft only. Save, then mark resolved to stage it.")).foregroundStyle(.secondary)
-                }.font(.caption).controlSize(.small).padding(8).background(Color.orange.opacity(0.1))
+                }.font(.caption).controlSize(.small).padding(.horizontal, 12).padding(.vertical, 9).rayGitChrome()
+                Divider()
             }
             if layout == "patch" {
                 if session.isDirty { Text(compareText("Patch shows saved disk content; save to update it")).font(.caption).foregroundStyle(.orange).padding(6) }
@@ -288,8 +296,9 @@ private struct FileCompareContent: View {
             }
     }
     private var controls: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             HStack(spacing: 8) {
+                Image(systemName: "doc.text").font(.system(size: 14)).foregroundStyle(.secondary)
                 Text(session.path).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.middle).help(session.path)
                 if session.isDirty { Circle().fill(.orange).frame(width: 7, height: 7) }
                 Spacer()

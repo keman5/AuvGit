@@ -61,27 +61,63 @@ struct PreferencesWindow: View {
     private var filtered: [String] { categories.filter { category in
         query.isEmpty || ([category] + (searchTerms[category] ?? [])).contains { prefsText($0).localizedCaseInsensitiveContains(query) || $0.localizedCaseInsensitiveContains(query) }
     } }
+    private func categoryIcon(_ category: String) -> String {
+        switch category {
+        case "General": return "slider.horizontal.3"
+        case "Appearance": return "paintpalette"
+        case "Editor": return "text.alignleft"
+        case "History": return "clock.arrow.circlepath"
+        case "Commands and Git": return "terminal"
+        case "Network and Authentication": return "network"
+        case "External Tools": return "wrench.and.screwdriver"
+        case "Keyboard Shortcuts": return "keyboard"
+        case "Git Flow and Hosting": return "arrow.triangle.branch"
+        case "Updates": return "arrow.down.circle"
+        case "Privacy": return "hand.raised"
+        default: return "gearshape.2"
+        }
+    }
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 10) {
-                TextField(prefsText("Search preferences"), text: $query).textFieldStyle(.roundedBorder).padding(.horizontal, 12).padding(.top, 14)
-                List(selection: $selected) { ForEach(filtered, id: \.self) { Text(prefsText($0)).tag($0) } }.listStyle(.sidebar)
-            }.frame(width: 220)
+                HStack(spacing: 7) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
+                    TextField(prefsText("Search preferences"), text: $query).textFieldStyle(.plain)
+                    if !query.isEmpty {
+                        Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel(prefsText("Clear search"))
+                    }
+                }.font(.system(size: 12)).padding(.horizontal, 9).padding(.vertical, 7)
+                    .rayGitInputSurface().padding(.horizontal, 12).padding(.top, 14)
+                List(selection: $selected) {
+                    ForEach(filtered, id: \.self) { category in
+                        Label { Text(prefsText(category)).lineLimit(1) } icon: {
+                            Image(systemName: categoryIcon(category)).frame(width: 18)
+                        }.font(.system(size: 12)).padding(.vertical, 3).tag(category)
+                    }
+                }.listStyle(.sidebar).scrollContentBackground(.hidden)
+            }.frame(width: 230).background(RayGitStyle.sidebar)
             Divider()
             VStack(alignment: .leading, spacing: 0) {
-                Text(prefsText(filtered.isEmpty ? "Search preferences" : selected)).font(.title2.bold()).padding(20)
+                HStack(spacing: 10) {
+                    Image(systemName: filtered.isEmpty ? "magnifyingglass" : categoryIcon(selected))
+                        .font(.system(size: 17, weight: .medium)).foregroundStyle(Color.accentColor)
+                        .frame(width: 32, height: 32).background(Color.accentColor.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
+                    Text(prefsText(filtered.isEmpty ? "Search preferences" : selected)).font(.system(size: 18, weight: .semibold))
+                    Spacer(minLength: 0)
+                }.padding(.horizontal, 20).padding(.vertical, 14).rayGitChrome()
                 Divider()
                 if filtered.isEmpty {
                     VStack(spacing: 12) {
-                        Image(systemName: "magnifyingglass").font(.largeTitle).foregroundStyle(.secondary)
-                        Text(prefsText("No matching preferences")).foregroundStyle(.secondary)
+                        Image(systemName: "magnifyingglass").font(.system(size: 27, weight: .light)).foregroundStyle(.tertiary)
+                        Text(prefsText("No matching preferences")).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
                         Button(prefsText("Clear search")) { query = "" }
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     page.frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-        }.frame(minWidth: 760, idealWidth: 860, minHeight: 540, idealHeight: 660)
+        }.background(RayGitStyle.canvas).frame(minWidth: 760, idealWidth: 860, minHeight: 540, idealHeight: 660)
             .onChange(of: query) { _, _ in if !filtered.contains(selected), let first = filtered.first { selected = first } }
             .onChange(of: theme) { _, _ in RayGitPreferences.applyAppearance() }
             .alert(prefsText("Clear local records?"), isPresented: Binding(get: { clearAction != nil }, set: { if !$0 { clearAction = nil } })) {

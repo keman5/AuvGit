@@ -22,18 +22,26 @@ struct ConflictResolverToolbar: View {
         HStack(spacing: 8) {
             Image(systemName: blocks.isEmpty && !malformed ? "checkmark.circle.fill" : "arrow.triangle.merge")
                 .foregroundStyle(blocks.isEmpty && !malformed ? Color.green : Color.orange)
-            Text(malformed ? resolverText("Incomplete conflict markers — repair the result manually") : (blocks.isEmpty ? resolverText("No unresolved conflicts") : resolverText("Conflict %d of %d", current + 1, blocks.count))).fontWeight(.semibold)
-            Button { state.select?((current + blocks.count - 1) % blocks.count) } label: { Image(systemName: "chevron.up") }.help(resolverText("Previous conflict"))
-            Button { state.select?((current + 1) % blocks.count) } label: { Image(systemName: "chevron.down") }.help(resolverText("Next conflict"))
+            Text(malformed ? resolverText("Incomplete conflict markers — repair the result manually") : (blocks.isEmpty ? resolverText("No unresolved conflicts") : resolverText("Conflict %d of %d", current + 1, blocks.count)))
+                .fontWeight(.semibold).lineLimit(1).layoutPriority(1)
+            Button { state.select?((current + blocks.count - 1) % blocks.count) } label: { Image(systemName: "chevron.up") }.help(resolverText("Previous conflict")).disabled(blocks.isEmpty || !enabled)
+            Button { state.select?((current + 1) % blocks.count) } label: { Image(systemName: "chevron.down") }.help(resolverText("Next conflict")).disabled(blocks.isEmpty || !enabled)
             Divider().frame(height: 16)
             choice("Use Ours", .ours)
             choice("Use Theirs", .theirs)
-            choice("Ours → Theirs", .oursThenTheirs)
-            choice("Theirs → Ours", .theirsThenOurs)
-            if blocks.indices.contains(current), blocks[current].base != nil { choice("Use Base", .base) }
+            Menu {
+                Button(resolverText("Ours → Theirs")) { state.accept?(.oursThenTheirs, current) }
+                Button(resolverText("Theirs → Ours")) { state.accept?(.theirsThenOurs, current) }
+                if blocks.indices.contains(current), blocks[current].base != nil {
+                    Divider()
+                    Button(resolverText("Use Base")) { state.accept?(.base, current) }
+                }
+            } label: { Image(systemName: "ellipsis.circle") }
+                .menuStyle(.borderlessButton).fixedSize()
+                .help(resolverText("Apply to the current conflict only")).disabled(blocks.isEmpty || !enabled)
             Spacer(minLength: 0)
             if blocks.indices.contains(current) { Text(resolverText("Lines %d–%d", blocks[current].startLine, blocks[current].endLine)).foregroundStyle(.secondary) }
-        }.disabled(blocks.isEmpty || !enabled).controlSize(.small)
+        }.controlSize(.small)
     }
     private func choice(_ key: String, _ side: ConflictDraft.Side) -> some View {
         Button { state.accept?(side, current) } label: {
@@ -42,6 +50,7 @@ struct ConflictResolverToolbar: View {
                 if side == .theirs { Image(systemName: "arrow.left.square.fill").foregroundStyle(Color.purple) }
                 Text(resolverText(key))
             }
-        }.help(resolverText("Apply to the current conflict only"))
+        }.tint(side == .ours ? .blue : .purple)
+            .help(resolverText("Apply to the current conflict only")).disabled(blocks.isEmpty || !enabled)
     }
 }
