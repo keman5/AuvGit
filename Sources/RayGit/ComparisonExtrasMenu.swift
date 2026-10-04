@@ -21,7 +21,7 @@ struct ComparisonExtrasMenu: View {
         }
     }
     var body: some View {
-        Menu(compareExtra("more")) {
+        Menu {
             if session.pendingExternalResult != nil { Button(compareExtra("applyExternalResult")) { confirmExternal = true }.disabled(!session.canEdit) }
             Button(compareExtra("encoding")) { showEncoding = true }.disabled(session.savedWorktree?.data == nil || session.savedWorktree?.isBinary == true)
             Button(compareExtra("establishRename")) { showRename = true }.disabled(session.snapshot?.index.exists != false || !session.canEdit || session.isDirty)
@@ -29,7 +29,8 @@ struct ComparisonExtrasMenu: View {
                 ForEach(versions, id: \.0) { name, version in Button(name) { restore = version; restoreName = name; confirmRestore = true } }
             }.disabled(session.isDirty)
             Button(compareExtra(session.snapshot?.isConflict == true ? "deleteResolve" : "deleteFile"), role: .destructive) { confirmDelete = true }.disabled(session.isDirty)
-        }.menuStyle(.borderlessButton).fixedSize().disabled(session.isBusy || session.snapshot == nil)
+        } label: { Image(systemName: "ellipsis") }
+        .menuStyle(.borderlessButton).fixedSize().help(compareExtra("more")).disabled(session.isBusy || session.snapshot == nil)
         .sheet(isPresented: $showEncoding) { EncodingConversionSheet(session: session) }
         .sheet(isPresented: $showRename) { RenameIdentitySheet(session: session) }
         .alert(compareExtra("applyExternalResult"), isPresented: $confirmExternal) {

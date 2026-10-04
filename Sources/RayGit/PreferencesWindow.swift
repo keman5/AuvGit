@@ -89,23 +89,25 @@ struct PreferencesWindow: View {
                     }
                 }.font(.system(size: 12)).padding(.horizontal, 9).padding(.vertical, 7)
                     .rayGitInputSurface().padding(.horizontal, 12).padding(.top, 14)
-                List(selection: $selected) {
-                    ForEach(filtered, id: \.self) { category in
-                        Label { Text(prefsText(category)).lineLimit(1) } icon: {
-                            Image(systemName: categoryIcon(category)).frame(width: 18)
-                        }.font(.system(size: 12)).padding(.vertical, 3).tag(category)
-                    }
-                }.listStyle(.sidebar).scrollContentBackground(.hidden)
-            }.frame(width: 230).background(RayGitStyle.sidebar)
+                ScrollView {
+                    VStack(spacing: 5) {
+                        ForEach(filtered, id: \.self) { category in
+                            Button { selected = category } label: {
+                                Label { Text(prefsText(category)).lineLimit(1) } icon: {
+                                    Image(systemName: categoryIcon(category)).font(.system(size: 18)).frame(width: 25)
+                                }.font(.system(size: 13, weight: selected == category ? .semibold : .regular))
+                                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 11)
+                                    .foregroundStyle(selected == category ? Color.white : Color.primary)
+                                    .background(selected == category ? Color.blue : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+                            }.buttonStyle(.plain)
+                        }
+                    }.padding(.horizontal, 12).padding(.vertical, 6)
+                }
+            }.frame(width: 240).background(RayGitStyle.sidebar)
             Divider()
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 10) {
-                    Image(systemName: filtered.isEmpty ? "magnifyingglass" : categoryIcon(selected))
-                        .font(.system(size: 17, weight: .medium)).foregroundStyle(Color.accentColor)
-                        .frame(width: 32, height: 32).background(Color.accentColor.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
-                    Text(prefsText(filtered.isEmpty ? "Search preferences" : selected)).font(.system(size: 18, weight: .semibold))
-                    Spacer(minLength: 0)
-                }.padding(.horizontal, 20).padding(.vertical, 14).rayGitChrome()
+                DesignPageHeading(title: prefsText(filtered.isEmpty ? "Search preferences" : selected), subtitle: designText(selected == "Editor" ? "Configure code and difference display" : "Customize your RayGit workspace"))
+                    .padding(.horizontal, 24).padding(.vertical, 14).rayGitChrome()
                 Divider()
                 if filtered.isEmpty {
                     VStack(spacing: 12) {
@@ -117,7 +119,7 @@ struct PreferencesWindow: View {
                     page.frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-        }.background(RayGitStyle.canvas).frame(minWidth: 760, idealWidth: 860, minHeight: 540, idealHeight: 660)
+        }.background(RayGitStyle.canvas).frame(minWidth: 760, idealWidth: 1040, minHeight: 620, idealHeight: 780)
             .onChange(of: query) { _, _ in if !filtered.contains(selected), let first = filtered.first { selected = first } }
             .onChange(of: theme) { _, _ in RayGitPreferences.applyAppearance() }
             .alert(prefsText("Clear local records?"), isPresented: Binding(get: { clearAction != nil }, set: { if !$0 { clearAction = nil } })) {

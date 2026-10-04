@@ -39,38 +39,86 @@ struct EditorPreferencesView: View {
         })
     }
     var body: some View {
-        Form {
-            Section(editorPrefsText("Font")) {
-                Toggle(editorPrefsText("Fixed width fonts only"), isOn: $fixedWidthOnly)
-                Picker(editorPrefsText("Font family"), selection: $fontName) {
-                    Text(editorPrefsText("System monospace")).tag("")
-                    if !fontName.isEmpty && !fonts.contains(fontName) { Text(fontName).tag(fontName) }
-                    ForEach(fonts, id: \.self) { Text($0).tag($0) }
-                }
-                Stepper(editorPrefsText("Font size") + ": \(Int(fontSize))", value: $fontSize, in: 9...32)
-                Text("func compare(left: String, right: String) {\n    // RayGit\n    return left == right\n}").font(Font(EditorPreferences.font(name: fontName, size: fontSize))).textSelection(.enabled).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(.background)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    section(designText("Font and layout")) {
+                        DesignSettingRow(editorPrefsText("Font family"), detail: designText("Choose the editor font")) {
+                            Picker(editorPrefsText("Font family"), selection: $fontName) {
+                                Text(editorPrefsText("System monospace")).tag("")
+                                if !fontName.isEmpty && !fonts.contains(fontName) { Text(fontName).tag(fontName) }
+                                ForEach(fonts, id: \.self) { Text($0).tag($0) }
+                            }.labelsHidden().frame(width: 220)
+                        }
+                        Divider()
+                        DesignSettingRow(editorPrefsText("Font size"), detail: designText("Size of the editor text")) {
+                            Stepper("\(Int(fontSize))", value: $fontSize, in: 9...32).frame(width: 94)
+                        }
+                        Divider()
+                        DesignSettingRow(editorPrefsText("Tab width"), detail: designText("Spaces represented by one tab")) {
+                            Stepper("\(tabWidth)", value: $tabWidth, in: 1...16).frame(width: 94)
+                        }
+                        Divider()
+                        settingToggle("Fixed width fonts only", $fixedWidthOnly)
+                    }
+                    section(designText("Editing behavior")) {
+                        settingToggle("Line numbers", $numbers, "Show original source line numbers")
+                        Divider()
+                        settingToggle("Wrap lines", $wraps, "Wrap text to the available pane width")
+                        Divider()
+                        settingToggle("Synchronized scrolling", $synchronized, "Keep corresponding changes together")
+                    }
+                    section(editorPrefsText("Comparison layout")) {
+                        DesignSettingRow(editorPrefsText("File comparison")) {
+                            Picker(editorPrefsText("File comparison"), selection: $layout) {
+                                Text(editorPrefsText("Automatic")).tag("automatic")
+                                Text(editorPrefsText("Three columns")).tag("three")
+                                Text(editorPrefsText("Two columns")).tag("two")
+                                Text(editorPrefsText("Patch")).tag("patch")
+                            }.labelsHidden().frame(width: 220)
+                        }
+                        Divider()
+                        settingToggle("Side by side diff", $sideBySide)
+                        Divider()
+                        settingToggle("Highlight current line", $currentLine)
+                        Divider()
+                        settingToggle("Show whitespace", $whitespace)
+                        Divider()
+                        settingToggle("Character differences", $characters)
+                        Divider()
+                        settingToggle("Syntax colors", $syntax)
+                    }
+                    section(editorPrefsText("Difference colors")) {
+                        ColorPicker(editorPrefsText("Added"), selection: colorBinding($additionColor, fallback: .systemGreen), supportsOpacity: false)
+                        Divider()
+                        ColorPicker(editorPrefsText("Deleted"), selection: colorBinding($deletionColor, fallback: .systemRed), supportsOpacity: false)
+                        Divider()
+                        ColorPicker(editorPrefsText("Modified"), selection: colorBinding($modificationColor, fallback: .systemOrange), supportsOpacity: false)
+                        Button(editorPrefsText("Reset colors")) { additionColor = ""; deletionColor = ""; modificationColor = "" }.padding(.top, 8)
+                    }
+                    DesignCard(designText("Font preview")) {
+                        Text("func compare(left: String, right: String) {\n    // RayGit\n    return left == right\n}")
+                            .font(Font(EditorPreferences.font(name: fontName, size: fontSize))).textSelection(.enabled)
+                    }
+                }.padding(24)
             }
-            Section(editorPrefsText("Display")) {
-                Toggle(editorPrefsText("Line numbers"), isOn: $numbers)
-                Toggle(editorPrefsText("Wrap lines"), isOn: $wraps)
-                Toggle(editorPrefsText("Synchronized scrolling"), isOn: $synchronized)
-                Stepper(editorPrefsText("Tab width") + ": \(tabWidth)", value: $tabWidth, in: 1...16)
-                Toggle(editorPrefsText("Syntax colors"), isOn: $syntax)
-                Toggle(editorPrefsText("Character differences"), isOn: $characters)
-                Toggle(editorPrefsText("Show whitespace"), isOn: $whitespace)
-                Toggle(editorPrefsText("Highlight current line"), isOn: $currentLine)
-            }
-            Section(editorPrefsText("Difference colors")) {
-                ColorPicker(editorPrefsText("Added"), selection: colorBinding($additionColor, fallback: .systemGreen), supportsOpacity: false)
-                ColorPicker(editorPrefsText("Deleted"), selection: colorBinding($deletionColor, fallback: .systemRed), supportsOpacity: false)
-                ColorPicker(editorPrefsText("Modified"), selection: colorBinding($modificationColor, fallback: .systemOrange), supportsOpacity: false)
-                Button(editorPrefsText("Reset colors")) { additionColor = ""; deletionColor = ""; modificationColor = "" }
-            }
-            Section(editorPrefsText("Comparison layout")) {
-                Picker(editorPrefsText("File comparison"), selection: $layout) { Text(editorPrefsText("Automatic")).tag("automatic"); Text(editorPrefsText("Three columns")).tag("three"); Text(editorPrefsText("Two columns")).tag("two"); Text(editorPrefsText("Patch")).tag("patch") }
-                Toggle(editorPrefsText("Side by side diff"), isOn: $sideBySide)
-            }
-            Button(editorPrefsText("Reset editor defaults")) { EditorPreferences.reset() }
-        }.formStyle(.grouped)
+            Divider()
+            HStack(spacing: 12) {
+                Button { EditorPreferences.reset() } label: { Label(editorPrefsText("Reset editor defaults"), systemImage: "arrow.counterclockwise") }
+                Text(designText("Changes are applied immediately")).font(.caption).foregroundStyle(.secondary)
+                Spacer()
+            }.padding(.horizontal, 24).padding(.vertical, 14)
+        }.tint(.blue)
+    }
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(.system(size: 15, weight: .semibold))
+            DesignCard { VStack(spacing: 0, content: content) }
+        }
+    }
+    private func settingToggle(_ key: String, _ binding: Binding<Bool>, _ detail: String = "") -> some View {
+        DesignSettingRow(editorPrefsText(key), detail: detail.isEmpty ? "" : designText(detail)) {
+            Toggle(editorPrefsText(key), isOn: binding).labelsHidden().toggleStyle(.switch).controlSize(.small)
+        }
     }
 }

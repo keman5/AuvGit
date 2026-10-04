@@ -109,6 +109,7 @@ final class RepositoryStore: ObservableObject {
     }
     func setGroup(path: String, group: String) { repositoryGroups[path] = group; UserDefaults.standard.set(repositoryGroups, forKey: "repositoryGroups") }
     @Published var recentPaths = UserDefaults.standard.stringArray(forKey: "recentRepositories") ?? []
+    @Published var repositoryChangeCounts: [String: Int] = [:]
     @Published var files: [GitFile] = []
     @Published var filesGeneration = UUID()
     @Published var branches: [GitBranch] = []
@@ -295,6 +296,7 @@ final class RepositoryStore: ObservableObject {
             async let newStashes = repository.stashes()
             let result = try await (newFiles, newBranches, newBranch, newStashes)
             guard version == repoVersion else { return }
+            repositoryChangeCounts[repository.url.path] = result.0.count
             files = result.0; filesGeneration = UUID(); branches = result.1; branch = result.2; stashes = result.3
             selectedPaths.formIntersection(Set(files.map(\.path)))
             setStatus("Refreshed · %@ changes · %@ staged", arguments: [String(files.count), String(stagedCount)])

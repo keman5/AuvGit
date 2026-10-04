@@ -29,6 +29,8 @@ struct ConflictResolverToolbar: View {
             Divider().frame(height: 16)
             choice("Use Ours", .ours)
             choice("Use Theirs", .theirs)
+            choice("Ours → Theirs", .oursThenTheirs)
+            choice("Theirs → Ours", .theirsThenOurs)
             Menu {
                 Button(resolverText("Ours → Theirs")) { state.accept?(.oursThenTheirs, current) }
                 Button(resolverText("Theirs → Ours")) { state.accept?(.theirsThenOurs, current) }
@@ -41,16 +43,18 @@ struct ConflictResolverToolbar: View {
                 .help(resolverText("Apply to the current conflict only")).disabled(blocks.isEmpty || !enabled)
             Spacer(minLength: 0)
             if blocks.indices.contains(current) { Text(resolverText("Lines %d–%d", blocks[current].startLine, blocks[current].endLine)).foregroundStyle(.secondary) }
-        }.controlSize(.small)
+        }.controlSize(.regular)
     }
     private func choice(_ key: String, _ side: ConflictDraft.Side) -> some View {
         Button { state.accept?(side, current) } label: {
             HStack(spacing: 4) {
-                if side == .ours { Image(systemName: "arrow.right.square.fill").foregroundStyle(Color.blue) }
-                if side == .theirs { Image(systemName: "arrow.left.square.fill").foregroundStyle(Color.purple) }
+                if side == .ours { Image(systemName: "arrow.right").foregroundStyle(Color.blue) }
+                if side == .theirs { Image(systemName: "arrow.left").foregroundStyle(Color.green) }
+                if side == .oursThenTheirs { Image(systemName: "chevron.forward.2") }
+                if side == .theirsThenOurs { Image(systemName: "chevron.backward.2") }
                 Text(resolverText(key))
             }
-        }.tint(side == .ours ? .blue : .purple)
+        }.buttonStyle(.bordered).tint(side == .theirs ? .green : .blue)
             .help(resolverText("Apply to the current conflict only")).disabled(blocks.isEmpty || !enabled)
     }
 }

@@ -4,11 +4,16 @@ import AppKit
 /// Shared chrome for the native workspace. Content remains edge-to-edge and dense.
 enum RayGitStyle {
     static let canvas = Color(nsColor: .textBackgroundColor)
-    static let sidebar = Color(nsColor: .windowBackgroundColor)
-    static let chrome = Color(nsColor: .controlBackgroundColor)
+    static let sidebar = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(calibratedRed: 0.13, green: 0.15, blue: 0.19, alpha: 1) : NSColor(calibratedRed: 0.92, green: 0.935, blue: 0.955, alpha: 1)
+    })
+    static let chrome = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .controlBackgroundColor : NSColor(calibratedRed: 0.98, green: 0.985, blue: 0.995, alpha: 1)
+    })
     static let border = Color(nsColor: .separatorColor).opacity(0.65)
     static let horizontalInset: CGFloat = 12
-    static let rowHeight: CGFloat = 28
+    static let rowHeight: CGFloat = 30
+    static let blue = Color(red: 0.04, green: 0.46, blue: 1)
 }
 
 struct RayGitPaneHeader: View {

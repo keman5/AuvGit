@@ -72,7 +72,7 @@ struct RepositoryTools: View {
         }
         .controlSize(.small)
         .onChange(of: confirm) { _, value in if !value { pending = nil } }
-        .interactiveDismissDisabled(busy || store.isBusy).padding(20).frame(width: 850, height: 640)
+        .interactiveDismissDisabled(busy || store.isBusy).padding(20).frame(width: operation == .interactiveRebase ? 1100 : 850, height: operation == .interactiveRebase ? 850 : 640)
         .alert(workflowText("Confirm repository change"), isPresented: $confirm) {
             Button(workflowText("Cancel"), role: .cancel) { pending = nil }
             Button(workflowText("Continue"), role: operation == .resetHard ? .destructive : nil) {

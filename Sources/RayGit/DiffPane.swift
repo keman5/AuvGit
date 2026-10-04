@@ -49,7 +49,7 @@ struct DiffPane: View {
                         Spacer(minLength: 0)
                     }
                 }
-            }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 6).rayGitChrome()
+            }.controlSize(.small).padding(.horizontal, 14).padding(.vertical, 10).rayGitChrome()
             if showSearch {
                 HStack(spacing: 8) {
                     HStack(spacing: 6) {
@@ -79,7 +79,7 @@ struct DiffPane: View {
                     HStack(spacing: 1) {
                         Text(diffText("diff.original")).frame(maxWidth: .infinity, alignment: .leading)
                         Text(diffText("diff.modified")).frame(maxWidth: .infinity, alignment: .leading)
-                    }.font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.vertical, 5).rayGitChrome()
+                    }.font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 16).frame(height: 32).rayGitChrome()
                     Divider()
                 }
                 DiffTextSurface(diff: diff, languagePath: title, sideBySide: sideBySide, selectedHunk: hunk, dark: colorScheme == .dark, wraps: wraps, lineNumbers: lineNumbers, synchronized: synchronized, fontSize: CGFloat(fontSize), query: query, searchStep: searchStep, matchCount: $matchCount)

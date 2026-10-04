@@ -42,6 +42,7 @@ struct HistoryPane: View {
             if showsSearch {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {
+                    if compact { Label(designWorkspaceText("Commit history"), systemImage: "clock.arrow.circlepath").font(.system(size: 12, weight: .semibold)) }
                     searchControl
                     if !compact { filterControls }
                 }
@@ -52,6 +53,7 @@ struct HistoryPane: View {
             }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8).rayGitChrome()
             Divider()
             }
+            if !compact {
             HStack(spacing: 8) {
                 Text(historyText("history.graph")).frame(width: graphWidth(graph), alignment: .leading)
                 Text(historyText("history.message")).frame(maxWidth: .infinity, alignment: .leading)
@@ -62,6 +64,7 @@ struct HistoryPane: View {
                 Text(historyText("history.hash")).frame(width: 75, alignment: .leading)
             }.font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.vertical, 6).rayGitChrome()
             Divider()
+            }
             if visible.isEmpty {
                 ContentUnavailableView {
                     Label(isLoading ? historyText("history.loading") : historyText("history.empty"), systemImage: "clock.arrow.circlepath")
@@ -78,7 +81,8 @@ struct HistoryPane: View {
                                 ForEach(compact ? Array(commit.refs.prefix(1)) : commit.refs, id: \.self) { ref in
                                     Text(ref).font(.system(size: 10, weight: .medium))
                                         .padding(.horizontal, 5).padding(.vertical, 2)
-                                        .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+                                        .foregroundStyle(ref.contains("origin/") ? RayGitStyle.blue : Color.primary)
+                                        .background((ref.contains("origin/") ? RayGitStyle.blue : Color.secondary).opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
                                         .frame(maxWidth: compact ? 90 : 120).lineLimit(1)
                                         .help(ref)
                                 }
@@ -90,6 +94,7 @@ struct HistoryPane: View {
                                 .font(.system(size: 11)).foregroundStyle(selection == commit.hash ? .primary : .secondary)
                                 .lineLimit(1).frame(width: dateWidth, alignment: .leading)
                             }
+                            if compact { Text(commit.date, style: .relative).font(.system(size: 10)).foregroundStyle(.secondary).frame(width: 65, alignment: .trailing) }
                             Text(commit.shortHash).font(.system(size: 11, design: .monospaced))
                                 .foregroundStyle(selection == commit.hash ? .primary : .secondary).frame(width: 75, alignment: .leading)
                         }.font(.system(size: 12))

@@ -11,14 +11,13 @@ struct RepositorySidebar: View {
     var body: some View {
         VSplitView {
             VStack(spacing: 0) {
-                RayGitPaneHeader(title: interactionText("Repositories"), systemImage: "externaldrive", count: store.recentPaths.count)
+                HStack { Text(interactionText("Repositories")).font(.system(size: 13, weight: .semibold)); Spacer(); Button { store.chooseRepository() } label: { Image(systemName: "plus") }.disabled(store.isBusy) }.padding(.horizontal, 16).frame(height: 42)
                 List {
                     ForEach(store.recentPaths, id: \.self) { path in repositoryRow(path) }
-                    Button { store.chooseRepository() } label: { Label(interactionText("Add Repository…"), systemImage: "plus") }.buttonStyle(.plain).disabled(store.isBusy)
                 }.listStyle(.sidebar).font(.system(size: 12)).scrollContentBackground(.hidden)
-            }.frame(minHeight: 110, idealHeight: 240)
+            }.frame(minHeight: 130, idealHeight: 300)
             VStack(spacing: 0) {
-                RayGitPaneHeader(title: interactionText("Branches"), systemImage: "arrow.triangle.branch", count: store.branches.count)
+                HStack { Text(interactionText("Branches")).font(.system(size: 13, weight: .semibold)); Spacer(); RayGitBadge(String(store.branches.count), tint: .secondary) }.padding(.horizontal, 16).frame(height: 42)
                 List(selection: $branchSelection) {
                     Section(interactionText("Local Branches")) {
                         ForEach(store.branches.filter { !$0.isRemote }) { branch in
@@ -28,6 +27,7 @@ struct RepositorySidebar: View {
                             }
                                 .fontWeight(branch.isCurrent ? .semibold : .regular)
                                 .tag("branch:" + branch.name)
+                                .listRowBackground(branch.isCurrent ? RayGitStyle.blue.opacity(0.12) : Color.clear)
                         }
                     }
                     Section(interactionText("Remote Branches")) {
@@ -72,21 +72,23 @@ struct RepositorySidebar: View {
     private func repositoryRow(_ path: String) -> some View {
         let active = path == store.repositoryURL?.path
         return Button { onAction(.openRepository, path) } label: {
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: active ? "folder.fill" : "folder").foregroundStyle(active ? Color.accentColor : .secondary)
-                    .frame(width: 20, height: 24)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(URL(fileURLWithPath: path).lastPathComponent).fontWeight(active ? .semibold : .regular)
-                        .lineLimit(1).truncationMode(.middle)
-                    if active, !store.branch.isEmpty {
-                        Label(store.branch, systemImage: "arrow.triangle.branch").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                    }
-                }
+            HStack(spacing: 9) {
+                Image(systemName: "folder").frame(width: 20)
+                Text(URL(fileURLWithPath: path).lastPathComponent).font(.system(size: 13))
+                    .lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 0)
-                if active { Circle().fill(Color.accentColor).frame(width: 5, height: 5).accessibilityHidden(true) }
-            }.padding(.vertical, 5).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                if let count = store.repositoryChangeCounts[path] {
+                    Text(String(count)).font(.system(size: 11, weight: .medium))
+                        .padding(.horizontal, 6).padding(.vertical, 3)
+                        .background((active ? Color.white : Color.secondary).opacity(0.14), in: RoundedRectangle(cornerRadius: 5))
+                }
+            }.foregroundStyle(active ? Color.white : Color.primary)
+                .padding(.horizontal, 10).frame(height: 34).frame(maxWidth: .infinity, alignment: .leading)
+                .background(active ? RayGitStyle.blue : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+                .contentShape(Rectangle())
         }.buttonStyle(.plain).help(path).disabled(store.isBusy)
-            .listRowBackground(active ? Color.accentColor.opacity(0.10) : Color.clear)
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(top: 1, leading: 7, bottom: 1, trailing: 7))
             .contextMenu {
                 Button(interactionText("Open Repository")) { onAction(.openRepository, path) }.disabled(store.isBusy)
                 Button(interactionText("Reveal in Finder")) { onAction(.revealRepository, path) }

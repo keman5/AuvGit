@@ -17,9 +17,20 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
     let onAction: (FileAction, Set<String>) -> Void
     let treeContent: TreeContent
 
+    @State private var category = "all"
+    private let categories = ["all", "modified", "added", "deleted", "conflict"]
+    private func matches(_ file: GitFile, _ category: String) -> Bool {
+        switch category {
+        case "conflict": return file.isConflict
+        case "added": return !file.isConflict && (file.isUntracked || file.indexStatus == "A" || file.worktreeStatus == "A")
+        case "deleted": return !file.isConflict && (file.indexStatus == "D" || file.worktreeStatus == "D")
+        case "modified": return !file.isConflict && !matches(file, "added") && !matches(file, "deleted")
+        default: return true
+        }
+    }
     private var visibleFiles: [GitFile] {
         let query = filter.trimmingCharacters(in: .whitespacesAndNewlines)
-        return query.isEmpty ? files : files.filter { RayGitPreferences.matches($0.path, query: query, caseMode: filterCase) }
+        return files.filter { matches($0, category) && (query.isEmpty || RayGitPreferences.matches($0.path, query: query, caseMode: filterCase)) }
     }
     private func text(_ key: String) -> String { L10n.text(key, table: "Files") }
     private func selected(_ paths: Set<String>) -> [GitFile] { files.filter { paths.contains($0.path) } }
@@ -50,37 +61,57 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Picker(workflowText("Files view"), selection: $treeMode) {
-                    Text(workflowText("Status list")).tag(false)
-                    Text(workflowText("Directory tree")).tag(true)
-                }.pickerStyle(.segmented).labelsHidden().accessibilityLabel(workflowText("Files view")).fixedSize(horizontal: true, vertical: false)
-                if !treeMode {
-                    HStack(spacing: 6) {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
-                        TextField(text("filter"), text: $filter).textFieldStyle(.plain)
-                    }.padding(.horizontal, 8).padding(.vertical, 5).rayGitInputSurface().frame(minWidth: 80, maxWidth: 220)
-                    Spacer(minLength: 0)
-                    actionButton("stage", .stage, selection)
-                    actionButton("unstage", .unstage, selection)
-                } else { Spacer(minLength: 0) }
-                Menu {
-                    if !treeMode {
-                        actionButton("compare", .compare, selection, single: true)
-                        actionButton("history", .history, selection, single: true)
-                        actionButton("discard", .discard, selection)
-                        Divider()
-                    }
-                    actionButton("stageAll", .stageAll, Set(files.map(\.path)))
-                    actionButton("unstageAll", .unstageAll, Set(files.map(\.path)))
-                } label: { Image(systemName: "ellipsis.circle") }
-                .menuStyle(.borderlessButton).frame(width: 24).help(text("allActions")).accessibilityLabel(text("allActions"))
-            }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 7).rayGitChrome()
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) { statusControls; Spacer(minLength: 4); fileControls }
+                VStack(spacing: 8) { HStack { statusControls; Spacer() }; HStack { fileControls; Spacer() } }
+            }.controlSize(.small).padding(.horizontal, 14).padding(.vertical, 9).rayGitChrome()
             Divider()
             if treeMode { treeContent }
             else if visibleFiles.isEmpty {
                 RayGitEmptyState(title: text(files.isEmpty ? "clean" : "noFiles"), systemImage: files.isEmpty ? "checkmark.circle" : "magnifyingglass")
             } else { fileTable }
+        }
+    }
+    private var statusControls: some View {
+        HStack(spacing: 7) {
+            Text(designWorkspaceText("Status")).font(.system(size: 12)).foregroundStyle(.secondary)
+            Picker(designWorkspaceText("Status"), selection: $category) {
+                ForEach(categories, id: \.self) { item in Text(categoryTitle(item)).tag(item) }
+            }.labelsHidden().frame(width: 96)
+            ForEach(categories, id: \.self) { item in
+                let tint: Color = item == "all" ? RayGitStyle.blue : item == "modified" ? .orange : item == "added" ? .green : .red
+                Button { category = item; treeMode = false } label: {
+                    HStack(spacing: 5) {
+                        if item != "all" { Image(systemName: item == "conflict" ? "asterisk" : "circle.fill").font(.system(size: 8)) }
+                        Text(categoryTitle(item))
+                        Text(String(files.filter { matches($0, item) }.count)).foregroundStyle(.secondary)
+                    }.font(.system(size: 11, weight: .medium)).padding(.horizontal, 9).padding(.vertical, 5)
+                        .foregroundStyle(category == item ? tint : Color.primary)
+                        .background(tint.opacity(category == item ? 0.17 : 0.07), in: Capsule())
+                }.buttonStyle(.plain)
+            }
+        }
+    }
+    private func categoryTitle(_ category: String) -> String { category == "all" ? designWorkspaceText("All") : text(category) }
+    private var fileControls: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField(text("filter"), text: $filter).textFieldStyle(.plain)
+            }.padding(.horizontal, 9).frame(height: 28).rayGitInputSurface().frame(width: 170)
+            Button { treeMode.toggle() } label: { Image(systemName: treeMode ? "folder" : "list.bullet") }
+                .help(workflowText("Files view")).accessibilityLabel(workflowText("Files view"))
+            Menu {
+                actionButton("stage", .stage, selection)
+                actionButton("unstage", .unstage, selection)
+                actionButton("compare", .compare, selection, single: true)
+                actionButton("history", .history, selection, single: true)
+                actionButton("discard", .discard, selection)
+                Divider()
+                actionButton("stageAll", .stageAll, Set(files.map(\.path)))
+                actionButton("unstageAll", .unstageAll, Set(files.map(\.path)))
+            } label: { Image(systemName: "arrow.triangle.swap") }
+                .menuStyle(.borderlessButton).frame(width: 24).help(text("allActions")).accessibilityLabel(text("allActions"))
         }
     }
     private var fileTable: some View {
@@ -92,14 +123,17 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
                         Text((file.path as NSString).lastPathComponent).lineLimit(1).truncationMode(.middle)
                     }
                 }.width(min: 120, ideal: 220)
-                TableColumn(text("index")) { file in status(file.indexStatus, selected: selection.contains(file.path)) }.width(min: 65, ideal: 85)
-                TableColumn(text("workspace")) { file in status(file.worktreeStatus, selected: selection.contains(file.path)) }.width(min: 65, ideal: 85)
+                TableColumn(designWorkspaceText("Status")) { file in
+                    status(file.isConflict ? "U" : file.isUntracked ? "?" : file.indexStatus != " " ? file.indexStatus : file.worktreeStatus, selected: false)
+                }.width(min: 70, ideal: 90)
+                TableColumn(text("workspace")) { file in status(file.worktreeStatus, selected: false) }.width(min: 65, ideal: 85)
+                TableColumn(text("index")) { file in status(file.indexStatus, selected: false) }.width(min: 65, ideal: 85)
                 TableColumn(text("directory")) { file in
                     let directory = (file.path as NSString).deletingLastPathComponent
                     Text(directory.isEmpty ? "—" : directory).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 }.width(min: 80, ideal: 180)
             }
-            .font(.system(size: 12))
+            .font(.system(size: 12)).environment(\.defaultMinListRowHeight, 28)
             .contextMenu(forSelectionType: String.self) { paths in
                 if paths.isEmpty {
                     actionButton("stageAll", .stageAll, Set(files.map(\.path)))

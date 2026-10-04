@@ -202,6 +202,7 @@ private struct FileCompareContent: View {
     @State private var navigation = 0
     @State private var changeNavigation = 0
     @State private var confirmReload = false
+    @State private var cursor = ComparisonCursorStatus(line: 1, column: 1, selectedCharacters: 0)
     @State private var showBase = false
     @StateObject private var resolver = ComparisonResolverState()
     @State private var conflictLayout = "all"
@@ -233,7 +234,7 @@ private struct FileCompareContent: View {
                             Text(resolverText("All three")).tag("all")
                             Text(resolverText("Result + Theirs")).tag("right")
                         }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 370)
-                        Toggle(compareText("Show merge base"), isOn: $showBase).toggleStyle(.checkbox)
+
                         Spacer(minLength: 0)
                         Button { showConflictHelp.toggle() } label: {
                             Label(compareText("Conflict: edit the result, save, then mark resolved"), systemImage: "info.circle")
@@ -261,25 +262,28 @@ private struct FileCompareContent: View {
             } else if let snapshot = session.snapshot, [snapshot.head.data?.count ?? 0, snapshot.index.data?.count ?? 0, snapshot.worktree.data?.count ?? 0, snapshot.base?.data?.count ?? 0, snapshot.ours?.data?.count ?? 0, snapshot.theirs?.data?.count ?? 0].max()! > 2 * 1024 * 1024 {
                 PagedComparisonView(snapshot: snapshot, layout: layout, baseline: baseline, showBase: showBase)
             } else if session.snapshot != nil {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField(compareText("Find in files"), text: $search).textFieldStyle(.roundedBorder).frame(maxWidth: 260)
-                        .onSubmit { navigation += 1 }
-                    Button { navigation -= 1 } label: { Image(systemName: "chevron.up") }.help(compareText("Previous match")).disabled(search.isEmpty)
-                    Button { navigation += 1 } label: { Image(systemName: "chevron.down") }.help(compareText("Next match")).disabled(search.isEmpty)
-                    if !search.isEmpty { Button { search = "" } label: { Image(systemName: "xmark.circle") } }
-                    Spacer(minLength: 0)
-                }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 6).background(.bar)
-                Divider()
-                ComparisonEditor(columns: columns, wrapLines: wrapLines, showLineNumbers: showNumbers, synchronizeScroll: synchronize, search: search, navigation: navigation, changeNavigation: changeNavigation, onEdit: { id, text in if id == "worktree" { session.draft = text } }, languagePath: session.path, resolver: session.snapshot?.isConflict == true ? resolver : nil)
+                ComparisonEditor(columns: columns, wrapLines: wrapLines, showLineNumbers: showNumbers, synchronizeScroll: synchronize, search: search, navigation: navigation, changeNavigation: changeNavigation, onEdit: { id, text in if id == "worktree" { session.draft = text } }, languagePath: session.path, resolver: session.snapshot?.isConflict == true ? resolver : nil, onCursorChange: { cursor = $0 })
             } else { Spacer(); if session.isBusy { ProgressView() } else { Text(compareText("No file loaded")).foregroundStyle(.secondary) }; Spacer() }
+            if session.snapshot?.isConflict == true, let base = session.snapshot?.base {
+                Divider()
+                CompareBasePanel(column: column("base", "Base (Stage 1)", base), wraps: wrapLines, numbers: showNumbers, expanded: $showBase)
+            }
             Divider()
             HStack {
                 if session.isBusy { ProgressView().controlSize(.mini) }
                 Text(session.isDirty ? compareText("Unsaved changes") : session.savedWorktree?.unavailableReason.map { compareText($0) } ?? session.status)
                 Spacer()
                 Text(session.preferredEncoding?.rawValue ?? session.savedWorktree?.data.map { ComparisonTextDecoder.format(of: $0).encoding.rawValue } ?? "").foregroundStyle(.secondary)
-            }.font(.caption).padding(.horizontal, 12).frame(height: 28)
+                if let data = session.savedWorktree?.data { Text(ComparisonTextDecoder.format(of: data).lineEnding.rawValue.uppercased()).foregroundStyle(.secondary) }
+                if session.snapshot != nil { Text(designCompareText("%d versions", columns.count)).foregroundStyle(.secondary) }
+                Text(designCompareText("Line %d, column %d", cursor.line, cursor.column)).foregroundStyle(.secondary)
+                Text(designCompareText("%d selected", cursor.selectedCharacters)).foregroundStyle(.secondary)
+                if session.snapshot?.isConflict == true {
+                    Button(compareText("Cancel")) { NSApp.keyWindow?.performClose(nil) }
+                    Button(compareText("Save & Mark Resolved")) { Task { await session.stage(resolve: true) } }
+                        .buttonStyle(.borderedProminent).disabled(session.isBusy || !session.canEdit || ConflictDraft.hasConflictMarkers(in: session.draft))
+                }
+            }.font(.caption).padding(.horizontal, 14).frame(height: session.snapshot?.isConflict == true ? 52 : 34).rayGitChrome()
         }.environment(\.locale, L10n.locale)
             .task { await session.reload() }
             .alert(compareText("Replace working tree draft with auto merge?"), isPresented: $confirmMerge) {
@@ -296,46 +300,72 @@ private struct FileCompareContent: View {
             }
     }
     private var controls: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "doc.text").font(.system(size: 14)).foregroundStyle(.secondary)
-                Text(session.path).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.middle).help(session.path)
-                if session.isDirty { Circle().fill(.orange).frame(width: 7, height: 7) }
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Label(session.repository.url.lastPathComponent, systemImage: "folder").foregroundStyle(.secondary)
+                    .lineLimit(1).frame(maxWidth: 260, alignment: .leading)
+                Divider().frame(height: 22)
+                Label(session.path, systemImage: "doc.text").fontWeight(.semibold).lineLimit(1).truncationMode(.middle).help(session.path)
+                Button { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(session.path, forType: .string) } label: { Image(systemName: "doc.on.doc") }.buttonStyle(.plain).help(designCompareText("Copy path"))
                 Spacer()
-                if session.snapshot?.isConflict == true { Button(compareText("Auto Merge")) { if session.draft != session.savedWorktree?.text { confirmMerge = true } else { Task { await session.autoMerge() } } }.disabled(session.isBusy) }
-                Button(compareText("Reload")) { if session.isDirty { confirmReload = true } else { Task { await session.reload() } } }.disabled(session.isBusy)
-                Button(compareText("Save")) { Task { await session.save() } }.keyboardShortcut("s").disabled(!session.isDirty || session.isBusy)
-                Button(compareText(session.snapshot?.isConflict == true ? "Save & Mark Resolved" : "Save & Stage")) { Task { await session.stage(resolve: session.snapshot?.isConflict == true) } }.buttonStyle(.borderedProminent).disabled(session.isBusy || !session.canEdit)
+                if session.isDirty { Label(compareText("Unsaved changes"), systemImage: "circle.fill").foregroundStyle(.orange).font(.caption) }
+                Button { if session.isDirty { confirmReload = true } else { Task { await session.reload() } } } label: { Image(systemName: "arrow.clockwise") }.disabled(session.isBusy).help(compareText("Reload"))
+            }.font(.system(size: 13)).padding(.horizontal, 16).frame(height: 48)
+            Divider()
+            ViewThatFits(in: .horizontal) {
+                comparisonToolbar
+                ScrollView(.horizontal) {
+                    comparisonToolbar.fixedSize(horizontal: true, vertical: false)
+                }
+            }.frame(minHeight: 52)
+            if let snapshot = session.snapshot {
+                HStack(spacing: 9) {
+                    Image(systemName: "arrow.triangle.branch").foregroundStyle(Color.accentColor)
+                    Text(snapshot.isConflict ? designCompareText("Ours → Result ← Theirs") : designCompareText("HEAD ← Index ← Working Tree")).fontWeight(.medium)
+                    Spacer()
+                    if snapshot.isConflict {
+                        Button(compareText("Auto Merge")) { if session.isDirty { confirmMerge = true } else { Task { await session.autoMerge() } } }.disabled(session.isBusy)
+                    }
+                    ExternalComparisonButton(snapshot: snapshot, resultText: session.draft, resultEncoding: session.preferredEncoding, onResult: { session.pendingExternalResult = $0 })
+                    Text(snapshot.isConflict ? designCompareText("Edit the result to resolve conflicts") : designCompareText("Edit the working tree to save your changes")).foregroundStyle(.secondary)
+                }.font(.system(size: 12)).padding(.horizontal, 14).frame(height: 36).background(Color.accentColor.opacity(0.07))
             }
-            HStack(spacing: 8) {
+        }.controlSize(.small).rayGitChrome()
+    }
+    private var comparisonToolbar: some View {
+        HStack(spacing: 10) {
                 Picker(compareText("Layout"), selection: $layout) {
                     Text(compareText("Automatic")).tag("automatic")
                     Text(compareText("Two Columns")).tag("two")
                     Text(compareText("Three Columns")).tag("three")
                     Text(compareText("Patch")).tag("patch")
-                }.pickerStyle(.segmented).labelsHidden().fixedSize(horizontal: true, vertical: false)
-                if layout == "two" && session.snapshot?.isConflict != true {
-                    Picker(compareText("Baseline"), selection: $baseline) { Text("HEAD").tag("head"); Text(compareText("Index")).tag("index") }.labelsHidden().fixedSize(horizontal: true, vertical: false)
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 260)
+                if resolvedLayout == "two" && session.snapshot?.isConflict != true {
+                    Picker(compareText("Baseline"), selection: $baseline) { Text("HEAD").tag("head"); Text(compareText("Index")).tag("index") }.labelsHidden().frame(width: 90)
                 }
-                Button { changeNavigation -= 1 } label: { Image(systemName: "arrow.up") }.help(compareText("Previous change")).disabled(layout == "patch")
-                Button { changeNavigation += 1 } label: { Image(systemName: "arrow.down") }.help(compareText("Next change")).disabled(layout == "patch")
-                Menu(compareText("Use Version")) {
-                    if let snapshot = session.snapshot {
-                        if snapshot.isConflict {
-                            versionButton("Ours", snapshot.ours); versionButton("Theirs", snapshot.theirs); versionButton("Base", snapshot.base)
-                        } else { versionButton("HEAD", snapshot.head); versionButton("Index", snapshot.index) }
-                    }
-                }.menuStyle(.borderlessButton).fixedSize().disabled(!session.canEdit || session.isBusy || layout == "patch")
-                if let snapshot = session.snapshot { ExternalComparisonButton(snapshot: snapshot, resultText: session.draft, resultEncoding: session.preferredEncoding, onResult: { session.pendingExternalResult = $0 }) }
-                ComparisonExtrasMenu(session: session)
-                Menu(compareText("Display")) {
-                    Toggle(compareText("Wrap Lines"), isOn: $wrapLines)
-                    Toggle(compareText("Line Numbers"), isOn: $showNumbers)
-                    Toggle(compareText("Synchronized Scrolling"), isOn: $synchronize)
-                }.menuStyle(.borderlessButton).fixedSize()
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField(compareText("Find in files"), text: $search).textFieldStyle(.plain).onSubmit { navigation += 1 }
+                    if !search.isEmpty { Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain) }
+                }.padding(.horizontal, 9).frame(minWidth: 120, idealWidth: 190, maxWidth: 230).frame(height: 30).rayGitInputSurface()
+                Button { if search.isEmpty { changeNavigation -= 1 } else { navigation -= 1 } } label: { Image(systemName: "arrow.up") }.help(search.isEmpty ? compareText("Previous change") : compareText("Previous match")).disabled(layout == "patch")
+                Button { if search.isEmpty { changeNavigation += 1 } else { navigation += 1 } } label: { Image(systemName: "arrow.down") }.help(search.isEmpty ? compareText("Next change") : compareText("Next match")).disabled(layout == "patch")
+                CompareDisplayButton(title: designCompareText("Sync"), symbol: "link", enabled: $synchronize)
+                CompareDisplayButton(title: designCompareText("Wrap"), symbol: "text.alignleft", enabled: $wrapLines)
+                CompareDisplayButton(title: designCompareText("Lines"), symbol: "list.number", enabled: $showNumbers)
                 Spacer(minLength: 0)
-            }
-        }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8).background(.bar)
+                Menu {
+                    if let snapshot = session.snapshot {
+                        if snapshot.isConflict { versionButton("Ours", snapshot.ours); versionButton("Theirs", snapshot.theirs); versionButton("Base", snapshot.base) }
+                        else { versionButton("HEAD", snapshot.head); versionButton("Index", snapshot.index) }
+                    }
+                } label: { Image(systemName: "doc.on.doc") }.menuStyle(.borderlessButton).fixedSize().help(compareText("Use Version")).disabled(!session.canEdit || session.isBusy || layout == "patch")
+                ComparisonExtrasMenu(session: session)
+                Button(compareText("Save")) { Task { await session.save() } }.keyboardShortcut("s").disabled(!session.isDirty || session.isBusy)
+                if session.snapshot?.isConflict != true {
+                    Button(compareText("Save & Stage")) { Task { await session.stage(resolve: false) } }.buttonStyle(.borderedProminent).disabled(session.isBusy || !session.canEdit)
+                }
+            }.padding(.horizontal, 14).frame(height: 52)
     }
     private func versionButton(_ name: String, _ version: FileRevisionContent?) -> some View {
         Button(compareText(name)) {
@@ -348,25 +378,25 @@ private struct FileCompareContent: View {
     private func column(_ id: String, _ name: String, _ revision: FileRevisionContent?, editable: Bool = false) -> ComparisonEditorColumn {
         let revision = session.preferredEncoding.flatMap { encoding in revision?.reinterpreting(as: encoding) } ?? revision
         let message = revision?.text != nil ? nil : (revision?.unavailableReason.map { compareText($0) } ?? (revision?.exists == true ? nil : compareText("File does not exist in this version")))
-        return ComparisonEditorColumn(id: id, title: compareText(name), text: editable ? session.draft : (revision?.text ?? ""), isEditable: editable && id == "worktree" && session.canEdit && !session.isBusy, message: message)
+        return ComparisonEditorColumn(id: id, title: compareText(name), text: editable ? session.draft : (revision?.text ?? ""), isEditable: editable && id == "worktree" && session.canEdit && !session.isBusy, message: message, detail: editable ? (session.isDirty ? compareText("Unsaved changes") : designCompareText("Editable")) : revision?.objectID.map { String($0.prefix(8)) } ?? designCompareText("Read-only"))
     }
     private var columns: [ComparisonEditorColumn] {
         guard let snapshot = session.snapshot else { return [] }
         if snapshot.isConflict {
-            let left = column(showBase ? "base" : "ours", showBase ? "Base (Stage 1)" : "Ours (Stage 2)", showBase ? snapshot.base : snapshot.ours)
+            let left = column("ours", "Ours (Stage 2)", snapshot.ours)
             let result = column("worktree", session.canEdit ? "Merge Result (Editable)" : "Merge Result (Read-only)", session.savedWorktree, editable: true)
             let right = column("theirs", "Theirs (Stage 3)", snapshot.theirs)
             if conflictLayout == "left" { return [left, result] }
             if conflictLayout == "right" { return [result, right] }
             return [left, result, right]
         }
-        let title = resolvedLayout == "three" ? (session.canEdit ? "Merge Result (Editable)" : "Merge Result (Read-only)") : (session.canEdit ? "Working Tree (Editable)" : "Working Tree (Read-only)")
+        let title = session.canEdit ? "Working Tree (Editable)" : "Working Tree (Read-only)"
         let working = column("worktree", title, session.savedWorktree, editable: true)
         if resolvedLayout == "two" {
             let useHead = layout == "automatic" ? snapshot.presentation.leftRevision == .head : baseline == "head"
             return [useHead ? column("head", "HEAD", snapshot.head) : column("index", "Index", snapshot.index), working]
         }
-        return [column("head", "HEAD", snapshot.head), working, column("index", "Index", snapshot.index)]
+        return [column("head", "HEAD", snapshot.head), column("index", "Index", snapshot.index), working]
     }
 }
 

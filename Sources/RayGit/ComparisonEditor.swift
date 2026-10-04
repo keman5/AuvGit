@@ -28,6 +28,13 @@ struct ComparisonEditorColumn: Identifiable {
     let isEditable: Bool
     let message: String?
     var firstLine: Int = 1
+    var detail: String = ""
+}
+
+struct ComparisonCursorStatus {
+    let line: Int
+    let column: Int
+    let selectedCharacters: Int
 }
 
 struct ComparisonEditor: NSViewRepresentable {
@@ -52,6 +59,7 @@ struct ComparisonEditor: NSViewRepresentable {
     let onEdit: (String, String) -> Void
     var languagePath: String = ""
     var resolver: ComparisonResolverState? = nil
+    var onCursorChange: ((ComparisonCursorStatus) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSSplitView {
@@ -124,6 +132,8 @@ struct ComparisonEditor: NSViewRepresentable {
             var changed = preferencesChanged || rebuild || previousSearch != value.search || previousLanguage != value.languagePath
             for (pane, column) in zip(panes, value.columns) {
                 pane.title.stringValue = column.title
+                pane.detail.stringValue = column.detail
+                pane.detail.toolTip = column.detail
                 pane.text.isEditable = column.isEditable && column.message == nil
                 // Keep undo enabled during save/loading; changing this property clears native history.
                 if !pane.text.allowsUndo { pane.text.allowsUndo = true }
@@ -200,10 +210,16 @@ struct ComparisonEditor: NSViewRepresentable {
             if let text = notification.object as? NSTextView, let paragraph = text.defaultParagraphStyle {
                 text.typingAttributes[.paragraphStyle] = paragraph
             }
-            guard !updating, model.resolver != nil, let text = notification.object as? NSTextView,
+            guard !updating, let text = notification.object as? NSTextView,
                   let pane = panes.first(where: { $0.text === text }) else { return }
+            let source = text.string as NSString
+            let selection = text.selectedRange()
+            let prefix = source.substring(to: min(selection.location, source.length))
+            let selected = source.substring(with: NSIntersectionRange(selection, NSRange(location: 0, length: source.length)))
+            model.onCursorChange?(ComparisonCursorStatus(line: prefix.filter { $0 == "\n" }.count + pane.gutter.firstLine,
+                column: (prefix.components(separatedBy: "\n").last?.count ?? 0) + 1, selectedCharacters: selected.count))
             active = text
-            if pane.id == "worktree", let index = ConflictDraft.blockIndex(atUTF16Offset: text.selectedRange().location, in: text.string) {
+            if model.resolver != nil, pane.id == "worktree", let index = ConflictDraft.blockIndex(atUTF16Offset: text.selectedRange().location, in: text.string) {
                 model.resolver?.selectedBlock = index
                 updateConflictGutters()
             }
@@ -621,6 +637,7 @@ private final class ComparisonTextView: NSTextView {
 private final class Pane: NSView {
     let id: String
     let title = NSTextField(labelWithString: "")
+    let detail = NSTextField(labelWithString: "")
     let message = NSTextField(wrappingLabelWithString: "")
     let scroll = NSScrollView()
     let text = ComparisonTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
@@ -660,18 +677,32 @@ private final class Pane: NSView {
         scroll.documentView = text
         gutter.text = text
         gutter.scroll = scroll
-        title.font = .systemFont(ofSize: 12, weight: .semibold)
-        for view in [title, scroll, gutter, message] {
+        title.font = .systemFont(ofSize: 13, weight: .semibold)
+        detail.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        detail.textColor = .secondaryLabelColor
+        detail.alignment = .right
+        title.lineBreakMode = .byTruncatingTail
+        detail.lineBreakMode = .byTruncatingMiddle
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        for view in [title, detail, scroll, gutter, message] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
         gutterWidth = gutter.widthAnchor.constraint(equalToConstant: 58)
         NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10), title.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10), title.topAnchor.constraint(equalTo: topAnchor, constant: 8), title.heightAnchor.constraint(equalToConstant: 20),
-            gutter.leadingAnchor.constraint(equalTo: leadingAnchor), gutter.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 8), gutter.bottomAnchor.constraint(equalTo: bottomAnchor), gutterWidth,
+            title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10), title.trailingAnchor.constraint(lessThanOrEqualTo: detail.leadingAnchor, constant: -8), title.topAnchor.constraint(equalTo: topAnchor, constant: 12), title.heightAnchor.constraint(equalToConstant: 20),
+            detail.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12), detail.centerYAnchor.constraint(equalTo: title.centerYAnchor), detail.widthAnchor.constraint(lessThanOrEqualToConstant: 150),
+            gutter.leadingAnchor.constraint(equalTo: leadingAnchor), gutter.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 12), gutter.bottomAnchor.constraint(equalTo: bottomAnchor), gutterWidth,
             scroll.leadingAnchor.constraint(equalTo: gutter.trailingAnchor), scroll.trailingAnchor.constraint(equalTo: trailingAnchor), scroll.topAnchor.constraint(equalTo: gutter.topAnchor), scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
             message.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16), message.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16), message.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 20)
         ])
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        NSColor.controlBackgroundColor.setFill()
+        NSRect(x: 0, y: bounds.height - 44, width: bounds.width, height: 44).intersection(dirtyRect).fill()
+        NSColor.separatorColor.setFill()
+        NSRect(x: 0, y: bounds.height - 44, width: bounds.width, height: 1).intersection(dirtyRect).fill()
     }
     required init?(coder: NSCoder) { fatalError() }
     func line(atY y: CGFloat) -> Int {
@@ -751,7 +782,7 @@ private final class LineGutter: NSView {
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
         NSBezierPath(rect: bounds).addClip()
-        NSColor.windowBackgroundColor.setFill()
+        NSColor.controlBackgroundColor.blended(withFraction: 0.45, of: .windowBackgroundColor)?.setFill()
         bounds.intersection(dirtyRect).fill()
         guard let text, let scroll, let layout = text.layoutManager, let container = text.textContainer else { return }
         conflictButtons = []

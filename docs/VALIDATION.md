@@ -239,3 +239,33 @@
 随后工作区普通替换块的行配对改为复用 `ComparisonAlignment`，修复长 Unicode 内容被直接按序配对到错误行的问题；同时修复关闭自动换行时，空白 gutter 小字号造成的行高漂移，高度均衡不再仅在开启自动换行时执行。追加变更重新通过本机 Release 构建，安装副本通过 `codesign` 与可执行文件 `cmp` 检查。
 
 最新版安装包的原生 GUI 确认 `ThreePane.txt` 工作区双栏在关闭自动换行时，`first original` 第2/3行、`anchor B` 第6/9行、Unicode 第9/11行、`anchor C` 第10/12行均像素同高；新增绿、删除红、修改橙及字符级颜色正确。开启自动换行并滚到底后，两栏滚动条值均为1，`anchor C` 第10/12行仍同高。验收后已关闭自动换行。
+
+## 2026-10-04 阶段 4：七张设计稿还原与 AI 提交入口验收
+
+设计路径与原生页面源码映射见 [UI_REDESIGN_20261004.md](UI_REDESIGN_20261004.md)。本机最终应用构建通过；`swift test --build-system native` 全量118项通过。四语言26表981键资源检查通过。使用 `ditto` 更新 `/Applications/RayGit.app`，安装副本通过严格 `codesign` 验证，其可执行文件与本地构建产物经 `cmp` 确认一致。此处不记录尚未完成的 Git 提交为成功。
+
+本轮局部原生 GUI 和 Git 操作证据如下：
+
+| 验证范围 | 实际结果及边界 |
+| --- | --- |
+| 主窗口 | 已查看新的工作区布局；不等于所有空态、错误态或完整历史操作已重测。 |
+| 网络页面 | fixture 真实 `upstream/main` 与 ahead 0 / behind 0 正确显示；本地 bare origin 的 Fetch 成功。未据此宣称互联网远端 Pull / Push 可用。 |
+| 标签页面 | 两个真实标签可见；创建表单展示轻量 / 注释 / 签名类型。未创建、签名或推送标签。 |
+| 编辑器设置 | 卡片与开关实时可见；未点击恢复默认。 |
+| Rebase 脏状态 | 脏 fixture 加载正确提示需要干净工作区；干净 fixture 加载及执行尚待补充。 |
+| 普通比较 | 实际三栏顺序为 HEAD / Index / Worktree；输入 `QA` 后 Undo 恢复干净草稿；换行开关有效。 |
+| 冲突与 Base | `/tmp/raygit-visual-polish-20261004` 中导航第二块成功；展开 Base 显示真实祖先内容。采用 Theirs 后3块变2块，Cmd-Z 恢复3块且草稿干净。 |
+| 内存 / 磁盘边界 | 本轮未保存或暂存冲突测试草稿。`resolver-demo.txt` SHA1 保持 `c923f59cbe92dfad1567c93214cf5d0cbd925766`，磁盘内容未变。 |
+| AI CLI 合成调用 | 首次实际调用因提供方路由失败；修正白名单传输配置后，真实 Codex CLI 的合成输入调用成功。安装版最终 AI GUI 仍待验收，不等于真实已暂存内容到 GUI 草稿的全流程已证明。 |
+
+截图目录 `/tmp/raygit-design-review/` 中保存 `network.png`、`tags.png`、`tag-create.png`、`editor-settings.png`、`compare.png`、`compare-wrapped.png`、`conflict-base.png`。初始视觉基线测量值65.04、覆盖率100%；首轮改版测量值74、覆盖率89.31%。之后工具栏几何已修订，最终截图及测量尚待补；不同覆盖率的局部比较不能当作最终整体还原度，不宣称95%还原。
+
+本轮仍未完成：干净 fixture 的 Rebase、安装版最终 AI 生成、最终工具栏截图与相似度、完整四语言逐页与深色主题、OpenAI 兼容 API、真实互联网远端推送、缺少 CLI 等失败情形，以及取消 / 超时与并发草稿变化的安装版专项。早期阶段的行对齐和保存解决证据继续有效，但不能据此声称本轮全部新增界面与操作已重测。
+
+### 2026-10-04 设计稿还原最终补充
+
+- 安装版AI按钮连续两次成功：`Describe RayGit features in README`、`Describe RayGit capabilities in README`。仅合成fixture暂存README送入当前Codex提供方，HEAD仍为85914f028ba1bac70eae9bd691c74ef430af3be7，暂存仍README两行新增；没有自动提交。
+- `swift test --build-system native --filter 'AICommitDraftGuardTests|BoundedProcessTests'` 4项通过，涵盖草稿拒绝条件与进程成功/取消/超时；GUI取消尝试时请求已结束，不能算GUI取消验证。
+- 干净副本Rebase读取HEAD~3显示3个真实提交、作者和时间，修改pick为reword后预览同步；未执行历史重写。Cmd-K文件搜索有效。
+- 最终本地打包、严格签名、安装二进制cmp通过，重新启动确认工具栏独立无障碍名称。测试开启的换行已恢复关闭。
+- 最终主窗口视觉比较73.39%，可比覆盖99.31%，未达95%。报告`/tmp/raygit-design-review/after-3/report.md`；内容/视口和原生控件仍有差异，不将该值宣称为七张设计图的整体还原度。
