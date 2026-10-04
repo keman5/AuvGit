@@ -4,7 +4,7 @@
 "diff.nextHunk" = "下一個變更區塊";
 "diff.view" = "檢視";
 "diff.sideBySide" = "並排";
-"diff.unified" = "統一";
+"diff.unified" = "合併";
 "diff.loading" = "正在載入差異…";
 "diff.empty" = "沒有可顯示的差異";
 "diff.binary" = "二進位檔案：無法顯示文字差異";

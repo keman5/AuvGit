@@ -8,6 +8,10 @@ public struct FileRevisionContent: Sendable {
     public let unavailableReason: String?
     public var gitMode: String? = nil
     public var objectID: String? = nil
+    public var byteCount: Int? = nil
+    public var canStreamText: Bool = false
+    public var characterCount: Int? { text?.count }
+    public var exceedsPreviewLimit: Bool { exists && data == nil && (byteCount ?? 0) > FileComparisonLimits.previewBytes }
     public var isEditable: Bool { exists && text != nil && unavailableReason == nil }
 }
 
@@ -16,7 +20,18 @@ public struct FileComparisonSnapshot: Sendable {
     public let head, index, worktree: FileRevisionContent
     public let base, ours, theirs: FileRevisionContent?
     public var status: GitFile? = nil
+    public var previewTarget: DiffTarget? = nil
     public var isConflict: Bool { status?.isConflict == true || base != nil || ours != nil || theirs != nil }
+    public var requiresStaticPreview: Bool { ["svg", "pdf"].contains(URL(fileURLWithPath: path).pathExtension.lowercased()) || [head, index, worktree, base, ours, theirs].compactMap { $0 }.contains { $0.isBinary || $0.exceedsPreviewLimit || ($0.data != nil && $0.text == nil) } }
+}
+
+public enum FileComparisonLimits { public static let previewBytes = 32 * 1024 * 1024 }
+private func hasUTF8TextPrefix(_ data: Data) -> Bool {
+    guard !data.contains(0) else { return false }
+    for trim in 0...min(3, data.count) {
+        if ComparisonTextDecoder.decode(Data(data.dropLast(trim))).text != nil { return true }
+    }
+    return data.isEmpty
 }
 
 private let comparisonLimit = 2 * 1024 * 1024
@@ -32,7 +47,7 @@ private func decodeContent(_ data: Data, reason: String? = nil) -> FileRevisionC
         return [value.contains("\r\n"), remainder.contains("\n"), remainder.contains("\r")].filter { $0 }.count > 1
     } ?? false
     return FileRevisionContent(data: data, text: text?.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n"), exists: true, isBinary: binary,
-        unavailableReason: reason ?? (mixedEndings ? "Files with mixed line endings are read-only." : data.count > comparisonLimit ? "Files larger than 2 MB are read-only." : decoded.readOnlyReason))
+        unavailableReason: reason ?? (mixedEndings ? "Files with mixed line endings are read-only." : data.count > comparisonLimit ? "Files larger than 2 MB are read-only." : decoded.readOnlyReason), byteCount: data.count)
 }
 
 extension GitRepository {
@@ -57,23 +72,42 @@ extension GitRepository {
         guard attrs[.type] as? FileAttributeType == .typeRegular else {
             return FileRevisionContent(data: nil, text: nil, exists: true, isBinary: false, unavailableReason: "Symbolic links and non-regular files are read-only.")
         }
-        if (attrs[.size] as? NSNumber)?.intValue ?? 0 > 32 * 1024 * 1024 {
-            return FileRevisionContent(data: nil, text: nil, exists: true, isBinary: false, unavailableReason: "Files larger than 2 MB are read-only.")
+        let byteCount = (attrs[.size] as? NSNumber)?.intValue ?? 0
+        if byteCount > FileComparisonLimits.previewBytes {
+            let handle = try FileHandle(forReadingFrom: file)
+            defer { try? handle.close() }
+            let sample = try handle.read(upToCount: 4096) ?? Data()
+            let streamable = hasUTF8TextPrefix(sample)
+            return FileRevisionContent(data: nil, text: nil, exists: true, isBinary: !streamable, unavailableReason: "File exceeds preview limit.", byteCount: byteCount, canStreamText: streamable)
         }
         let permissions = (attrs[.posixPermissions] as? NSNumber)?.intValue ?? 0
-        var content = decodeContent(try Data(contentsOf: file), reason: permissions & 0o222 == 0 ? "The file is read-only." : nil)
+        let handle = try FileHandle(forReadingFrom: file)
+        defer { try? handle.close() }
+        let data = try handle.read(upToCount: FileComparisonLimits.previewBytes + 1) ?? Data()
+        guard data.count <= FileComparisonLimits.previewBytes else {
+            return FileRevisionContent(data: nil, text: nil, exists: true, isBinary: !hasUTF8TextPrefix(Data(data.prefix(4096))), unavailableReason: "File exceeds preview limit.", byteCount: max(byteCount, data.count), canStreamText: hasUTF8TextPrefix(Data(data.prefix(4096))))
+        }
+        var content = decodeContent(data, reason: permissions & 0o222 == 0 ? "The file is read-only." : nil)
         content.gitMode = permissions & 0o111 != 0 ? "100755" : "100644"
         return content
     }
     private func blobContent(_ oid: String, mode: String) async throws -> FileRevisionContent {
         if mode == "160000" || mode == "040000" { return FileRevisionContent(data: nil, text: nil, exists: true, isBinary: false, unavailableReason: "Directories and submodules are read-only.", gitMode: mode, objectID: oid) }
         let size = try await GitProcess.run(at: url, arguments: ["cat-file", "-s", oid])
-        if (Int(size.text.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0) > 32 * 1024 * 1024 {
-            return FileRevisionContent(data: nil, text: nil, exists: true, isBinary: false, unavailableReason: "Files larger than 2 MB are read-only.", gitMode: mode, objectID: oid)
+        let byteCount = Int(size.text.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        if byteCount > FileComparisonLimits.previewBytes {
+            let sample = try await blobPrefix(oid)
+            let streamable = hasUTF8TextPrefix(sample)
+            return FileRevisionContent(data: nil, text: nil, exists: true, isBinary: !streamable, unavailableReason: "File exceeds preview limit.", gitMode: mode, objectID: oid, byteCount: byteCount, canStreamText: streamable)
         }
         var content = decodeContent(try await GitProcess.run(at: url, arguments: ["cat-file", "blob", oid]).data, reason: mode == "120000" ? "Symbolic links are read-only." : mode == "160000" ? "Submodules are read-only." : nil)
         content.gitMode = mode; content.objectID = oid
         return content
+    }
+    private func blobPrefix(_ oid: String) async throws -> Data {
+        return try await GitCommandLog.$suppressRoutineReads.withValue(true) {
+            try await GitProcess.run(at: url, arguments: ["cat-file", "blob", oid], timeout: 5, outputPrefixBytes: 4096).data
+        }
     }
     public func fileComparison(path: String) async throws -> FileComparisonSnapshot {
         let file = try comparisonURL(path)
@@ -96,6 +130,45 @@ extension GitRepository {
             if fields.count == 3, let stage = Int(fields[2]) { stages[stage] = try await blobContent(String(fields[1]), mode: String(fields[0])) }
         }
         return FileComparisonSnapshot(path: path, head: head, index: stages[0] ?? missingContent(), worktree: try diskContent(file), base: stages[1], ours: stages[2], theirs: stages[3], status: fileStatus)
+    }
+    public func comparisonPreview(target: DiffTarget) async throws -> FileComparisonSnapshot {
+        switch target {
+        case let .worktree(path, _):
+            let file = try comparisonURL(path)
+            let original = try await indexComparisonContent(path: path)
+            return FileComparisonSnapshot(path: path, head: original, index: original, worktree: try diskContent(file), base: nil, ours: nil, theirs: nil, previewTarget: target)
+        case let .staged(path):
+            _ = try comparisonURL(path)
+            let original = try await status().first(where: { $0.path == path })?.originalPath ?? path
+            let headCheck = try await GitProcess.run(at: url, arguments: ["rev-parse", "--verify", "HEAD"], allowedCodes: [0, 128])
+            let left = headCheck.code == 0 ? try await treeComparisonContent(revision: "HEAD", path: original) : missingContent()
+            let right = try await indexComparisonContent(path: path)
+            return FileComparisonSnapshot(path: path, head: left, index: left, worktree: right, base: nil, ours: nil, theirs: nil, previewTarget: target)
+        case let .commit(hash, path):
+            _ = try comparisonURL(path)
+            let revision = try await workflowRevision(hash)
+            let parent = try await GitProcess.run(at: url, arguments: ["rev-parse", "--verify", revision + "^"], allowedCodes: [0, 128])
+            let original = try await commitFiles(hash: revision).first(where: { $0.path == path })?.originalPath ?? path
+            let left = parent.code == 0 ? try await treeComparisonContent(revision: parent.text.trimmingCharacters(in: .whitespacesAndNewlines), path: original) : missingContent()
+            let right = try await treeComparisonContent(revision: revision, path: path)
+            return FileComparisonSnapshot(path: path, head: left, index: left, worktree: right, base: nil, ours: nil, theirs: nil, previewTarget: target)
+        }
+    }
+    private func indexComparisonContent(path: String) async throws -> FileRevisionContent {
+        let listing = try await GitProcess.run(at: url, arguments: ["ls-files", "--stage", "-z", "--", path])
+        for entry in listing.data.split(separator: 0) {
+            guard let tab = entry.firstIndex(of: 9) else { continue }
+            let fields = String(decoding: entry[..<tab], as: UTF8.self).split(separator: " ")
+            if fields.count == 3, fields[2] == "0" { return try await blobContent(String(fields[1]), mode: String(fields[0])) }
+        }
+        return missingContent()
+    }
+    private func treeComparisonContent(revision: String, path: String) async throws -> FileRevisionContent {
+        let tree = try await GitProcess.run(at: url, arguments: ["ls-tree", "-z", revision, "--", path])
+        guard let entry = tree.data.split(separator: 0).first, let tab = entry.firstIndex(of: 9) else { return missingContent() }
+        let fields = String(decoding: entry[..<tab], as: UTF8.self).split(separator: " ")
+        guard fields.count == 3 else { return missingContent() }
+        return try await blobContent(String(fields[2]), mode: String(fields[0]))
     }
     private func checkedWorktree(_ path: String, expected: FileRevisionContent, encoding: ComparisonEncoding? = nil) throws -> (URL, FileRevisionContent) {
         let file = try comparisonURL(path), current = try diskContent(file)

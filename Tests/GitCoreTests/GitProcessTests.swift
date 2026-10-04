@@ -9,6 +9,14 @@ private final class ProgressRecorder: @unchecked Sendable {
     var text: String { lock.lock(); defer { lock.unlock() }; return values.joined() }
 }
 final class GitProcessTests: XCTestCase {
+    func testGitHubAuthenticationFallbackIsCommandLocalAndHostScoped() {
+        XCTAssertEqual(NetworkAuthentication.arguments(ghPath: nil), [])
+        XCTAssertEqual(NetworkAuthentication.arguments(ghPath: "/opt/homebrew/bin/gh"), [
+            "-c", "credential.https://github.com.helper=!'/opt/homebrew/bin/gh' auth git-credential"
+        ])
+        XCTAssertEqual(NetworkAuthentication.arguments(ghPath: "/test/a'b/gh").last,
+                       "credential.https://github.com.helper=!'/test/a'\\''b/gh' auth git-credential")
+    }
     private func fixture() async throws -> URL {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -52,6 +60,18 @@ final class GitProcessTests: XCTestCase {
         do { _ = try await task.value; XCTFail("Expected cancellation") } catch is CancellationError {}
         let result = try await GitProcess.run(at: directory, arguments: ["config", "--get", "should.not.exist"], allowedCodes: [0, 1])
         XCTAssertEqual(result.code, 1)
+    }
+    func testFailurePreservesBothDiagnosticStreams() async throws {
+        let directory = try await fixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        _ = try await GitProcess.run(at: directory, arguments: ["config", "alias.rejected", "!printf 'remote rejected branch\\n'; printf 'push failed\\n' >&2; exit 1"])
+        do {
+            _ = try await GitProcess.run(at: directory, arguments: ["rejected"])
+            XCTFail("Expected command rejection")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("push failed"))
+            XCTAssertTrue(error.localizedDescription.contains("remote rejected branch"))
+        }
     }
     func testConcurrentCommandsDoNotInheritEachOthersPipes() async throws {
         let directory = try await fixture()

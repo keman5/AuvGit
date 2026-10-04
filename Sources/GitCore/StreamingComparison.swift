@@ -37,6 +37,13 @@ public actor StreamingTextFile {
         }
     }
     deinit { try? handle.close(); if let temporaryDirectory { try? FileManager.default.removeItem(at: temporaryDirectory) } }
+    public func search(_ options: LargeTextSearchOptions) async throws -> LargeTextSearchResult {
+        try checkSnapshot()
+        let result = try await LargeTextSearch.file(url, options: options)
+        try checkSnapshot()
+        return result
+    }
+    public func comparisonURL() throws -> URL { try checkSnapshot(); return url }
     private func checkSnapshot() throws {
         let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
         guard attrs[.type] as? FileAttributeType == .typeRegular,
@@ -76,6 +83,24 @@ public actor StreamingTextFile {
     }
 }
 extension GitRepository {
+    public func streamingDiff(path: String, revision: StreamingRevision) async throws -> String {
+        switch revision {
+        case .worktree:
+            let file = try await status().first(where: { $0.path == path })
+            if file?.isConflict == true { return try await streamingDiff(path: path, revision: .ours) }
+            let untracked = file?.isUntracked ?? false
+            return try await diff(target: .worktree(path: path, untracked: untracked))
+        case .index: return try await diff(target: .staged(path: path))
+        case .head: return try await diff(target: .commit(hash: "HEAD", path: path))
+        case .base, .ours, .theirs:
+            let source = try await streamingContent(path: path, revision: revision)
+            let target = try streamingWorktree(path: path)
+            let sourceURL = try await source.comparisonURL(), targetURL = try await target.comparisonURL()
+            let result = try await GitProcess.run(at: url, arguments: ["diff", "--no-index", "--no-ext-diff", "--no-textconv", "--no-color", "--", sourceURL.path, targetURL.path], allowedCodes: [0, 1])
+            withExtendedLifetime((source, target)) {}
+            return result.text
+        }
+    }
     public func streamingWorktree(path: String) throws -> StreamingTextFile {
         let parts = path.split(separator: "/", omittingEmptySubsequences: false)
         guard !path.isEmpty, !path.hasPrefix("/"), !path.contains("\0"), !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." || $0.lowercased() == ".git" }) else { throw GitError("Invalid repository file path.") }

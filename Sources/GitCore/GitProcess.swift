@@ -3,8 +3,10 @@ import Darwin
 
 public struct GitError: LocalizedError, Sendable {
     public let message: String
+    public let exitCode: Int32?
     public var errorDescription: String? { message }
-    public init(_ message: String) {
+    public init(_ message: String, exitCode: Int32? = nil) {
+        self.exitCode = exitCode
         self.message = message.replacingOccurrences(of: #"(https?://)[^/\s@]+@"#, with: "$1[redacted]@", options: .regularExpression)
     }
 }
@@ -16,10 +18,12 @@ private final class Capture: @unchecked Sendable {
     private let lock = NSLock()
     private var bytes = Data()
     private var overflow = false
-    func read(_ handle: FileHandle, onChunk: (@Sendable (String) -> Void)? = nil) {
+    private var prefixComplete = false
+    var completedPrefix: Bool { lock.lock(); defer { lock.unlock() }; return prefixComplete }
+    func read(_ handle: FileHandle, onChunk: (@Sendable (String) -> Void)? = nil, prefixBytes: Int? = nil, onPrefix: (() -> Void)? = nil) {
         defer { try? handle.close() }
         while true {
-            let chunk = handle.readData(ofLength: 65536)
+            let chunk = handle.readData(ofLength: prefixBytes.map { max(1, $0 - bytes.count) } ?? 65536)
             if chunk.isEmpty { break }
             lock.lock()
             let remaining = max(0, 32 * 1024 * 1024 - bytes.count)
@@ -27,6 +31,10 @@ private final class Capture: @unchecked Sendable {
             if chunk.count > remaining { overflow = true }
             lock.unlock()
             onChunk?(String(decoding: chunk, as: UTF8.self))
+            if let prefixBytes, bytes.count >= prefixBytes {
+                lock.lock(); prefixComplete = true; lock.unlock()
+                onPrefix?(); return
+            }
         }
     }
     func result() -> (Data, Bool) { lock.lock(); defer { lock.unlock() }; return (bytes, overflow) }
@@ -46,13 +54,26 @@ private final class GitCancellation: @unchecked Sendable {
 }
 
 enum GitProcess {
-    static func run(at directory: URL, arguments: [String], allowedCodes: Set<Int32> = [0], timeout: TimeInterval? = nil, executable: String? = nil, progress: (@Sendable (String) -> Void)? = nil, outputFile: URL? = nil) async throws -> GitOutput {
+    static func run(at directory: URL, arguments: [String], allowedCodes: Set<Int32> = [0], timeout: TimeInterval? = nil, executable: String? = nil, progress: (@Sendable (String) -> Void)? = nil, outputFile: URL? = nil, outputPrefixBytes: Int? = nil) async throws -> GitOutput {
         let cancellation = GitCancellation()
+        let started = Date()
+        let commandExecutable = executable ?? GitRuntimePreferences.shared.executablePath
+        let preferences = GitRuntimePreferences.shared
+        let proxyArguments = preferences.proxyMode == "inherit" ? [] : ["-c", "http.proxy=" + (preferences.proxyMode == "manual" ? preferences.proxyURL : "")]
+        let actualArguments = ["--no-pager"] + proxyArguments + arguments
+        let logCommand = !GitCommandLog.suppressRoutineReads
         return try await withTaskCancellationHandler {
-            try Task.checkCancellation()
-            return try await Task.detached(priority: .userInitiated) {
-                try runBlocking(at: directory, arguments: arguments, allowedCodes: allowedCodes, timeout: timeout ?? GitRuntimePreferences.shared.timeout, executable: executable ?? GitRuntimePreferences.shared.executablePath, progress: progress, outputFile: outputFile, cancellation: cancellation)
-            }.value
+            do {
+                try Task.checkCancellation()
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try runBlocking(at: directory, arguments: actualArguments, allowedCodes: allowedCodes, timeout: timeout ?? GitRuntimePreferences.shared.timeout, executable: commandExecutable, progress: progress, outputFile: outputFile, outputPrefixBytes: outputPrefixBytes, cancellation: cancellation)
+                }.value
+                if logCommand { GitCommandLog.record(directory: directory, executable: commandExecutable, arguments: actualArguments, output: result.text + "\n" + result.error, error: nil, exitCode: result.code, started: started) }
+                return result
+            } catch {
+                if logCommand { GitCommandLog.record(directory: directory, executable: commandExecutable, arguments: actualArguments, output: "", error: error.localizedDescription, exitCode: (error as? GitError)?.exitCode, started: started) }
+                throw error
+            }
         } onCancel: { cancellation.cancel() }
     }
     static func runToFile(at directory: URL, arguments: [String], outputFile: URL) async throws {
@@ -60,11 +81,15 @@ enum GitProcess {
         do { _ = try await run(at: directory, arguments: arguments, outputFile: outputFile) }
         catch { try? FileManager.default.removeItem(at: outputFile); throw error }
     }
-    private static func runBlocking(at directory: URL, arguments: [String], allowedCodes: Set<Int32>, timeout: TimeInterval, executable: String, progress: (@Sendable (String) -> Void)?, outputFile: URL?, cancellation: GitCancellation) throws -> GitOutput {
+    private static func runBlocking(at directory: URL, arguments: [String], allowedCodes: Set<Int32>, timeout: TimeInterval, executable: String, progress: (@Sendable (String) -> Void)?, outputFile: URL?, outputPrefixBytes: Int?, cancellation: GitCancellation) throws -> GitOutput {
+        let prefixLimit = outputPrefixBytes.map { min(32 * 1024 * 1024, max(1, $0)) }
         if cancellation.isCancelled { throw CancellationError() }
         var environment = GitRuntimePreferences.shared.environment(ProcessInfo.processInfo.environment)
         environment["GIT_TERMINAL_PROMPT"] = "0"; environment["GIT_LITERAL_PATHSPECS"] = "1"
-        environment["GIT_ASKPASS"] = "/usr/bin/false"; environment["SSH_ASKPASS"] = "/usr/bin/false"
+        // Reuse explicitly configured GUI authentication providers when inherited.
+        // The fallback keeps unattended commands from opening an interactive prompt.
+        if environment["GIT_ASKPASS"] == nil { environment["GIT_ASKPASS"] = "/usr/bin/false" }
+        if environment["SSH_ASKPASS"] == nil { environment["SSH_ASKPASS"] = "/usr/bin/false" }
         if environment["GIT_SSH_COMMAND"] == nil { environment["GIT_SSH_COMMAND"] = "ssh -oBatchMode=yes" }
         var searchPaths = (environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin").components(separatedBy: ":")
         for path in ["/opt/homebrew/bin", "/usr/local/bin"] where !searchPaths.contains(path) { searchPaths.append(path) }
@@ -91,9 +116,7 @@ enum GitProcess {
         // The process group is installed atomically before exec, so descendants inherit it.
         posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT))
         posix_spawnattr_setpgroup(&attributes, 0)
-        let proxy = GitRuntimePreferences.shared
-        let proxyArgs = proxy.proxyMode == "inherit" ? [] : ["-c", "http.proxy=" + (proxy.proxyMode == "manual" ? proxy.proxyURL : "")]
-        let argv = ([executable, "--no-pager"] + proxyArgs + arguments).map { strdup($0) } + [nil]
+        let argv = ([executable] + arguments).map { strdup($0) } + [nil]
         let env = environment.map { strdup($0.key + "=" + $0.value) } + [nil]
         defer { argv.compactMap { $0 }.forEach { free($0) }; env.compactMap { $0 }.forEach { free($0) } }
         var pid: pid_t = 0
@@ -106,7 +129,11 @@ enum GitProcess {
         defer { cancellation.clear() }
         let out = Capture(), err = Capture(), readers = DispatchGroup()
         let stdoutHandle = FileHandle(fileDescriptor: stdoutFD[0], closeOnDealloc: true), stderrHandle = FileHandle(fileDescriptor: stderrFD[0], closeOnDealloc: true)
-        readers.enter(); DispatchQueue.global().async { out.read(stdoutHandle); readers.leave() }
+        let spawnedPID = pid
+        readers.enter(); DispatchQueue.global().async {
+            out.read(stdoutHandle, prefixBytes: prefixLimit, onPrefix: { kill(-spawnedPID, SIGTERM) })
+            readers.leave()
+        }
         readers.enter(); DispatchQueue.global().async { err.read(stderrHandle, onChunk: progress); readers.leave() }
         let deadline = Date().addingTimeInterval(timeout)
         var status: Int32 = 0, stopped: Date?, timedOut = false, wasCancelled = false
@@ -119,8 +146,13 @@ enum GitProcess {
                 waitFailure = errno; break
             }
             if info.si_pid == pid { break }
-            if cancellation.isCancelled || Date() >= deadline {
+            if cancellation.isCancelled || (!out.completedPrefix && Date() >= deadline) {
                 wasCancelled = cancellation.isCancelled; timedOut = !wasCancelled
+                if stopped == nil { stopped = Date(); kill(-pid, SIGTERM) }
+                if let stopped, Date().timeIntervalSince(stopped) >= 0.5 { kill(-pid, SIGKILL) }
+            } else if out.completedPrefix {
+                // Git may wait for a helper after its stdout has been closed. Prefix
+                // completion owns the same bounded shutdown as timeout/cancellation.
                 if stopped == nil { stopped = Date(); kill(-pid, SIGTERM) }
                 if let stopped, Date().timeIntervalSince(stopped) >= 0.5 { kill(-pid, SIGKILL) }
             }
@@ -145,10 +177,18 @@ enum GitProcess {
         if oversized || errorOversized { throw GitError("Git output exceeds the 32 MB display limit.") }
         let code: Int32 = status & 0x7f == 0 ? (status >> 8) & 0xff : 128 + (status & 0x7f)
         let output = GitOutput(data: data, error: String(decoding: errorData, as: UTF8.self), code: code)
+        let prefixFinished = out.completedPrefix && [Int32(0), 128 + SIGTERM, 128 + SIGPIPE, 128 + SIGKILL].contains(code)
         if !allowedCodes.contains(code), output.error.contains("git-lfs"), output.error.contains("not found") || output.error.contains("No such file") {
             throw GitError("Git LFS is required by this repository but git-lfs was not found. Install Git LFS or add its executable directory to PATH, then reopen RayGit.")
         }
-        if !allowedCodes.contains(code) { throw GitError(output.error.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Git command failed (\(code))." : output.error.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        if !allowedCodes.contains(code) && !prefixFinished {
+            // Porcelain commands (including push) also report rejection details on stdout.
+            let diagnostics = [output.error, output.text]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+            throw GitError(diagnostics.isEmpty ? "Git command failed (\(code))." : diagnostics, exitCode: code)
+        }
         return output
     }
 }

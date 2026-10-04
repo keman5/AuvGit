@@ -309,3 +309,71 @@
 - 本地release构建及安装至`/Applications/RayGit.app`完成，严格签名与可执行文件cmp通过。日志：`/tmp/raygit-compact-final-tests.log`、`/tmp/raygit-compact-final-build.log`。
 - 最终安装版GUI：LongCompare首次显示第160行，双栏/三栏滚动值均0.8121565934065934；三栏窗口1400→1050pt仍保持第160行及后续上下文同高。ConflictLater首次显示第140行，三侧滚动值均0.8421696574225123；栏间我方箭头采用后冲突清零，Cmd-Z恢复1块且保存禁用；窄窗口仍保持三栏共同上下文对齐及顶部控件完整。未保存/暂存，两个fixture文件SHA256均与验证前一致。换行/行号/同步滚动保持开启。
 - 同尺寸冲突截图比较，正文顶部从约284pt缩至158pt，新增约126pt代码显示高度。有效截图：`/tmp/raygit-compact-before.png`、`/tmp/raygit-compact-after.png`、`/tmp/raygit-compact-ordinary.png`、`/tmp/raygit-compact-three-narrow.png`、`/tmp/raygit-compact-conflict-narrow.png`。未穷尽大字号、六位行号、所有语言和媒体/分页比较的GUI验证。
+
+### 2026-10-04 单行对比、状态图标与独立日志窗口
+
+- 对比顶部合并为单行主工具栏，完整文件路径移到原生标题栏。两栏/三栏在切换和窗口缩放时等宽；栏间箭头缩为20×24pt，预留24pt栏位，不因接受全部变化或忙碌状态收缩。关闭确认返回后先显式移除确认窗口，再关闭对比窗口。
+- 工作区删除工作区/提交历史切换整行，将范围、忽略空白和编辑入口移入差异区现有三点菜单；所有省略号更多菜单隐藏下拉标记。文件状态采用8种图标筛选，新增点路径隐藏文件显示与真实Git忽略文件只读列表。树形视图支持状态/搜索/隐藏筛选，显示忽略文件时切换到列表。
+- 实际检查本机SmartGit 26.1日志窗口后新增Cmd-L独立日志：左引用/分支/标签、上部提交图与右侧提交详情/文件、底部跨宽差异。每仓库复用窗口，独立RepositoryStore不写主会话；关闭释放监听和安全作用域访问；日志置前时Cmd-R刷新日志，主工作区暂存/提交快捷键禁用。
+- 首轮完整测试发现旧divider约束在resize后恢复手动拖动比例；改为AppKit布局后更新divider位置。最终全量137项测试0失败（`/tmp/raygit-compact-ui-final-tests.log`），22项定向测试0失败（`/tmp/raygit-compact-ui-focused.log`）。本地Release构建、安装至`/Applications/RayGit.app`、严格签名检查和二进制cmp通过（`/tmp/raygit-compact-ui-build.log`）。
+- 已安装应用GUI验证使用新建可丢弃fixture `raygit-compact-ui-2tmxuwii`：隐藏开关移除`.hidden-demo.txt`；忽略开关显示`ignored-demo.log`且菜单仅Finder显示/复制；已修改筛选在树中仅显示`long-compare.txt`。Cmd-L显示6个提交，选中提交联动Config.swift及真实补丁；标签v0.1.0范围缩为2个提交；再次Cmd-L保留同窗和选择，关闭后工作区仍为原3个变化。
+- 对比GUI验证：标题栏为完整路径、主控件单行、双栏699.5pt、三栏466pt均分；首次定位160行。采用索引块后点击关闭→放弃草稿，随后AX直接返回工作区，确认框和比较窗均无残留；磁盘逐字验证仍保留原`Changed line 160`，没有保存或暂存。布局缩放和接受全部后固定栏宽另由AppKit回归测试覆盖。
+- 截图：`/tmp/raygit-compact-log.png`、`/tmp/raygit-compact-three.png`。未在GUI穷尽日志写操作、所有语言和所有极端窗口尺寸；隐藏文件开关按路径中的点文件/点目录判断，未扩展Finder隐藏属性。
+
+### 2026-10-04 主工具栏、设置点击区域与网络认证
+
+- 主工具栏移除仓库切换，默认 Pull / Push、弹性间距、暂存 / 取消暂存 / 丢弃 / 贮藏 / 应用贮藏、弹性间距、刷新 / 创建仓库。自定义面板暴露原生普通和可调间距；文件操作按有效选择启用，应用贮藏主操作与 Cmd-Shift-S 应用最新记录并保留确认，菜单可选其他记录。
+- 设置侧栏图标由18pt改为14pt，完整padding后的矩形作为点击区域。安装版点击编辑器分类最右侧空白后成功切换页面。
+- 实际报错为 GitHub HTTPS 无法取得用户名且 askpass 被禁用。本机gh已有登录，而默认钥匙串helper未返回凭据；网络命令以仅github.com生效的命令级helper回退复用gh，原有helper优先，不写仓库或全局Git配置。显式askpass不再被覆盖；失败时保留stderr与stdout的完整诊断。
+- 全量139项测试0失败（`/tmp/raygit-toolbar-test.log`）；四语言28表1011键检查及git diff --check通过。Release构建、安装、严格签名验证与二进制cmp通过（`/tmp/raygit-toolbar-build.log`）。
+- 安装版使用独立本地`raygit-toolbar-hxlo35cd/Toolbar QA`及裸仓库：暂存0→1→取消暂存0；丢弃仅测试文件恢复干净；Cmd-Shift-S确认后恢复stash.txt且贮藏记录保留；工具栏贮藏后工作区干净。Pull得到Incoming测试提交和实际文件，Push后裸仓库HEAD与本地新提交相同。Rayon仅执行相同认证回退的只读ls-remote并成功，未实际推送真实仓库。
+- 自定义面板已显示原生间距选项；添加一次后偏好文件记录三个NSToolbarFlexibleSpaceItem（含两个默认项）。继续添加及重启恢复验证时Mac锁屏，剩余GUI验收待解锁；不将已保存配置视为重启恢复证据。
+
+### 2026-10-04 紧凑操作、表格排序与失败日志
+
+- 顶部操作使用紧凑图标加文字，应用贮藏默认合入更多菜单；提交选项移至右上，底部提交与修订复选框同行。应用自绘圆角不超过10pt，主界面、比较、日志及设置按钮边框统一6pt；系统原生窗口和菜单外框由macOS控制。
+- 文件表五列接入原生排序及箭头；无选择时暂存/取消暂存/丢弃解析全部符合条件文件，已有选择则限定选择。丢弃仍确认且排除未跟踪、忽略及冲突文件。仓库按钮使用无额外顶部inset的ScrollView，点击与右键区域同宽；同步图标使用本地upstream计数及冲突状态，不主动fetch。
+- Git命令日志包含实际argv（敏感配置脱敏）、目录、输出、退出码、时间和耗时，保留最近300条，详情默认收起。无变化轮询和可选upstream探测不刷日志；常见失败摘要支持四语言。专用弹窗失败也桥接到底部状态栏，无CLI的校验失败单独记录，不伪造命令。
+- 最终逻辑版本全量146项测试0失败（`/tmp/raygit-polish-final-tests.log`）；四语言31表1045键检查通过。随后仅按钮形状及仓库列表容器调整，经Release构建及安装版检查。最终本地Release、安装`/Applications/RayGit.app`、严格签名及二进制cmp通过（`/tmp/raygit-polish-build.log`）。
+- 安装版临时仓库`raygit-polish-qa-zs5d8pok`中无选中项暂存1→4、取消暂存4→0；丢弃确认准确列出3个tracked文件并排除New.txt，随后取消。名称表头切换升降序及箭头已观察。实际模拟本地tracking refs分别验证可推送1、可拉取1、推送1且拉取1图标；既有冲突fixture显示冲突图标；右键仓库无延长的外围选中框。
+- 打开非仓库目录后底部显示“此目录不是 Git 仓库”，点击日志初始全部折叠，展开可见`git --no-pager rev-parse --show-toplevel`、退出128与原始fatal文本。历史窗口alternate→main均自动选择首条，选中文字和标签白色可读；“合并”名称已生效。截图：`/tmp/raygit-polish-operation-log.png`、`/tmp/raygit-polish-history.png`。未穷尽各语言GUI和所有专用弹窗的失败路径；丢弃实际写入沿用核心回归覆盖，本轮GUI仅确认范围。
+
+### 2026-10-04 图标、贮藏日志与静态文件预览
+
+- 本机 SmartGit 26.1 只读参考后重新设计主工具栏图标：24×23pt 轮廓加彩色操作角标，遵循原生“仅图标 / 图标和文本”模式。应用贮藏采用独立主操作与下拉列表的合并按钮，无记录禁用，长记录名称截断；修复原生 split Menu 仅抽取首个 SF Symbol 导致角标丢失的问题，使用完整图像桥接。
+- 文件状态筛选去除背景及额外padding，隐藏与忽略图标区分，移除重命名筛选入口；文件行按状态显示角标，仓库保留文件夹并叠加同步/冲突指示。默认名称、状态、相对目录三列，表头原生右键菜单可开启工作区/索引列，首屏文件区300pt。修订勾选不显示内联警告，搜索占位符不浮动，干净文案更新。
+- 贮藏“显示变更”打开独立日志并固定选择实际stash提交，包含第三父提交中的未跟踪文件；历史右键首项查看日志、第二项提交详情。设置提交模板使用原生文件选择器，配置只写当前仓库。操作日志默认折叠，详情使用可选择的原生文本视图，最后展开/点击详情获得Cmd-A/C响应。
+- 工作区、历史及独立比较支持直接显示常见栅格图片；工作区明确索引→磁盘、已暂存明确HEAD→索引。超过32MiB的二进制仅采样4096字节并显示实际字节数，不执行文本差异；二进制无定义的字符数不作虚构。已支持的大型UTF-8文本流式比较保留。图片解码限制源像素和缩略图尺寸，HTML/SVG不执行。
+- 完整153项测试通过（`/tmp/raygit-refine-tests.log`）；此前定向15项通过（`/tmp/raygit-refine-focused.log`），覆盖stash固定引用/未跟踪、索引及历史版本映射、超大文件采样、UTF-8边界及Git进程有界终止。采样读满后Git辅助进程未退出的超时误判由真实回归测试发现并修复。完整测试后仅工具栏图像桥接和翻译调整，经最终Release构建验证。四语言32表1061键及git diff --check通过；本地构建安装`/Applications/RayGit.app`，严格签名与二进制cmp通过（`/tmp/raygit-refine-final-build.log`）。
+- 安装版临时仓库`raygit-refine-qa-6n9n7lp3`实测：原生图标/文字两种模式、贮藏截断列表、300pt分隔位置、右键显示/隐藏工作区列、修订无警告；设置LocalTemplate.txt后仓库config与提交框均为模板内容。工作区Preview.png显示橙色索引/紫色磁盘，暂存范围显示绿色HEAD/橙色索引；独立图片窗口正常渲染。40MiB Large.bin在主窗口及独立窗口均显示41,943,040字节摘要，无全文比较错误。
+- 旧贮藏50d5cc28自动选中并显示Notes.txt及StashOnly.txt，未跟踪补丁为`untracked stash payload`；搜索框获得焦点后占位符位置稳定。日志两条依次展开后Cmd-A各自选择最新详情，Cmd-C粘贴回测试提交框验证完整命令/退出码/输出，随后清空输入。干净fixture`raygit-design-rebase-clean`显示“工作区很干净”且应用贮藏禁用。未操作业务仓库、未提交fixture内容。
+- 截图：`/tmp/raygit-refine-final-main.png`、`/tmp/raygit-refine-image-worktree.png`、`/tmp/raygit-refine-stash-history.png`。GUI以PNG及40MiB二进制为代表，未逐一实测全部图片编码、深色模式及所有语言。
+
+
+### 2026-10-04 差异行号、搜索替换、紧凑模式与安静刷新
+
+- 主差异视图按解析后的行类型隐藏文件模式、补丁头及hunk元数据，真实文件中的`@@`文本保留；并排/合并保留原始行号、对齐占位，变更背景覆盖行号。首次定位以文件及版本身份标识区分，同一文件安静刷新保留滚动。独立比较和冲突预览同样覆盖行号并定位首个变更。
+- 主窗口及独立比较采用搜索弹窗，支持大小写、正则、前后匹配、替换及全部替换；只读预览可携带查询、选项和替换模板打开编辑器。替换仅修改可编辑工作区草稿，原生一次Undo/Redo；正则保留完整匹配上下文及捕获组。完整测试发现groupsByEvent=false时关闭Undo组后设置actionName会触发AppKit异常，已将命名移至组关闭前并增加具名冲突撤销断言。
+- 紧凑模式仅显示差异并保持真实行号及各栏占位。独立比较的紧凑视图是只读投影，完整编辑器保留挂载以保留草稿和撤销，可返回编辑；任一版本超过2MiB进入分页/流式路径时，本轮搜索与紧凑功能禁用并说明限制。
+- 日志显示菜单支持作者头像/姓名、远程分支及标签；详情分别显示作者和提交者姓名、邮箱及时间。GitHub noreply身份使用真实用户名头像，其他有效邮箱使用Gravatar，失败显示默认图标；不会凭时间差断言某次操作为amend。自绘圆角最大8pt，系统窗口外框及系统弹出容器由macOS管理。
+- 重复点击同一仓库（含符号链接规范化路径）只读文件状态；不重开历史，不切isBusy，不重扫近期仓库；状态相同但正文改变仍刷新差异。并发打开/修改使旧刷新结果失效，防止覆盖新状态。
+- 完整165项测试0失败（`/tmp/raygit-search-final-tests.log`）；定向搜索/撤销9项通过。完整测试后仅搜索上下按钮热区改为24×24，最终Release构建覆盖该调整。四语言35表1094键及git diff --check通过。本地Release构建并安装`/Applications/RayGit.app`，严格签名验证与二进制cmp通过（`/tmp/raygit-search-build.log`）。
+- 安装版`raygit-search-qa-2pm37fpz`实测：主工作区索引→工作区标题、81/160行红绿背景包含行号，紧凑模式只显示81/160/161行及空占位；Added.txt无补丁元数据且真实`@@ literal content must stay`仍显示。大小写ALPHA匹配1处，无效`[`正则显示错误且禁用替换入口；query `item-(\d+)`与replacement `token-$1`及两个选项完整传入独立编辑器，工作区显示4处匹配。
+- 独立三栏初始显示首变更80行，HEAD/索引/工作区标题明确；全部替换得到token-124/457/790/999，Cmd-Z一次还原、Cmd-Shift-Z一次重做，切换紧凑再返回仍能一次撤销。测试未保存草稿，文件SHA256保持原值。主窗口重复点击当前仓库保留Example筛选及Example.swift选择；临时将item-457改为458（仍为M状态）后正文及时更新，再恢复并验证SHA256。
+- 独立日志合成提交实际显示作者Octocat、GitHub noreply邮箱、作者时间2026/9/1 12:00和提交者RayGit Search QA、提交时间2026/10/4 10:00；GitHub头像已实际加载，远程分支显示选项可切换。`raygit-first-change-8epcvg05`主冲突预览打开即显示140行及三栏高亮行号。未穷尽所有语言、深色模式和全部平台头像来源的GUI。
+- 截图：`/tmp/raygit-search-main.png`、`/tmp/raygit-search-main-compact.png`、`/tmp/raygit-search-editor-compact.png`、`/tmp/raygit-search-history.png`、`/tmp/raygit-search-conflict-first.png`。本轮未创建提交。
+
+
+### 2026-10-04 完整差异导航、大文件搜索与日志输出 QA（待最终安装验收）
+
+- 本轮 GUI 使用独立 bundle ID `dev.raygit.qa` 与可丢弃 fixture `/tmp/raygit-complete-qa-path`。以下是独立 QA 应用证据，不代表当前 `/Applications/RayGit.app` 官方安装版已包含或验收这些修改；最终安装结果待补。Mac 随后锁定，阻止了剩余 GUI 复测与安装。
+- 全量183项测试0失败（`/tmp/raygit-complete-all-tests.log`）。后续分页/媒体修复另有22项回归测试通过（`/tmp/raygit-paging-media-regressions.log`）；不将后续定向通过表述为修改后再次全量通过。
+- 独立原生三栏关闭手动同步滚动后，下一处变化仍主动定位全部栏：两次观察到三栏滚动值分别完全一致为 `0.542137`、`0.857180`，其中覆盖纯删除变更。主预览下一处变化时两侧滚动值同为 `0.427884`。
+- 原生查找 `NEW INSERT` 显示2项匹配；Return 导航后三栏滚动值同为 `1`。鼠标可点击替换框并输入 `QA INSERT`；全部替换后 Escape 返回编辑器，Cmd-Z一次恢复原草稿且 Save 禁用。紧凑视图点击工作区第140行后返回完整编辑器并精确选中第140行，三栏滚动值同为 `0.542137`，Redo 仍保留。
+- 本地与远程同名 `origin/main` 的碰撞 fixture 实测选择远程 `origin/main`，首个提交为 `f85a848a`，未误选同名本地分支。
+- 3.4 MB 分页文本及43 MB流式文本查找 `ALPHA` 均得到2项结果；跳转第20000行后仍保留真实 `020000` 行前缀。流式紧凑视图显示2个hunk。分页下一页的 GUI 验证发现错误，随后已修复并由上述22项回归测试覆盖；该修复后的下一页 GUI 尚待复测。本轮大文件搜索/只读紧凑能力替代上一轮超过2 MiB时禁用这些功能的限制。
+- ASCII PDF 的 GUI 验证发现其误入文本编辑器。随后已修复 core 静态文档识别与 `CompareWindow` 的 PDF/SVG 大文件分支条件，并由后续定向测试覆盖；修复后 GUI 尚待复测，不声称已在窗口确认正确渲染。
+- 操作日志默认收起。展开长日志显示32K预览截断提示，完整查看窗口可见末尾 `END_OF_COMPLETE_LOG_OUTPUT`，原生 Cmd-A全选通过。导出至 fixture 内 `RayGit-operation.txt`，文件大小88,384字节，末尾标记完整保留。完整脱敏输出与预览边界明确，存档有有限预算及生命周期；进程输出超过32 MiB时明确提示未捕获完整输出。
+- 主窗口 shell 的全屏进入/退出、标题、自定义“图标和文字”及间距、关闭/重开已进行 GUI 验证。CUA 坐标拖动因 `noWindowsAvailable` 未能验证；仅补有窗口几何回归覆盖，不将其视为实际鼠标拖动通过。
+- 最终合并分页、静态文档识别、默认8pt外壳、正常窗口位置持久化及八边缩放几何后，重新执行 `swift test --build-system native`：189项全部通过（`/tmp/raygit-final-all-tests.log`）。四语言37表1128键检查及 `git diff --check` 通过。首次三栏测试布局仍记录一次约束告警，具体约束被系统隐藏；最终几何断言与现有三栏GUI证据通过，未将此告警视作已彻底消除。
+- 最终本地 Release 构建成功（`/tmp/raygit-complete-release.log`），产物 `.artifacts/RayGit.app` 严格签名检查通过。打包签名会改变可执行文件，不能与 linker-signed 构建直接逐字比较；另行解析 Mach-O，全部40个实际落盘代码和数据 section 的长度及 SHA256 均与本次 native Release 构建一致。打包脚本使用 `--show-bin-path` 的真实 native 输出目录，避免 `.build/release` 指向旧构建。锁屏仍阻止最终 GUI 复测与正式应用替换，本轮没有安装至 `/Applications` 或创建 Git 提交。

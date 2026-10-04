@@ -230,3 +230,6 @@
 "Base (Stage 1)" = "共通祖先（ステージ 1）";
 "Ours (Stage 2)" = "Ours（ステージ 2）";
 "Theirs (Stage 3)" = "Theirs（ステージ 3）";
+
+"File exceeds preview limit." = "ファイルがプレビューのサイズ上限を超えています。";
+"Working Tree" = "作業ツリー";

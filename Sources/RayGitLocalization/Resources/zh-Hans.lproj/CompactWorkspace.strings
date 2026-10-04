@@ -1,0 +1,14 @@
+"all" = "全部";
+"modified" = "已修改";
+"added" = "新增";
+"deleted" = "已删除";
+"conflict" = "冲突";
+"untracked" = "未跟踪";
+"renamed" = "已重命名";
+"staged" = "已暂存";
+"Show hidden files" = "显示隐藏文件";
+"Show ignored files (read-only)" = "显示忽略文件（只读）";
+"On" = "开启";
+"Off" = "关闭";
+"Ignored · read-only" = "已忽略 · 只读";
+"Ignored files could not be loaded" = "无法加载忽略文件";

@@ -1,0 +1,14 @@
+"all" = "All";
+"modified" = "Modified";
+"added" = "Added";
+"deleted" = "Deleted";
+"conflict" = "Conflicts";
+"untracked" = "Untracked";
+"renamed" = "Renamed";
+"staged" = "Staged";
+"Show hidden files" = "Show hidden files";
+"Show ignored files (read-only)" = "Show ignored files (read-only)";
+"On" = "On";
+"Off" = "Off";
+"Ignored · read-only" = "Ignored · read-only";
+"Ignored files could not be loaded" = "Ignored files could not be loaded";

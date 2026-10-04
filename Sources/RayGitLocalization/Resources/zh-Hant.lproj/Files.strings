@@ -1,5 +1,5 @@
 "files" = "檔案";
-"filter" = "篩選路徑…";
+"filter" = "篩選檔案…";
 "stage" = "暫存";
 "unstage" = "取消暫存";
 "stageAll" = "全部暫存";
@@ -17,7 +17,7 @@
 "copyName" = "複製名稱";
 "copyPath" = "複製路徑";
 "copyRelativePath" = "複製相對路徑";
-"clean" = "工作區乾淨";
+"clean" = "工作區很乾淨";
 "noFiles" = "沒有符合的檔案";
 "none" = "—";
 "untracked" = "未追蹤";

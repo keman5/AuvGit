@@ -1,0 +1,10 @@
+"Changes only" = "仅显示差异行";
+"Compare source" = "比较源版本";
+"Parent revision" = "父提交版本";
+"Result limit reached; narrow the query." = "匹配结果达到上限，请缩小搜索范围。";
+"Search scans the complete UTF-8 file line by line. Regex is line-based; lines above 1 MiB are reported. Results are capped at 10,000." = "逐行搜索整个 UTF-8 文件；正则按行匹配。超过 1 MiB 的单行会报提示；最多返回 10,000 项结果。";
+"Search scans complete revisions line by line. Regex is line-based; lines above 1 MiB are reported. Results are capped at 10,000 per revision." = "逐行搜索完整版本；正则按行匹配。超过 1 MiB 的单行会报提示；每个版本最多返回 10,000 项结果。";
+"Streaming search requires valid UTF-8 text." = "流式搜索需要有效的 UTF-8 文本。";
+"Streaming search cannot scan a line larger than 1 MiB." = "流式搜索无法扫描超过 1 MiB 的单行。";
+"Page starts at column %@; this is a continuation of source line %@." = "此页从第 %@ 列开始，是原文件第 %@ 行的续页。";
+"The source line continues on the next page." = "此原始行的内容在下一页继续。";

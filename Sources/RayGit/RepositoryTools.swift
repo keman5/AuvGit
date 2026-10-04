@@ -116,7 +116,7 @@ struct RepositoryTools: View {
         guard let repo = store.repository, !store.isBusy else { return }; let base = first
         busy = true; store.isBusy = true
         Task {
-            do { let plan = try await repo.advancedOperation(.rebasePlan, first: base, second: ""); if operation == .interactiveRebase && first == base && store.repositoryURL == repo.url { second = plan } } catch { resultFailed = true; output = error.localizedDescription }
+            do { let plan = try await repo.advancedOperation(.rebasePlan, first: base, second: ""); if operation == .interactiveRebase && first == base && store.repositoryURL == repo.url { second = plan } } catch { resultFailed = true; output = OperationFailure.message(error, repository: store.repositoryURL) }
             busy = false; store.isBusy = false
         }
     }
@@ -157,7 +157,7 @@ struct RepositoryTools: View {
         busy = true; store.isBusy = true; output = ""; resultFailed = false
         Task {
             do { if op == .blame || op == .reflog { inspected = (op == .blame ? a : nil, b.isEmpty ? "HEAD" : b); output = "" } else { output = try await repository.advancedOperation(op, first: a, second: b) }; if op == .compare { compared = (a, b) }; if output.isEmpty { output = workflowText("Completed") };  }
-            catch { resultFailed = true; output = error.localizedDescription }
+            catch { resultFailed = true; output = OperationFailure.message(error, repository: store.repositoryURL) }
             busy = false; store.isBusy = false; if op.writes { await store.refresh() }
         }
     }
@@ -209,7 +209,7 @@ struct CreateRepositorySheet: View {
         busy = true; store.isBusy = true
         Task {
             do { let url = URL(fileURLWithPath: target); let repo = try await cloning ? GitRepository.clone(source: cloneSource, destination: url) : GitRepository.initialize(at: url); store.isBusy = false; await store.open(repo.url); dismiss() }
-            catch { self.error = error.localizedDescription }
+            catch { self.error = OperationFailure.message(error) }
             busy = false; store.isBusy = false
         }
     }
@@ -235,6 +235,6 @@ struct HistoricalRecordsView: View {
     private func open(_ line: String) {
         guard let repository, let word = line.split(separator: " ").first else { return }
         let revision = String(word).trimmingCharacters(in: CharacterSet(charactersIn: "^"))
-        Task { do { let hash = try await repository.workflowRevision(revision); if let commit = try await repository.log(limit: 1, ref: hash).first { CommitDetailPresenter.show(commit: commit, repository: repository) } } catch { self.error = error.localizedDescription } }
+        Task { do { let hash = try await repository.workflowRevision(revision); if let commit = try await repository.log(limit: 1, ref: hash).first { CommitDetailPresenter.show(commit: commit, repository: repository) } } catch { self.error = OperationFailure.message(error) } }
     }
 }

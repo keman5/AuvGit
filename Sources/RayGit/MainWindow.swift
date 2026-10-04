@@ -5,6 +5,8 @@ import RayGitLocalization
 
 struct MainWindow: View {
     @ObservedObject var store: RepositoryStore
+    var usesBorderlessToolbar = false
+    var shellToolbarModel: BorderlessToolbarModel? = nil
     @StateObject private var terminals = TerminalSessions()
     @AppStorage("preferences.filterCase") private var preferenceFilterCase = "insensitive"
     @AppStorage(L10n.preferenceKey) private var languageCode = "system"
@@ -34,6 +36,7 @@ struct MainWindow: View {
         let commit: GitCommit
         let repositoryURL: URL
     }
+    @Environment(\.colorScheme) private var toolbarColorScheme
     @Environment(\.scenePhase) private var scenePhase
     struct PendingAction: Identifiable {
         let id = UUID()
@@ -43,13 +46,10 @@ struct MainWindow: View {
     }
     private var windowContent: some View {
         VStack(spacing: 0) {
-            if let error = store.error {
-                HStack(alignment: .top) {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                    Text(error).font(.system(size: 12)).textSelection(.enabled).lineLimit(4)
-                    Spacer(); Button { store.error = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain).help(mainText("dismissError")).accessibilityLabel(mainText("dismissError"))
-                }.padding(10).background(Color.orange.opacity(0.10))
-                Divider()
+            if usesBorderlessToolbar, let model = shellToolbarModel {
+                BorderlessToolbarView(model: model, commands: shellCommands) { command, text in
+                    shellCommandControl(command, showsText: text)
+                }
             }
             VSplitView {
                 HSplitView {
@@ -67,154 +67,126 @@ struct MainWindow: View {
             HStack(spacing: 8) {
                 if store.isBusy { ProgressView().controlSize(.mini) }
                 else { Circle().fill(store.error == nil ? Color.green : .orange).frame(width: 6, height: 6) }
-                Text(store.status).lineLimit(1)
+                Button { showActivity = true } label: {
+                    Text(store.error ?? store.status).lineLimit(1)
+                }.buttonStyle(.plain).help(refinementText("Open operation log"))
                 Spacer()
                 if !store.branch.isEmpty { Label(store.branch, systemImage: "arrow.triangle.branch").font(.system(size: 11, weight: .medium)) }
-                Button { terminals.toggle(for: store.repositoryURL, store: store) } label: { Image(systemName: "terminal") }.buttonStyle(.plain).help(terminalText("toggle")).accessibilityLabel(terminalText("toggle")).disabled(store.repository == nil)
-                Button { showActivity = true } label: { Image(systemName: "list.bullet.rectangle") }.buttonStyle(.plain).help(mainText("activity"))
+                Button { terminals.toggle(for: store.repositoryURL, store: store) } label: { Image(systemName: "terminal").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(.plain).help(terminalText("toggle")).accessibilityLabel(terminalText("toggle")).disabled(store.repository == nil)
+                Button { showActivity = true } label: { Image(systemName: "list.bullet.rectangle").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(.plain).help(mainText("activity"))
             }.font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 12).frame(height: 30).rayGitChrome()
         }
         .background(RayGitStyle.canvas)
-        .controlSize(.small)
+        .controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6))
         .frame(minHeight: terminals.visible ? 750 : 680)
         .navigationTitle(store.repositoryURL?.lastPathComponent ?? "RayGit")
         .background(TerminalShortcutMonitor { terminals.toggle(for: store.repositoryURL, store: store) }.frame(width: 0, height: 0))
+        .background {
+            Button {
+                if let stash = store.stashes.first { sidebarAction(.stashApply, stash.ref) }
+            } label: { Text(interactionText("Apply Stash…")) }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+                .disabled(store.repository == nil || store.isBusy || store.stashes.isEmpty)
+                .hidden().frame(width: 0, height: 0)
+        }
     }
     private var toolbarContent: some View {
         // Recreate localized descendants without recreating MainWindow's session owner.
         windowContent.id(languageCode)
-            .background(TitlebarToolbarSupport().frame(width: 0, height: 0))
+            .background(TitlebarToolbarSupport(shellContent: { model in NSHostingView(rootView: MainWindow(store: store, usesBorderlessToolbar: true, shellToolbarModel: model)) }, hidesNativeToolbar: usesBorderlessToolbar, shellWindowTitle: usesBorderlessToolbar ? (store.repositoryURL?.lastPathComponent ?? "RayGit") : nil).frame(width: 0, height: 0))
             .modifier(ToolbarWindowTitleRemoval())
             // Version the customization identity: the old AppKit-injected identifiers
             // cannot be restored into SwiftUI's item storage. Keep other preferences intact.
-            .toolbar(id: "RayGit.mainToolbar.design.v4") {
-            ToolbarItem(id: "open", placement: .automatic) {
-                Button { store.chooseRepository() } label: { Label(mainText("open"), systemImage: "folder.badge.plus") }
-                    .help(mainText("openHelp")).disabled(store.isBusy)
-            }
-            .defaultCustomization(.hidden)
-            ToolbarItem(id: "create", placement: .automatic) {
-                Button { showCreate = true } label: { Label(workflowText("Create Repository"), systemImage: "plus") }
-                    .help(workflowText("Create Repository")).disabled(store.isBusy)
-            }
-            .defaultCustomization(.hidden)
-            ToolbarItem(id: "refresh", placement: .automatic) {
-                Button { Task { await store.refresh() } } label: { Label(mainText("refresh"), systemImage: "arrow.clockwise") }
-                    .help(mainText("refreshHelp")).disabled(store.repository == nil || store.isBusy)
-            }
-            .defaultCustomization(.hidden)
-            ToolbarItem(id: "repositoryTitle", placement: .navigation) {
-                HStack(spacing: 0) {
-                Menu {
-                    ForEach(store.recentPaths, id: \.self) { path in
-                        Button { Task { await store.open(URL(fileURLWithPath: path)) } } label: {
-                            Label(URL(fileURLWithPath: path).lastPathComponent, systemImage: path == store.repositoryURL?.path ? "checkmark" : "folder")
+            .toolbar(id: "RayGit.mainToolbar.design.v7") {
+                ToolbarItem(id: "pull") {
+                    Button { performToolbarCommand("pull") } label: { toolbarLabel(mainText("pull"), systemImage: "arrow.down.to.line") }
+                        .controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).help(mainText("pull")).disabled(store.repository == nil || store.isBusy)
+                }.compactMainToolbarItem()
+                ToolbarItem(id: "push") {
+                    Button { performToolbarCommand("push") } label: { toolbarLabel(mainText("push"), systemImage: "arrow.up.to.line") }
+                        .controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).help(mainText("push")).disabled(store.repository == nil || store.isBusy)
+                }.compactMainToolbarItem()
+                if #available(macOS 26.0, *) { ToolbarSpacer(.flexible) }
+                ToolbarItem(id: "stage") {
+                    Button { performToolbarCommand("stage") } label: { toolbarLabel(mainText("stage"), systemImage: "plus.circle") }
+                        .controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).help(refinementText("Stage selected files, or all eligible files when none are selected")).disabled(!toolbarCanStage)
+                }.compactMainToolbarItem()
+                ToolbarItem(id: "unstage") {
+                    Button { performToolbarCommand("unstage") } label: { toolbarLabel(mainText("unstage"), systemImage: "minus.circle") }
+                        .controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).help(refinementText("Unstage selected files, or all eligible files when none are selected")).disabled(!toolbarCanUnstage)
+                }.compactMainToolbarItem()
+                ToolbarItem(id: "discard") {
+                    Button { performToolbarCommand("discard") } label: { toolbarLabel(refinementText("Discard"), systemImage: "arrow.uturn.backward") }
+                        .controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).help(refinementText("Discard selected tracked changes, or all eligible tracked changes when none are selected")).disabled(!toolbarCanDiscard)
+                }.compactMainToolbarItem()
+                ToolbarItem(id: "stash") {
+                    Button { performToolbarCommand("stash") } label: { toolbarLabel(mainText("stash"), systemImage: "archivebox") }
+                        .controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).help(mainText("stash")).disabled(store.repository == nil || store.isBusy || store.files.isEmpty)
+                }.compactMainToolbarItem()
+                ToolbarItem(id: "applyStash") {
+                    Menu {
+                        ForEach(store.stashes) { stash in
+                            Button(stashMenuTitle(stash)) { sidebarAction(.stashApply, stash.ref) }
                         }
+                    } label: { toolbarLabel(refinementText("Apply"), systemImage: "archivebox.fill") } primaryAction: {
+                        if let stash = store.stashes.first { sidebarAction(.stashApply, stash.ref) }
                     }
-                    Divider()
-                    Button(mainText("open")) { store.chooseRepository() }
-                    Button(workflowText("Create Repository")) { showCreate = true }
-                } label: {
-                    HStack(spacing: 9) {
-                        Image(systemName: "folder").foregroundStyle(.secondary)
-                        Text(store.repositoryURL?.lastPathComponent ?? "RayGit").lineLimit(1).truncationMode(.middle)
-                        Image(systemName: "chevron.down").font(.system(size: 9)).foregroundStyle(.secondary)
-                    }.font(.system(size: 13, weight: .semibold)).frame(minWidth: 170, maxWidth: 250, alignment: .leading)
-
-                }.menuStyle(.borderlessButton).labelStyle(.titleAndIcon).disabled(store.isBusy)
-                }
-            }
-            .customizationBehavior(.disabled)
-            if #available(macOS 26.0, *) {
-                ToolbarSpacer(.flexible)
-            }
-            ToolbarItem(id: "verticalSeparator") {
-                Divider().frame(height: 18)
-                    .help(mainText("toolbarSeparator"))
-            }
-            .defaultCustomization(.hidden)
-            ToolbarItem(id: "tools") {
-                Menu {
-                    Button(workflowText("Repository Tools")) { showTools = true }
-                    Button(mainText("open")) { store.chooseRepository() }
-                    Button(workflowText("Create Repository")) { showCreate = true }
-                    Divider()
-                    Button(mainText("fetch")) { store.operation("Fetch") { try await $0.fetch() } }
-                    Button(mainText("pull")) { confirm(mainText("pullTitle"), mainText("pullMessage")) { store.operation("Pull") { try await $0.pull() } } }
-                    Button(mainText("push")) { confirm(mainText("pushTitle"), mainText("pushMessage")) { store.operation("Push") { try await $0.push() } } }
-                    Button(mainText("commit")) { store.mode = "workspace"; commitFocused = true }
-                    Button(mainText("stash")) { confirm(mainText("stashTitle"), mainText("stashMessage")) { store.operation("贮藏") { try await $0.stash(message: "RayGit stash") } } }.disabled(store.files.isEmpty)
-                    Button(mainText("newBranch")) { askName(mainText("createBranch")) { name in store.operation("创建分支") { try await $0.createBranch(name: name) } } }
-                    Divider()
-                    Button(aiCommitText("Settings")) { showAISettings = true }
-                } label: { Label(workflowText("Repository Tools"), systemImage: "ellipsis") }
-                    .labelStyle(.iconOnly).help(workflowText("Repository Tools")).disabled(store.repository == nil || store.isBusy)
-            }
-            .defaultCustomization(.hidden)
-            ToolbarItem(id: "fetch") {
-                Button { store.operation("Fetch") { try await $0.fetch() } } label: { Label(mainText("fetch"), systemImage: "arrow.down.to.line") }
-                    .help(mainText("fetch")).disabled(store.repository == nil || store.isBusy)
-            }
-            .defaultCustomization(.hidden)
-            ToolbarItem(id: "pull") {
-                Button { confirm(mainText("pullTitle"), mainText("pullMessage")) { store.operation("Pull") { try await $0.pull() } } } label: { Label(mainText("pull"), systemImage: "arrow.down.circle") }
-                    .help(mainText("pull")).disabled(store.repository == nil || store.isBusy)
-            }
-            .defaultCustomization(.hidden)
-            ToolbarItem(id: "push") {
-                Button { confirm(mainText("pushTitle"), mainText("pushMessage")) { store.operation("Push") { try await $0.push() } } } label: { Label(mainText("push"), systemImage: "arrow.up.circle") }
-                    .help(mainText("push")).disabled(store.repository == nil || store.isBusy)
-            }
-            .defaultCustomization(.hidden)
-            ToolbarItem(id: "commit") {
-                Button { store.mode = "workspace"; commitFocused = true } label: { Label(mainText("commit"), systemImage: "checkmark.square") }
-                    .help(mainText("commit")).disabled(store.repository == nil || store.isBusy)
-            }
-            .defaultCustomization(.hidden)
-            ToolbarItem(id: "stash") {
-                Button { confirm(mainText("stashTitle"), mainText("stashMessage")) { store.operation("贮藏") { try await $0.stash(message: "RayGit stash") } } } label: { Label(mainText("stash"), systemImage: "archivebox") }
-                    .help(mainText("stash")).disabled(store.repository == nil || store.isBusy || store.files.isEmpty)
-            }
-            .defaultCustomization(.hidden)
-            ToolbarItem(id: "newBranch") {
-                Button { askName(mainText("createBranch")) { name in store.operation("创建分支") { try await $0.createBranch(name: name) } } } label: { Label(mainText("newBranch"), systemImage: "arrow.triangle.branch") }
-                    .help(mainText("newBranch")).disabled(store.repository == nil || store.isBusy)
-            }
-            .defaultCustomization(.hidden)
-            ToolbarItem(id: "workspaceActions", placement: .primaryAction) {
-                HStack(spacing: 10) {
-                    Button { Task { await store.refresh() } } label: { Image(systemName: "arrow.clockwise") }
-                        .accessibilityLabel(mainText("refresh")).help(mainText("refreshHelp")).disabled(store.repository == nil || store.isBusy)
-                    Button { showNetwork = true } label: { Image(systemName: "point.3.connected.trianglepath.dotted") }
-                        .accessibilityLabel(workflowText("Network")).help(workflowText("Network")).disabled(store.repository == nil || store.isBusy)
-                    Button { showTags = true } label: { Image(systemName: "tag") }
-                        .accessibilityLabel(workflowText("Tag Management")).help(workflowText("Tag Management")).disabled(store.repository == nil || store.isBusy)
-                Menu {
-                    Button(workflowText("Repository Tools")) { showTools = true }
-                    Button(mainText("open")) { store.chooseRepository() }
-                    Button(workflowText("Create Repository")) { showCreate = true }
-                    Divider()
-                    Button(mainText("fetch")) { store.operation("Fetch") { try await $0.fetch() } }
-                    Button(mainText("pull")) { confirm(mainText("pullTitle"), mainText("pullMessage")) { store.operation("Pull") { try await $0.pull() } } }
-                    Button(mainText("push")) { confirm(mainText("pushTitle"), mainText("pushMessage")) { store.operation("Push") { try await $0.push() } } }
-                    Button(mainText("commit")) { store.mode = "workspace"; commitFocused = true }
-                    Button(mainText("stash")) { confirm(mainText("stashTitle"), mainText("stashMessage")) { store.operation("贮藏") { try await $0.stash(message: "RayGit stash") } } }.disabled(store.files.isEmpty)
-                    Button(mainText("newBranch")) { askName(mainText("createBranch")) { name in store.operation("创建分支") { try await $0.createBranch(name: name) } } }
-                    Divider()
-                    Button(aiCommitText("Settings")) { showAISettings = true }
-                } label: { Label(workflowText("Repository Tools"), systemImage: "ellipsis") }
-                    .labelStyle(.iconOnly).accessibilityLabel(workflowText("Repository Tools")).help(workflowText("Repository Tools")).disabled(store.repository == nil || store.isBusy)
-
-                    Button { showWorkspaceSearch = true } label: {
-                        HStack(spacing: 9) {
-                            Image(systemName: "magnifyingglass")
-                            Text(designWorkspaceText("Search files, commits, branches…")).lineLimit(1)
-                            Spacer(minLength: 5)
-                            Text("⌘ K").font(.caption)
-                        }.foregroundStyle(.secondary).padding(.horizontal, 10).frame(width: 235, height: 28).rayGitInputSurface()
-                    }.buttonStyle(.plain).accessibilityLabel(designWorkspaceText("Search files, commits, branches…")).keyboardShortcut("k").disabled(store.repository == nil)
-                }.labelStyle(.titleAndIcon)
-            }.customizationBehavior(.disabled)
+                    .controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).help(interactionText("Apply Stash…"))
+                    .disabled(store.repository == nil || store.isBusy || store.stashes.isEmpty)
+                }.compactMainToolbarItem()
+                if #available(macOS 26.0, *) { ToolbarSpacer(.flexible) }
+                ToolbarItem(id: "refresh") {
+                    Button { performToolbarCommand("refresh") } label: { toolbarLabel(mainText("refresh"), systemImage: "arrow.clockwise") }
+                        .controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).help(mainText("refreshHelp")).disabled(store.repository == nil || store.isBusy)
+                }.compactMainToolbarItem()
+                ToolbarItem(id: "create") {
+                    Button { performToolbarCommand("create") } label: { toolbarLabel(refinementText("Create"), systemImage: "folder.badge.plus") }
+                        .controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).help(workflowText("Create Repository")).disabled(store.isBusy)
+                }.compactMainToolbarItem()
+                ToolbarItem(id: "open") {
+                    Button { store.chooseRepository() } label: { toolbarLabel(mainText("open"), systemImage: "folder.badge.plus") }
+                        .controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).help(mainText("openHelp")).disabled(store.isBusy)
+                }.compactMainToolbarItem().defaultCustomization(.hidden)
+                ToolbarItem(id: "fetch") {
+                    Button { store.operation("Fetch") { try await $0.fetch() } } label: { toolbarLabel(mainText("fetch"), systemImage: "arrow.down.to.line") }
+                        .disabled(store.repository == nil || store.isBusy)
+                }.compactMainToolbarItem().defaultCustomization(.hidden)
+                ToolbarItem(id: "commit") {
+                    Button { store.mode = "workspace"; commitFocused = true } label: { toolbarLabel(mainText("commit"), systemImage: "checkmark.square") }
+                        .disabled(store.repository == nil || store.isBusy)
+                }.compactMainToolbarItem().defaultCustomization(.hidden)
+                ToolbarItem(id: "newBranch") {
+                    Button { askName(mainText("createBranch")) { name in store.operation("创建分支") { try await $0.createBranch(name: name) } } } label: { toolbarLabel(mainText("newBranch"), systemImage: "arrow.triangle.branch") }
+                        .disabled(store.repository == nil || store.isBusy)
+                }.compactMainToolbarItem().defaultCustomization(.hidden)
+                ToolbarItem(id: "network") {
+                    Button { showNetwork = true } label: { toolbarLabel(workflowText("Network"), systemImage: "point.3.connected.trianglepath.dotted") }
+                        .disabled(store.repository == nil || store.isBusy)
+                }.compactMainToolbarItem().defaultCustomization(.hidden)
+                ToolbarItem(id: "tags") {
+                    Button { showTags = true } label: { toolbarLabel(workflowText("Tag Management"), systemImage: "tag") }
+                        .disabled(store.repository == nil || store.isBusy)
+                }.compactMainToolbarItem().defaultCustomization(.hidden)
+                ToolbarItem(id: "search") {
+                    Button { showWorkspaceSearch = true } label: { toolbarLabel(designWorkspaceText("Search files, commits, branches…"), systemImage: "magnifyingglass") }
+                        .keyboardShortcut("k").disabled(store.repository == nil)
+                }.compactMainToolbarItem().defaultCustomization(.hidden)
+                ToolbarItem(id: "tools") {
+                    Menu {
+                        Button(workflowText("Repository Tools")) { showTools = true }
+                        Button(workflowText("Network")) { showNetwork = true }
+                        Button(workflowText("Tag Management")) { showTags = true }
+                        Button(designWorkspaceText("Search files, commits, branches…")) { showWorkspaceSearch = true }
+                        Divider()
+                        Button(mainText("open")) { store.chooseRepository() }
+                        ForEach(store.recentPaths, id: \.self) { path in
+                            Button(URL(fileURLWithPath: path).lastPathComponent) { Task { await store.open(URL(fileURLWithPath: path)) } }
+                        }
+                        Divider()
+                        Button(aiCommitText("Settings")) { showAISettings = true }
+                    } label: { toolbarLabel(refinementText("More"), systemImage: "ellipsis").frame(minHeight: 24).contentShape(Rectangle()) }
+                        .menuIndicator(.hidden).controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).help(refinementText("More")).disabled(store.isBusy)
+                }.compactMainToolbarItem()
             ToolbarItem(id: "language") {
                 Menu {
                     ForEach(AppLanguage.allCases) { language in
@@ -225,32 +197,132 @@ struct MainWindow: View {
                             }
                         }
                     }
-                } label: { Label(mainText("language"), systemImage: "globe") }.labelStyle(.iconOnly).help(mainText("language"))
-            }.defaultCustomization(.hidden)
+                } label: { toolbarLabel(mainText("language"), systemImage: "globe") }.controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).help(mainText("language"))
+            }.compactMainToolbarItem().defaultCustomization(.hidden)
 
+            }
+    }
+    private func refinementText(_ key: String) -> String { L10n.text(key, table: "MainRefinement") }
+    private var shellCommands: [ShellToolbarCommand] {
+        let values: [(String, String, String, Bool)] = [
+            ("pull", mainText("pull"), "arrow.down.to.line", toolbarReady),
+            ("push", mainText("push"), "arrow.up.to.line", toolbarReady),
+            ("stage", mainText("stage"), "plus.circle", toolbarCanStage),
+            ("unstage", mainText("unstage"), "minus.circle", toolbarCanUnstage),
+            ("discard", refinementText("Discard"), "arrow.uturn.backward", toolbarCanDiscard),
+            ("stash", mainText("stash"), "archivebox", toolbarReady && !store.files.isEmpty),
+            ("applyStash", refinementText("Apply"), "archivebox.fill", toolbarReady && !store.stashes.isEmpty),
+            ("refresh", mainText("refresh"), "arrow.clockwise", toolbarReady),
+            ("create", refinementText("Create"), "folder.badge.plus", !store.isBusy),
+            ("tools", refinementText("More"), "ellipsis", !store.isBusy),
+            ("open", mainText("open"), "folder.badge.plus", !store.isBusy),
+            ("fetch", mainText("fetch"), "arrow.down.to.line", toolbarReady),
+            ("commit", mainText("commit"), "checkmark.square", toolbarReady),
+            ("newBranch", mainText("newBranch"), "arrow.triangle.branch", toolbarReady),
+            ("network", workflowText("Network"), "point.3.connected.trianglepath.dotted", toolbarReady),
+            ("tags", workflowText("Tag Management"), "tag", toolbarReady),
+            ("search", designWorkspaceText("Search files, commits, branches…"), "magnifyingglass", store.repository != nil),
+            ("language", mainText("language"), "globe", true)
+        ]
+        return values.map { id, title, symbol, enabled in ShellToolbarCommand(id: id, title: title, symbol: symbol, enabled: enabled, action: { performToolbarCommand(id) }) }
+    }
+    @ViewBuilder private func shellCommandControl(_ command: ShellToolbarCommand, showsText: Bool) -> some View {
+        if command.id == "applyStash" {
+            Menu { ForEach(store.stashes) { stash in Button(stashMenuTitle(stash)) { sidebarAction(.stashApply, stash.ref) } } }
+                label: { shellCommandLabel(command, showsText: showsText) }
+                primaryAction: { command.action() }
+        } else if command.id == "tools" {
+            Menu {
+                Button(workflowText("Repository Tools")) { showTools = true }
+                Button(workflowText("Network")) { showNetwork = true }
+                Button(workflowText("Tag Management")) { showTags = true }
+                Button(designWorkspaceText("Search files, commits, branches…")) { showWorkspaceSearch = true }
+                Divider()
+                Button(mainText("open")) { store.chooseRepository() }
+                ForEach(store.recentPaths, id: \.self) { path in Button(URL(fileURLWithPath: path).lastPathComponent) { Task { await store.open(URL(fileURLWithPath: path)) } } }
+                Divider()
+                Button(aiCommitText("Settings")) { showAISettings = true }
+            } label: { shellCommandLabel(command, showsText: showsText) }
+                .menuIndicator(.hidden)
+        } else if command.id == "language" {
+            Menu { ForEach(AppLanguage.allCases) { language in Button(language.nativeName) { languageCode = language.rawValue } } }
+                label: { shellCommandLabel(command, showsText: showsText) }
+        } else { Button(action: command.action) { shellCommandLabel(command, showsText: showsText) }.buttonStyle(.plain).accessibilityLabel(command.title) }
+    }
+    private func shellCommandLabel(_ command: ShellToolbarCommand, showsText: Bool) -> some View {
+        HStack(spacing: 3) {
+            Image(nsImage: RepositoryOperationIcon.toolbarImage(symbol: command.symbol, colorScheme: toolbarColorScheme)).frame(width: 24, height: 23).accessibilityHidden(true)
+            if showsText { Text(command.title).font(.system(size: 11, weight: .medium)).lineLimit(1) }
+        }.frame(minWidth: 32).frame(width: showsText ? nil : 32, height: 28).contentShape(Rectangle())
+    }
+    private func performToolbarCommand(_ id: String) {
+        switch id {
+        case "pull": confirm(mainText("pullTitle"), mainText("pullMessage")) { store.operation("Pull") { try await $0.pull() } }
+        case "push": confirm(mainText("pushTitle"), mainText("pushMessage")) { store.operation("Push") { try await $0.push() } }
+        case "stage": fileAction(.stage, store.selectedPaths)
+        case "unstage": fileAction(.unstage, store.selectedPaths)
+        case "discard": fileAction(.discard, store.selectedPaths)
+        case "stash": confirm(mainText("stashTitle"), mainText("stashMessage")) { store.operation("贮藏") { try await $0.stash(message: "RayGit stash") } }
+        case "applyStash": if let stash = store.stashes.first { sidebarAction(.stashApply, stash.ref) }
+        case "refresh": Task { await store.refresh() }
+        case "create": showCreate = true
+        case "open": store.chooseRepository()
+        case "fetch": store.operation("Fetch") { try await $0.fetch() }
+        case "commit": store.mode = "workspace"; commitFocused = true
+        case "newBranch": askName(mainText("createBranch")) { name in store.operation("创建分支") { try await $0.createBranch(name: name) } }
+        case "network": showNetwork = true
+        case "tags": showTags = true
+        case "search": showWorkspaceSearch = true
+        default: break
         }
     }
+    private func toolbarLabel(_ title: String, systemImage: String) -> some View {
+        Label { Text(title) } icon: { Image(nsImage: RepositoryOperationIcon.toolbarImage(symbol: systemImage, colorScheme: toolbarColorScheme)) }
+            .font(.system(size: 11, weight: .medium))
+    }
+    private func stashMenuTitle(_ stash: GitStash) -> String {
+        let value = stash.ref + " · " + stash.subject.replacingOccurrences(of: "\n", with: " ")
+        return value.count > 65 ? String(value.prefix(64)) + "…" : value
+    }
+    private func toolbarTargets(_ action: FileAction) -> Set<String> {
+        WorkspaceFileActionTargets.paths(for: action, files: store.files, selection: store.selectedPaths)
+    }
+    private var toolbarReady: Bool { store.repository != nil && !store.isBusy }
+    private var toolbarCanStage: Bool { toolbarReady && !toolbarTargets(.stage).isEmpty }
+    private var toolbarCanUnstage: Bool { toolbarReady && !toolbarTargets(.unstage).isEmpty }
+    private var toolbarCanDiscard: Bool { toolbarReady && !toolbarTargets(.discard).isEmpty }
+    private var handlesStoreEvents: Bool { usesBorderlessToolbar || !EightPointWindowShell.usesBorderlessMode }
+
     private var observedContent: some View {
         toolbarContent.onReceive(NotificationCenter.default.publisher(for: .rayGitWorktreeChanged)) { event in
+            guard handlesStoreEvents else { return }
             if let url = event.object as? URL, url == store.repositoryURL { Task { await store.refresh() } }
         }
-        .onChange(of: preferenceFilterCase) { _, _ in store.objectWillChange.send() }
-        .onChange(of: store.amend) { _, value in fillAmendMessage(value) }
-        .onChange(of: store.selectedPaths) { _, _ in guard !store.isRestoringViewState else { return }; if let file = store.selectedFile { store.stagedDiff = file.isStaged && !file.isUnstaged }; Task { await store.loadDiff() } }
-        .onChange(of: store.stagedDiff) { _, _ in guard !store.isRestoringViewState else { return }; Task { await store.loadDiff() } }
-        .onChange(of: store.ignoreWhitespace) { _, _ in guard !store.isRestoringViewState else { return }; Task { await store.loadDiff() } }
-        .onChange(of: store.mode) { _, _ in guard !store.isRestoringViewState else { return }; Task { await store.loadDiff() } }
-        .onChange(of: store.selectedCommit) { _, _ in guard !store.isRestoringViewState else { return }; Task { await store.loadCommitFiles() } }
-        .onChange(of: store.selectedCommitPath) { _, _ in guard !store.isRestoringViewState else { return }; Task { await store.loadDiff() } }
-        .onChange(of: store.historySearch) { _, _ in guard !store.isRestoringViewState else { return }; store.scheduleSearch() }
-        .onChange(of: store.historyAuthor) { _, _ in guard !store.isRestoringViewState else { return }; store.scheduleSearch() }
+        .onChange(of: preferenceFilterCase) { _, _ in if handlesStoreEvents { store.objectWillChange.send() } }
+        .onChange(of: store.amend) { _, value in if handlesStoreEvents { fillAmendMessage(value) } }
+        .onChange(of: store.selectedPaths) { _, _ in guard handlesStoreEvents, !store.isRestoringViewState else { return }; if let file = store.selectedFile { store.stagedDiff = file.isStaged && !file.isUnstaged }; Task { await store.loadDiff() } }
+        .onChange(of: store.stagedDiff) { _, _ in guard handlesStoreEvents, !store.isRestoringViewState else { return }; Task { await store.loadDiff() } }
+        .onChange(of: store.ignoreWhitespace) { _, _ in guard handlesStoreEvents, !store.isRestoringViewState else { return }; Task { await store.loadDiff() } }
+        .onChange(of: store.mode) { _, mode in
+            guard handlesStoreEvents, !store.isRestoringViewState else { return }
+            if mode == "history" {
+                if let repo = store.repository { LogPresenter.show(repository: repo, search: store.historySearch, selectedCommit: store.selectedCommit, applyFilter: true) }
+                store.mode = "workspace"
+            }
+            Task { await store.loadDiff() }
+        }
+        .onChange(of: store.selectedCommit) { _, _ in guard handlesStoreEvents, !store.isRestoringViewState else { return }; Task { await store.loadCommitFiles() } }
+        .onChange(of: store.selectedCommitPath) { _, _ in guard handlesStoreEvents, !store.isRestoringViewState else { return }; Task { await store.loadDiff() } }
+        .onChange(of: store.historySearch) { _, _ in guard handlesStoreEvents, !store.isRestoringViewState else { return }; store.scheduleSearch() }
+        .onChange(of: store.historyAuthor) { _, _ in guard handlesStoreEvents, !store.isRestoringViewState else { return }; store.scheduleSearch() }
         .onChange(of: store.repositoryURL) { _, directory in
+            guard handlesStoreEvents else { return }
             aiCommit.cancel()
             if let directory, terminals.visible { terminals.show(for: directory, store: store) }
             else if directory == nil { terminals.hide() }
         }
-        .onChange(of: store.openRepositories) { _, paths in terminals.retainRepositories(paths) }
-        .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await store.refreshIfChanged() } } }
+        .onChange(of: store.openRepositories) { _, paths in if handlesStoreEvents { terminals.retainRepositories(paths) } }
+        .onChange(of: scenePhase) { _, phase in if handlesStoreEvents, phase == .active { Task { await store.refreshIfChanged() } } }
     }
     var body: some View {
         observedContent.alert(item: $confirmation) { action in Alert(title: Text(action.title), message: Text(action.message), primaryButton: .default(Text(mainText("continue")), action: action.action), secondaryButton: .cancel(Text(mainText("cancel")))) }
@@ -267,12 +339,7 @@ struct MainWindow: View {
         .sheet(isPresented: $showNetwork) { NetworkOperationsView(store: store) }
         .sheet(isPresented: $showTools) { RepositoryTools(store: store) }
         .sheet(isPresented: $showCreate) { CreateRepositorySheet(store: store) }
-        .sheet(isPresented: $showActivity) {
-            VStack(alignment: .leading) {
-                HStack { Text(mainText("activity")).font(.headline); Spacer(); Button(mainText("close")) { showActivity = false } }
-                ScrollView { Text(store.activity.isEmpty ? mainText("noActivity") : store.activity.joined(separator: "\n\n")).font(.system(.caption, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
-            }.padding(20).frame(width: 650, height: 400)
-        }
+        .sheet(isPresented: $showActivity) { OperationLogView(store: store) }
         .sheet(item: $mergeAction) { prompt in
             VStack(alignment: .leading, spacing: 16) {
                 Text(interactionText(prompt.action == .cherryPick ? "Cherry-Pick Commit" : "Revert Commit")).font(.headline)
@@ -315,55 +382,26 @@ struct MainWindow: View {
         }
     }
     var workspace: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Picker(mainText("view"), selection: $store.mode) { Text(mainText("workspace")).tag("workspace"); Text(mainText("history")).tag("history") }.pickerStyle(.segmented).labelsHidden().accessibilityLabel(mainText("view")).fixedSize(horizontal: true, vertical: false).controlSize(.small)
-                Spacer()
-                if store.mode == "workspace" { workspaceDiffControls }
-            }.padding(.horizontal, 12).padding(.vertical, 9).rayGitChrome()
-            if store.historyPath != nil || store.historyRef != nil {
-                HStack { Label(store.historyPath ?? store.historyRef ?? "", systemImage: "line.3.horizontal.decrease.circle").lineLimit(1); Spacer(); Button(interactionText("Show All History")) { store.showHistory(path: nil, ref: nil) } }.font(.caption).padding(.horizontal, 12).padding(.bottom, 8)
+        WorkspacePaneSplit(
+            compact: terminals.visible,
+            files: filesPane,
+            diff: diffPane,
+            footer: HSplitView {
+                historyPane(compact: true).frame(minWidth: 300)
+                commitPane.frame(minWidth: 320, idealWidth: 400, maxWidth: 540)
             }
-            Divider()
-            if store.mode == "workspace" {
-                WorkspacePaneSplit(
-                    compact: terminals.visible,
-                    files: filesPane,
-                    diff: diffPane,
-                    footer: HSplitView {
-                        historyPane(compact: true).frame(minWidth: 300)
-                        commitPane.frame(minWidth: 320, idealWidth: 400, maxWidth: 540)
-                    }
-                ).frame(minHeight: terminals.visible ? 422 : 432, maxHeight: .infinity)
-                    .frame(maxWidth: .infinity)
-
-            } else {
-                VSplitView {
-                    historyPane(compact: false).frame(minHeight: terminals.visible ? 160 : 230, idealHeight: terminals.visible ? 220 : 360)
-                    HSplitView {
-                        List(selection: $store.selectedCommitPath) {
-                            Section(mainText("changedFiles", store.commitFiles.count)) {
-                                ForEach(store.commitFiles) { file in HStack(spacing: 7) { Text(file.status).font(.system(.caption, design: .monospaced)).foregroundStyle(statusColor(file.status)); Text(file.path).font(.system(size: 12)).lineLimit(2) }.tag(file.path) }
-                            }
-                        }.contextMenu(forSelectionType: String.self) { paths in
-                            if let path = paths.first { Button(interactionText("Show Changes")) { compareCommitFile(path) }; Button(interactionText("Copy Relative Path")) { copyText(path) } }
-                        } primaryAction: { paths in if let path = paths.first { compareCommitFile(path) } }
-                        .frame(minWidth: 180, idealWidth: 210, maxWidth: 260)
-                        diffPane.frame(minWidth: 360, minHeight: terminals.visible ? 160 : 210)
-                    }
-                }
-            }
-        }
+        ).frame(minHeight: terminals.visible ? 422 : 432, maxHeight: .infinity)
+            .frame(maxWidth: .infinity)
     }
     var filesPane: some View {
-        WorkspaceFilesPane(files: store.files, selection: $store.selectedPaths, filter: $store.fileFilter, treeMode: $fileTree, isBusy: store.isBusy, onAction: fileAction, treeContent: workspaceTreeContent)
+        WorkspaceFilesPane(files: store.files, selection: $store.selectedPaths, filter: $store.fileFilter, treeMode: $fileTree, isBusy: store.isBusy, onAction: fileAction, treeContent: { paths in workspaceTreeContent(paths) }, repository: store.repository)
     }
-    private var workspaceTreeContent: some View {
+    private func workspaceTreeContent(_ paths: Set<String>?) -> some View {
         Group {
             if let repository = store.repository {
                 WorkspaceTree(repository: repository, openFile: { path in
                     ComparePresenter.show(title: path, repository: repository, target: .worktree(path: path, untracked: store.files.first(where: { $0.path == path })?.isUntracked ?? false))
-                }, primaryAction: { path in
+                }, visiblePaths: paths, primaryAction: { path in
                     guard !store.isBusy else { return }
                     if RayGitPreferences.doubleClick == "stage", let file = store.files.first(where: { $0.path == path }), !file.isConflict {
                         fileAction(file.isUnstaged ? .stage : .unstage, [path])
@@ -376,25 +414,39 @@ struct MainWindow: View {
     var diffPane: some View {
         VStack(spacing: 0) {
             if let snapshot = store.conflictPreview {
-                WorkspaceConflictPreview(snapshot: snapshot)
+                WorkspaceConflictPreview(snapshot: snapshot, onOpenEditorSearch: { options, replacement in
+                    guard let repository = store.repository else { return }
+                    ComparePresenter.show(title: (snapshot.path as NSString).lastPathComponent, repository: repository,
+                        target: .worktree(path: snapshot.path, untracked: false), searchOptions: options, replacement: replacement)
+                }, onOpenEditorLine: { pane, line in
+                    guard let repository = store.repository else { return }
+                    ComparePresenter.show(title: (snapshot.path as NSString).lastPathComponent, repository: repository,
+                        target: .worktree(path: snapshot.path, untracked: false), initialLine: line, initialPaneID: pane)
+                })
             } else {
-                DiffPane(text: store.diffText, title: store.diffTitle, isLoading: store.loadingDiff)
+                DiffPane(text: store.diffText, title: store.diffTitle, isLoading: store.loadingDiff, extraMenuItems: AnyView(workspaceDiffMenuItems), preview: store.staticPreview,
+                    leftRevisionTitle: store.diffLeftRevisionTitle, rightRevisionTitle: store.diffRightRevisionTitle,
+                    onOpenEditableComparison: editableDiffSearch)
             }
         }
     }
-    private var workspaceDiffControls: some View {
-        HStack(spacing: 8) {
-            if store.conflictPreview == nil {
-                Picker(mainText("diffScope"), selection: $store.stagedDiff) {
-                    Text(mainText("workspace")).tag(false)
-                    Text(mainText("staged")).tag(true)
-                }.pickerStyle(.segmented).labelsHidden().fixedSize()
-            }
-            Menu {
-                if store.selectedPaths.count == 1 { Button(compareText("Edit / Three-way Compare")) { fileAction(.compare, store.selectedPaths) }.disabled(store.isBusy) }
-                if store.conflictPreview == nil { Toggle(mainText("ignoreWhitespace"), isOn: $store.ignoreWhitespace) }
-            } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).frame(width: 24).help(workflowText("Files view"))
-        }.controlSize(.small)
+    private var editableDiffSearch: ((ComparisonSearchOptions, String) -> Void)? {
+        guard store.mode == "workspace", let repository = store.repository, let file = store.selectedFile,
+              file.worktreeStatus != "D", !store.isBusy else { return nil }
+        return { options, replacement in
+            ComparePresenter.show(title: (file.path as NSString).lastPathComponent, repository: repository,
+                target: .worktree(path: file.path, untracked: file.isUntracked), searchOptions: options, replacement: replacement)
+        }
+    }
+    @ViewBuilder private var workspaceDiffMenuItems: some View {
+        Picker(mainText("diffScope"), selection: $store.stagedDiff) {
+            Text(mainText("workspace")).tag(false)
+            Text(mainText("staged")).tag(true)
+        }
+        if store.selectedPaths.count == 1 {
+            Button(compareText("Edit / Three-way Compare")) { fileAction(.compare, store.selectedPaths) }.disabled(store.isBusy)
+        }
+        Toggle(mainText("ignoreWhitespace"), isOn: $store.ignoreWhitespace)
     }
     var commitPane: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -402,13 +454,12 @@ struct MainWindow: View {
                 ScrollView(.vertical) { commitForm }
             } else { commitForm }
             HStack {
-                Image(systemName: "info.circle").foregroundStyle(.secondary).help(mainText("commitNote"))
-                    .accessibilityLabel(mainText("commitNote"))
+                Toggle(mainText("amend"), isOn: $store.amend).toggleStyle(.checkbox).font(.caption)
                 Spacer()
                 Button {
                     if store.amend { confirm(mainText("amend"), mainText("amendMessage")) { store.commit() } }
                     else { store.commit() }
-                } label: { Text(store.amend ? mainText("amendCommit") : mainText("commitStaged")) }
+                } label: { Text(mainText("commit")) }
                     .buttonStyle(.borderedProminent)
                     .disabled(store.isBusy || store.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (!store.amend && store.stagedCount == 0) || store.files.contains(where: \.isConflict))
             }
@@ -419,35 +470,23 @@ struct MainWindow: View {
             HStack(spacing: 8) {
                 Label(mainText("commit"), systemImage: "point.3.connected.trianglepath.dotted").font(.system(size: 12, weight: .semibold))
                 Spacer(minLength: 0)
-                if aiCommit.isLoading { ProgressView().controlSize(.small); Button { aiCommit.cancel() } label: { Image(systemName: "xmark.circle") }.help(aiCommitText("Cancel")) }
+                if aiCommit.isLoading { ProgressView().controlSize(.small); Button { aiCommit.cancel() } label: { Image(systemName: "xmark.circle").frame(width: 24, height: 24).contentShape(Rectangle()) }.help(aiCommitText("Cancel")) }
                 else {
-                    Button { if AICommitConfiguration.isConfigured { aiCommit.generate(store: store) } else { showAISettings = true } } label: { Image(systemName: "sparkles").foregroundStyle(RayGitStyle.blue) }
+                    Button { if AICommitConfiguration.isConfigured { aiCommit.generate(store: store) } else { showAISettings = true } } label: { Image(systemName: "sparkles").foregroundStyle(RayGitStyle.blue).frame(width: 24, height: 24).contentShape(Rectangle()) }
                         .buttonStyle(.plain).help(aiCommitText("Generate commit message")).accessibilityLabel(aiCommitText("Generate commit message"))
                         .disabled(store.isBusy || store.stagedCount == 0)
                 }
-            }
-            TextEditor(text: $store.commitMessage)
-                .focused($commitFocused).font(.system(size: 13))
-                .scrollContentBackground(.hidden).padding(4)
-                .rayGitInputSurface()
-                .overlay(alignment: .topLeading) {
-                    if store.commitMessage.isEmpty {
-                        Text(mainText("commitPlaceholder")).foregroundStyle(.tertiary).font(.system(size: 13))
-                            .padding(9).allowsHitTesting(false)
-                    }
-                }.frame(minHeight: 80)
-            HStack(spacing: 8) {
-                Toggle(mainText("amend"), isOn: $store.amend).toggleStyle(.checkbox).font(.caption)
-                Spacer(minLength: 0)
                 Menu {
                     Button("Signed-off-by", action: addSignoff)
-                    Button(workflowText("commitTemplate"), action: loadTemplate)
-                } label: { Image(systemName: "ellipsis.circle") }
-                    .menuStyle(.borderlessButton).fixedSize().help(workflowText("commitTemplate"))
-                    .disabled(store.isBusy)
+                    Button(workflowText("commitTemplate")) { if let repository = store.repository { chooseTemplate(for: repository.url, configure: true) } }
+                    Button(refinementText("Load configured template"), action: loadTemplate)
+                } label: { Label(refinementText("More"), systemImage: "ellipsis").frame(minHeight: 24).contentShape(Rectangle()) }
+                    .menuIndicator(.hidden).menuStyle(.borderlessButton).fixedSize()
+                    .help(refinementText("Commit options")).disabled(store.isBusy)
             }
+            CommitMessageEditor(text: $store.commitMessage, focused: Binding(get: { commitFocused }, set: { commitFocused = $0 }), placeholder: mainText("commitPlaceholder"))
+                .rayGitInputSurface().frame(minHeight: 80)
             if let error = aiCommit.error { Text(error).font(.caption).foregroundStyle(.orange).textSelection(.enabled) }
-            if store.amend { Text(mainText("amendWarning")).font(.caption).foregroundStyle(.orange) }
         }
     }
     private func jumpToCommit(_ value: String) {
@@ -470,10 +509,32 @@ struct MainWindow: View {
         guard let repo = store.repository else { return }
         Task { do {
             let path = try await repo.workflowRead(["config", "--path", "commit.template"]).trimmingCharacters(in: .newlines)
-            let url = path.hasPrefix("/") ? URL(fileURLWithPath: path) : repo.url.appendingPathComponent(path)
+            guard !path.isEmpty else { chooseTemplate(for: repo.url); return }
+            let expanded = (path as NSString).expandingTildeInPath
+            let url = expanded.hasPrefix("/") ? URL(fileURLWithPath: expanded) : repo.url.appendingPathComponent(expanded)
             let message = try String(contentsOf: url, encoding: .utf8)
             if store.repositoryURL == repo.url { store.commitMessage = message }
+        } catch let error as GitError where error.exitCode == 1 {
+            if store.repositoryURL == repo.url { chooseTemplate(for: repo.url) }
         } catch { store.report(error) } }
+    }
+    private func chooseTemplate(for repositoryURL: URL, configure: Bool = false) {
+        guard store.repositoryURL == repositoryURL else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true; panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
+        panel.message = refinementText("Choose a commit message template")
+        panel.begin { response in
+            guard response == .OK, let url = panel.url, store.repositoryURL == repositoryURL else { return }
+            do {
+                let message = try String(contentsOf: url, encoding: .utf8)
+                if configure {
+                    store.operation(workflowText("commitTemplate")) { repository in
+                        _ = try await repository.workflowRead(["config", "--local", "commit.template", url.path])
+                        if store.repositoryURL == repositoryURL { store.commitMessage = message }
+                    }
+                } else { store.commitMessage = message }
+            } catch { store.report(error) }
+        }
     }
     func statusName(_ status: String) -> String { [" ": "—", "?": mainText("untracked"), "M": mainText("modified"), "A": mainText("added"), "D": mainText("deleted"), "R": mainText("renamed"), "C": mainText("copied"), "U": mainText("conflict"), "T": mainText("type") ][status] ?? status }
     func statusColor(_ status: String) -> Color { switch status { case "A", "?": return .green; case "D": return .red; case "M", "R", "U": return .orange; default: return .secondary } }
@@ -482,8 +543,8 @@ struct MainWindow: View {
 extension MainWindow {
     private func historyPane(compact: Bool) -> some View {
         VStack(spacing: 0) {
-            if compact { HStack { Label(interactionText("Log"), systemImage: "clock.arrow.circlepath").font(.system(size: 12, weight: .semibold)); HistorySearchControl(search: $store.historySearch).frame(maxWidth: .infinity); Button { store.mode = "history" } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }.buttonStyle(.plain).help(interactionText("Expand History")) }.padding(.horizontal, 12).frame(height: 36).rayGitChrome() }
-            HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch, isLoading: store.loadingHistory, hasMore: store.hasMore, onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy, onAction: historyAction, compact: compact, showsSearch: !compact, onJump: jumpToCommit, authorFilter: $store.historyAuthor)
+            if compact { HStack { Label(interactionText("Log"), systemImage: "clock.arrow.circlepath").font(.system(size: 12, weight: .semibold)); HistorySearchControl(search: $store.historySearch).frame(maxWidth: .infinity); HistoryDisplayMenu(); Button { if let repo = store.repository { LogPresenter.show(repository: repo) } } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }.buttonStyle(.plain).help(interactionText("Expand History")) }.padding(.horizontal, 12).frame(height: 36).rayGitChrome() }
+            HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch, isLoading: store.loadingHistory, hasMore: store.hasMore, onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy, onAction: historyAction, compact: compact, showsSearch: !compact, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), navigationGeneration: store.historyNavigationGeneration, onJump: jumpToCommit, authorFilter: $store.historyAuthor)
         }
     }
     private func copyText(_ text: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
@@ -511,16 +572,19 @@ extension MainWindow {
         case .reveal: NSWorkspace.shared.activateFileViewerSelecting(ordered.map { root.appendingPathComponent($0) })
         case .history: if let path = ordered.first { store.showHistory(path: path, ref: nil) }
         case .stage, .stageAll:
-            let targets = files.filter { $0.isUnstaged && !$0.isConflict }.map(\.path)
+            let eligible = WorkspaceFileActionTargets.paths(for: .stage, files: store.files, selection: paths)
+            let targets = store.files.filter { eligible.contains($0.path) }.flatMap { [$0.path] + ($0.originalPath.map { [$0] } ?? []) }
             guard !targets.isEmpty else { return }
             store.operation("暂存") { try await $0.stage(paths: targets) }
         case .unstage, .unstageAll:
-            let targets = files.filter { $0.isStaged && !$0.isConflict }.map(\.path)
+            let eligible = WorkspaceFileActionTargets.paths(for: .unstage, files: store.files, selection: paths)
+            let targets = store.files.filter { eligible.contains($0.path) }.flatMap { [$0.path] + ($0.originalPath.map { [$0] } ?? []) }
             guard !targets.isEmpty else { return }
             store.operation("取消暂存") { try await $0.unstage(paths: targets) }
         case .discard:
-            guard !files.isEmpty, files.allSatisfy({ !$0.isUntracked && !$0.isConflict && $0.isUnstaged }) else { return }
-            confirm(interactionText("Discard Working Tree Changes"), interactionText("Discard Message") + "\n\n" + ordered.joined(separator: "\n")) { store.operation(interactionText("Discard…")) { try await $0.discardWorktree(paths: ordered) } }
+            let targets = WorkspaceFileActionTargets.paths(for: .discard, files: store.files, selection: paths).sorted()
+            guard !targets.isEmpty else { return }
+            confirm(interactionText("Discard Working Tree Changes"), interactionText("Discard Message") + "\n\n" + targets.joined(separator: "\n")) { store.operation(interactionText("Discard…")) { try await $0.discardWorktree(paths: targets) } }
         case .copyName: copyText(ordered.map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: "\n"))
         case .copyPath: copyText(ordered.map { root.appendingPathComponent($0).path }.joined(separator: "\n"))
         case .copyRelativePath: copyText(ordered.joined(separator: "\n"))
@@ -536,6 +600,7 @@ extension MainWindow {
         }
         switch action {
         case .show: CommitDetailPresenter.show(commit: commit, repository: repository)
+        case .viewLog: LogPresenter.show(repository: repository, selectedCommit: commit.hash, applyFilter: true)
         case .copyHash: copyText(commit.hash)
         case .copyMessage: copyText(commit.body.isEmpty ? commit.subject : commit.body)
         case .createBranch: askName(interactionText("Create Branch at %@", commit.shortHash)) { name in store.operation(interactionText("Create Branch")) { try await $0.createBranch(name: name, startPoint: commit.hash) } }
@@ -557,7 +622,7 @@ extension MainWindow {
             confirm(mainText("checkoutTitle", value), mainText("checkoutMessage")) { store.operation("切换分支") { try await $0.checkout(branch: value) } }
         case .rename: askName(interactionText("Rename Branch…"), initial: value) { name in store.operation(interactionText("Rename Branch…")) { try await $0.renameBranch(oldName: value, newName: name) } }
         case .delete: confirm(interactionText("Delete Branch…"), interactionText("Delete Branch Message", value)) { store.operation(interactionText("Delete Branch…")) { try await $0.deleteBranch(name: value) } }
-        case .stashShow: if let repository = store.repository { ComparePresenter.show(title: value, repository: repository, stash: value) }
+        case .stashShow: store.showStashHistory(ref: value)
         case .stashApply: confirm(mainText("applyTitle", value), mainText("applyMessage")) { store.operation("应用贮藏") { try await $0.applyStash(ref: value) } }
         case .stashDrop: confirm(interactionText("Drop Stash…"), interactionText("Drop Stash Message", value)) { store.operation(interactionText("Drop Stash…")) { try await $0.dropStash(ref: value) } }
         }
@@ -631,7 +696,7 @@ private final class WorkspaceSplitView: NSSplitView, NSSplitViewDelegate {
     private func initializeDistribution() {
         guard subviews.count == 3, bounds.height >= fileMinimum + diffMinimum + footerMinimum + 2 * dividerThickness else { return }
         initialized = true
-        distribute(fileHeight: compact ? 130 : 190, footerHeight: compact ? 160 : 180)
+        distribute(fileHeight: 300, footerHeight: compact ? 160 : 180)
     }
     private func distribute(fileHeight: CGFloat, footerHeight: CGFloat) {
         guard subviews.count == 3 else { return }
@@ -660,7 +725,7 @@ private final class WorkspaceSplitView: NSSplitView, NSSplitViewDelegate {
     func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool { false }
 }
 
-/// Remove SwiftUI's expanding default title; the title is a normal toolbar item.
+/// Remove SwiftUI's expanding default title so the toolbar controls its own spaces.
 private struct ToolbarWindowTitleRemoval: ViewModifier {
     @ViewBuilder func body(content: Content) -> some View {
         if #available(macOS 15.0, *) {
@@ -668,5 +733,13 @@ private struct ToolbarWindowTitleRemoval: ViewModifier {
         } else {
             content
         }
+    }
+}
+
+private extension CustomizableToolbarContent {
+    @ToolbarContentBuilder
+    func compactMainToolbarItem() -> some CustomizableToolbarContent {
+        if #available(macOS 26.0, *) { self.sharedBackgroundVisibility(.hidden) }
+        else { self }
     }
 }

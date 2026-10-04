@@ -1,0 +1,7 @@
+"conflicts" = "競合ファイル %d 件";
+"pushPull" = "プッシュ可能 %d コミット、プル可能 %d コミット";
+"pull" = "プル可能 %d コミット";
+"push" = "プッシュ可能 %d コミット";
+"operationLog" = "操作ログを開く";
+"viewLog" = "ログを表示";
+"commitDetails" = "コミットの詳細";

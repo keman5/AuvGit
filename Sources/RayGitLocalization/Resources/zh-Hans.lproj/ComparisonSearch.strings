@@ -1,0 +1,20 @@
+"Search and replace" = "搜索与替换";
+"Find" = "查找";
+"Previous match" = "上一个匹配";
+"Next match" = "下一个匹配";
+"Case sensitive" = "区分大小写";
+"Regular expression" = "正则表达式";
+"Replace with" = "替换为";
+"Replace" = "替换";
+"Replace all" = "全部替换";
+"Open editor to replace" = "打开编辑器进行替换";
+"Replacements change the draft only. Use Undo to revert." = "替换仅修改草稿，可用撤销恢复。";
+"This preview is read-only." = "此预览为只读。";
+"Compact differences" = "紧凑差异";
+"Compact differences are read-only." = "紧凑差异为只读。";
+"Return to editor" = "返回编辑器";
+"No differences" = "无差异";
+"Invalid regular expression" = "无效的正则表达式";
+"Paged previews are read-only; search and compact differences are unavailable." = "分页预览为只读，暂不支持搜索和紧凑差异。";
+
+"Cancel search" = "取消搜索";

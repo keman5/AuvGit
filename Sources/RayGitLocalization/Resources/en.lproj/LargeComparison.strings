@@ -1,0 +1,10 @@
+"Changes only" = "Changes only";
+"Compare source" = "Compare source";
+"Parent revision" = "Parent revision";
+"Result limit reached; narrow the query." = "Result limit reached; narrow the query.";
+"Search scans the complete UTF-8 file line by line. Regex is line-based; lines above 1 MiB are reported. Results are capped at 10,000." = "Search scans the complete UTF-8 file line by line. Regex is line-based; lines above 1 MiB are reported. Results are capped at 10,000.";
+"Search scans complete revisions line by line. Regex is line-based; lines above 1 MiB are reported. Results are capped at 10,000 per revision." = "Search scans complete revisions line by line. Regex is line-based; lines above 1 MiB are reported. Results are capped at 10,000 per revision.";
+"Streaming search requires valid UTF-8 text." = "Streaming search requires valid UTF-8 text.";
+"Streaming search cannot scan a line larger than 1 MiB." = "Streaming search cannot scan a line larger than 1 MiB.";
+"Page starts at column %@; this is a continuation of source line %@." = "Page starts at column %@; this is a continuation of source line %@.";
+"The source line continues on the next page." = "The source line continues on the next page.";

@@ -1,0 +1,20 @@
+"Search and replace" = "Search and replace";
+"Find" = "Find";
+"Previous match" = "Previous match";
+"Next match" = "Next match";
+"Case sensitive" = "Case sensitive";
+"Regular expression" = "Regular expression";
+"Replace with" = "Replace with";
+"Replace" = "Replace";
+"Replace all" = "Replace all";
+"Open editor to replace" = "Open editor to replace";
+"Replacements change the draft only. Use Undo to revert." = "Replacements change the draft only. Use Undo to revert.";
+"This preview is read-only." = "This preview is read-only.";
+"Compact differences" = "Compact differences";
+"Compact differences are read-only." = "Compact differences are read-only.";
+"Return to editor" = "Return to editor";
+"No differences" = "No differences";
+"Invalid regular expression" = "Invalid regular expression";
+"Paged previews are read-only; search and compact differences are unavailable." = "Paged previews are read-only; search and compact differences are unavailable.";
+
+"Cancel search" = "Cancel search";

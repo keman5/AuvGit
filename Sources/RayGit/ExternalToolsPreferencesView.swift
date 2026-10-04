@@ -35,7 +35,7 @@ struct ExternalToolsPreferencesView: View {
             validation = editorPrefsText("Valid configuration")
             return true
         } catch {
-            let message = error.localizedDescription
+            let message = OperationFailure.message(error)
             let unavailable = "External tool template references an unavailable version: "
             if message.hasPrefix(unavailable) {
                 validation = editorPrefsText("Unavailable version") + " " + message.dropFirst(unavailable.count)

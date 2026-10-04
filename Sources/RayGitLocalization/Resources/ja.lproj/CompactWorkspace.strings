@@ -1,0 +1,14 @@
+"all" = "すべて";
+"modified" = "変更済み";
+"added" = "追加済み";
+"deleted" = "削除済み";
+"conflict" = "競合";
+"untracked" = "未追跡";
+"renamed" = "名前変更済み";
+"staged" = "ステージ済み";
+"Show hidden files" = "隠しファイルを表示";
+"Show ignored files (read-only)" = "無視したファイルを表示（読み取り専用）";
+"On" = "オン";
+"Off" = "オフ";
+"Ignored · read-only" = "無視 · 読み取り専用";
+"Ignored files could not be loaded" = "無視したファイルを読み込めませんでした";

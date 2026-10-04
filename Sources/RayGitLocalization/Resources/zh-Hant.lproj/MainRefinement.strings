@@ -1,0 +1,11 @@
+"Apply" = "套用";
+"Create" = "建立";
+"Discard" = "捨棄";
+"More" = "更多";
+"Commit options" = "提交選項";
+"Open operation log" = "開啟操作記錄";
+"Stage selected files, or all eligible files when none are selected" = "暫存選取檔案；未選取時暫存全部可暫存檔案";
+"Unstage selected files, or all eligible files when none are selected" = "取消暫存選取檔案；未選取時取消全部可取消暫存檔案";
+"Discard selected tracked changes, or all eligible tracked changes when none are selected" = "捨棄選取的已追蹤變更；未選取時捨棄全部可捨棄的已追蹤變更";
+"Choose a commit message template" = "選擇提交訊息模板";
+"Load configured template" = "載入已設定模板";

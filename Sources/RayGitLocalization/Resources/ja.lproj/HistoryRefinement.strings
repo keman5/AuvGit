@@ -1,0 +1,13 @@
+"Show author avatars" = "作者のアバターを表示";
+"Show author names" = "作者名を表示";
+"Show remote branch labels" = "リモートブランチのラベルを表示";
+"Show tag labels" = "タグを表示";
+"History display options" = "履歴の表示設定";
+"Author" = "作者";
+"Committer" = "コミッター";
+"Author date" = "作成日時";
+"Commit date" = "コミット日時";
+"Different dates may reflect history rewriting or importing; they do not identify a specific operation." = "日時の違いは履歴の書き換えやインポートでも生じるため、特定の操作を示すものではありません。";
+"Empty tree" = "空のバージョン";
+"Expanded" = "展開済み";
+"Collapsed" = "折りたたみ済み";

@@ -4,7 +4,7 @@
 "diff.nextHunk" = "Next hunk";
 "diff.view" = "View";
 "diff.sideBySide" = "Side by Side";
-"diff.unified" = "Unified";
+"diff.unified" = "Combined";
 "diff.loading" = "Loading diff…";
 "diff.empty" = "No differences to display";
 "diff.binary" = "Binary file: text differences are unavailable";

@@ -1,0 +1,14 @@
+"Log" = "ログ";
+"Filter references" = "参照を絞り込み";
+"All branches" = "すべてのブランチ";
+"Local branches" = "ローカルブランチ";
+"Remote branches" = "リモートブランチ";
+"Tags" = "タグ";
+"File history" = "ファイル履歴";
+"Repository-relative path" = "リポジトリ相対パス";
+"Clear file filter" = "ファイル絞り込みを解除";
+"Commit" = "コミット";
+"Parents" = "親コミット";
+"Select a commit" = "コミットを選択";
+"Name" = "名前";
+"This operation changes the repository. Review the selected commit before continuing." = "この操作はリポジトリを変更します。実行前に選択したコミットを確認してください。";

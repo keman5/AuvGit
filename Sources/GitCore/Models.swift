@@ -24,12 +24,21 @@ public struct GitCommit: Identifiable, Hashable, Sendable {
     public let hash: String
     public let parents: [String]
     public let author: String
+    public let authorEmail: String
+    public let committer: String
+    public let committerEmail: String
+    public let committedDate: Date
     public let date: Date
     public let subject: String
     public let body: String
     public let refs: [String]
     public var shortHash: String { String(hash.prefix(8)) }
-    public init(hash: String, parents: [String], author: String, date: Date, subject: String, body: String, refs: [String]) { self.hash = hash; self.parents = parents; self.author = author; self.date = date; self.subject = subject; self.body = body; self.refs = refs }
+    public init(hash: String, parents: [String], author: String, date: Date, subject: String, body: String, refs: [String], authorEmail: String = "", committer: String? = nil, committerEmail: String? = nil, committedDate: Date? = nil) {
+        self.hash = hash; self.parents = parents; self.author = author; self.authorEmail = authorEmail
+        self.committer = committer ?? author; self.committerEmail = committerEmail ?? authorEmail
+        self.date = date; self.committedDate = committedDate ?? date
+        self.subject = subject; self.body = body; self.refs = refs
+    }
 }
 public struct GitCommitFile: Identifiable, Hashable, Sendable {
     public var id: String { path }

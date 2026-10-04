@@ -57,7 +57,7 @@ struct ExtensionsSettings: View {
                     Spacer()
                     Button(compareText("Open Review Page")) {
                         guard let repository = store.repository else { return }
-                        Task { do { NSWorkspace.shared.open(try await repository.reviewURL(target: reviewTarget)) } catch { message = compareText(error.localizedDescription) } }
+                        Task { do { NSWorkspace.shared.open(try await repository.reviewURL(target: reviewTarget)) } catch { message = compareText(OperationFailure.message(error, repository: store.repositoryURL)) } }
                     }.disabled(store.repository == nil || reviewTarget.isEmpty)
                 }
             }
@@ -128,7 +128,7 @@ struct ExtensionsSettings: View {
                 if newer { update = manifest } else { message = compareText("This installation is up to date.") }
             } catch {
                 guard generation == updateGeneration, !Task.isCancelled else { return }
-                checking = false; message = compareText(error.localizedDescription)
+                checking = false; message = compareText(OperationFailure.message(error, repository: store.repositoryURL))
             }
         }
     }
@@ -138,7 +138,7 @@ struct ExtensionsSettings: View {
         store.isBusy = true
         Task {
             do { if finish { try await repository.finishGitFlow(kind: selectedKind, name: name, main: main, develop: develop) } else { try await repository.startGitFlow(kind: selectedKind, name: name, main: main, develop: develop) }; message = compareText("Git Flow completed") }
-            catch { message = compareText(error.localizedDescription) }
+            catch { message = compareText(OperationFailure.message(error, repository: store.repositoryURL)) }
             store.isBusy = false; await store.refresh()
         }
     }

@@ -4,8 +4,24 @@ import Combine
 final class ComparisonEditingCommands: ObservableObject {
     @Published private(set) var canUndo = false
     @Published private(set) var canRedo = false
+    @Published private(set) var searchCurrent = 0
+    @Published private(set) var searchTotal = 0
+    var focusEditorAction: (() -> Void)?
+    var selectReadOnlyRangeAction: ((String, NSRange) -> Void)?
+    func revealRange(paneID: String, range: NSRange) { selectReadOnlyRangeAction?(paneID, range) }
+    var revealLineAction: ((String, Int) -> Void)?
+    func focusEditor() { focusEditorAction?() }
+    func revealLine(paneID: String, number: Int) { revealLineAction?(paneID, number) }
+    func updateSearch(current: Int, total: Int) {
+        if searchCurrent != current { searchCurrent = current }
+        if searchTotal != total { searchTotal = total }
+    }
     private var undoAction: (() -> Void)?
     private var redoAction: (() -> Void)?
+    var replaceSearchAction: ((ComparisonSearchOptions, String, Bool) -> String?)?
+    func replaceSearch(options: ComparisonSearchOptions, replacement: String, all: Bool) -> String? {
+        replaceSearchAction?(options, replacement, all)
+    }
     func undo() { guard canUndo else { return }; undoAction?() }
     func redo() { guard canRedo else { return }; redoAction?() }
     func connect(undo: @escaping () -> Void, redo: @escaping () -> Void) { undoAction = undo; redoAction = redo }
@@ -66,9 +82,11 @@ class UndoableComparisonTextView: NSTextView {
         isEditable = true
         insertText(value, replacementRange: replacement)
         isEditable = wasEditable
+        // With groupsByEvent disabled, AppKit requires the operation group to
+        // remain open while assigning its name (including Replace All).
+        if let actionName { history.setActionName(actionName) }
         history.endUndoGrouping()
         breakUndoCoalescing()
-        if let actionName { history.setActionName(actionName) }
         historyChanged?()
     }
 }

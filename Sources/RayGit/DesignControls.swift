@@ -30,8 +30,8 @@ struct DesignCard<Content: View>: View {
                 Divider()
             }
             content.padding(14).frame(maxWidth: .infinity, alignment: .leading)
-        }.background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 9))
-            .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color(nsColor: .separatorColor).opacity(0.65), lineWidth: 1))
+        }.background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor).opacity(0.65), lineWidth: 1))
     }
 }
 

@@ -261,12 +261,12 @@ struct RebaseWorkflowView: View {
                             guard fields.count == 3, let seconds = Double(fields[2]) else { return nil }
                             return (fields[0], CommitMetadata(author: fields[1], date: Date(timeIntervalSince1970: seconds)))
                         })
-                    } } } catch { output = error.localizedDescription }; store.isBusy = false }
+                    } } } catch { output = OperationFailure.message(error, repository: store.repositoryURL) }; store.isBusy = false }
     }
     private func loadMessage() {
         let token = UUID(); editingRequest = token
         guard let key = messageSelection, messages[key] == nil, originalMessages[key] == nil, let repo = store.repository else { return }
-        Task { do { let hash = try await repo.workflowRevision(key); let message = try await repo.workflowRead(["show", "-s", "--format=%B", hash]); if editingRequest == token, messageSelection == key, messages[key] == nil { originalMessages[key] = message } } catch { if editingRequest == token { output = error.localizedDescription } } }
+        Task { do { let hash = try await repo.workflowRevision(key); let message = try await repo.workflowRead(["show", "-s", "--format=%B", hash]); if editingRequest == token, messageSelection == key, messages[key] == nil { originalMessages[key] = message } } catch { if editingRequest == token { output = OperationFailure.message(error, repository: store.repositoryURL) } } }
     }
     private func prepare() {
         guard let repo = store.repository, let plan = captured, !store.isBusy else { return }
@@ -279,12 +279,12 @@ struct RebaseWorkflowView: View {
                 for target in sourceTargets { if let message = saved[target.hash] { editedMessages[target.line] = message } }
                 guard store.repositoryURL == repo.url, captured?.head == plan.head, todo == edited else { throw GitError("Rebase selection changed; preview again") }
                 pending = PendingRebase(repository: repo, plan: plan, todo: edited, messages: editedMessages, exec: instructions.filter { $0.command == "exec" }.map(\.argument)); confirm = true
-            } catch { output = error.localizedDescription }
+            } catch { output = OperationFailure.message(error, repository: store.repositoryURL) }
             store.isBusy = false
         }
     }
     private func run(_ request: PendingRebase) {
         guard store.repositoryURL == request.repository.url, !store.isBusy else { return }; store.isBusy = true
-        Task { do { output = try await request.repository.executeRebase(plan: request.plan, editedTodo: request.todo, messages: request.messages, allowExec: true); if output.isEmpty { output = sessionText("Rebase completed or paused") } } catch { output = error.localizedDescription }; store.isBusy = false; await store.refresh() }
+        Task { do { output = try await request.repository.executeRebase(plan: request.plan, editedTodo: request.todo, messages: request.messages, allowExec: true); if output.isEmpty { output = sessionText("Rebase completed or paused") } } catch { output = OperationFailure.message(error, repository: store.repositoryURL) }; store.isBusy = false; await store.refresh() }
     }
 }

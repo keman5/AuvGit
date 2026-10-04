@@ -1,0 +1,14 @@
+"Log" = "日誌";
+"Filter references" = "篩選參照";
+"All branches" = "所有分支";
+"Local branches" = "本機分支";
+"Remote branches" = "遠端分支";
+"Tags" = "標籤";
+"File history" = "檔案歷史";
+"Repository-relative path" = "倉庫相對路徑";
+"Clear file filter" = "清除檔案篩選";
+"Commit" = "提交";
+"Parents" = "父提交";
+"Select a commit" = "選擇提交";
+"Name" = "名稱";
+"This operation changes the repository. Review the selected commit before continuing." = "此操作會修改倉庫。繼續前請確認所選提交。";

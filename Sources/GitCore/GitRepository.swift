@@ -37,7 +37,7 @@ public actor GitRepository {
         return "Detached " + (try await run(["rev-parse", "--short", "HEAD"])).text.trimmingCharacters(in: .newlines)
     }
     public func log(limit: Int = 200, skip: Int = 0, search: String = "", path: String? = nil, ref: String? = nil, author: String = "") async throws -> [GitCommit] {
-        var args = ["log", "--topo-order", "-z", "--format=%H%x00%P%x00%an%x00%at%x00%s%x00%B%x00%D"]
+        var args = ["log", "--topo-order", "-z", "--format=%H%x00%P%x00%an%x00%at%x00%s%x00%B%x00%D%x00%ae%x00%cn%x00%ce%x00%ct"]
         if path == nil { args += ["--max-count=\(max(0,limit))", "--skip=\(max(0,skip))"] }
         if path == nil && !author.isEmpty { args += ["--fixed-strings", "--regexp-ignore-case", "--author=" + author] }
         if path == nil && !search.isEmpty { args += ["--fixed-strings", "--regexp-ignore-case", "--grep=" + search] }
@@ -51,8 +51,8 @@ public actor GitRepository {
         if output.code != 0 { if (try await run(["show-ref"], allowedCodes: [0, 1])).code == 1 { return [] }; throw GitError(output.error) }
         let tokens = fields(output.data)
         var result: [GitCommit] = []
-        for i in stride(from: 0, to: max(0, tokens.count - 6), by: 7) {
-            result.append(GitCommit(hash: tokens[i], parents: tokens[i+1].split(separator: " ").map(String.init), author: tokens[i+2], date: Date(timeIntervalSince1970: Double(tokens[i+3]) ?? 0), subject: tokens[i+4], body: tokens[i+5], refs: tokens[i+6].split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }))
+        for i in stride(from: 0, to: max(0, tokens.count - 10), by: 11) {
+            result.append(GitCommit(hash: tokens[i], parents: tokens[i+1].split(separator: " ").map(String.init), author: tokens[i+2], date: Date(timeIntervalSince1970: Double(tokens[i+3]) ?? 0), subject: tokens[i+4], body: tokens[i+5], refs: tokens[i+6].split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }, authorEmail: tokens[i+7], committer: tokens[i+8], committerEmail: tokens[i+9], committedDate: Date(timeIntervalSince1970: Double(tokens[i+10]) ?? 0)))
         }
         if path != nil {
             // Git's --skip/--grep can skip the rename needed by --follow. Traverse
@@ -190,9 +190,9 @@ public actor GitRepository {
         return try await run(["stash", "show", "--patch", "--include-untracked", "--no-ext-diff", "--no-textconv", "--no-color", ref]).text
     }
 
-    public func fetch() async throws { _ = try await run(["fetch", "--all"] + (GitRuntimePreferences.shared.fetchPrune ? ["--prune"] : ["--no-prune"])) }
-    public func pull() async throws { _ = try await run(["pull", "--ff-only"]) }
-    public func push() async throws { _ = try await run(["push"]) }
+    public func fetch() async throws { _ = try await runNetwork(.fetch, progress: { _ in }) }
+    public func pull() async throws { _ = try await runNetwork(.pull, progress: { _ in }) }
+    public func push() async throws { _ = try await runNetwork(.push, progress: { _ in }) }
     public func stashes() async throws -> [GitStash] {
         let tokens = fields(try await run(["stash", "list", "-z", "--format=%gd%x00%gs"]).data)
         return stride(from: 0, to: max(0,tokens.count - 1), by: 2).map { GitStash(ref: tokens[$0], subject: tokens[$0+1]) }

@@ -1,0 +1,7 @@
+"conflicts" = "%d conflicted files";
+"pushPull" = "%d commits to push, %d commits to pull";
+"pull" = "%d commits to pull";
+"push" = "%d commits to push";
+"operationLog" = "Open operation log";
+"viewLog" = "View Log";
+"commitDetails" = "Commit Details";

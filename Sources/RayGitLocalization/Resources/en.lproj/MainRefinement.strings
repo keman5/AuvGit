@@ -1,0 +1,11 @@
+"Apply" = "Apply";
+"Create" = "Create";
+"Discard" = "Discard";
+"More" = "More";
+"Commit options" = "Commit options";
+"Open operation log" = "Open operation log";
+"Stage selected files, or all eligible files when none are selected" = "Stage selected files, or all eligible files when none are selected";
+"Unstage selected files, or all eligible files when none are selected" = "Unstage selected files, or all eligible files when none are selected";
+"Discard selected tracked changes, or all eligible tracked changes when none are selected" = "Discard selected tracked changes, or all eligible tracked changes when none are selected";
+"Choose a commit message template" = "Choose a commit message template";
+"Load configured template" = "Load configured template";

@@ -71,6 +71,21 @@ public struct TextPage: Sendable {
     public let hasNext: Bool
 }
 public enum TextPager {
+    public static func pageFromLine(_ text: String, firstLine: Int, linesPerPage: Int = 500, columnOffset: Int = 0) -> TextPage {
+        let source = text as NSString
+        var offset = 0, line = 1
+        while offset < source.length, line < max(1, firstLine) {
+            offset = NSMaxRange(source.lineRange(for: NSRange(location: offset, length: 0))); line += 1
+        }
+        offset = min(source.length, offset + max(0, columnOffset))
+        let start = offset, cap = min(source.length, start + 100_000)
+        var count = 0
+        while offset < cap, count < max(1, linesPerPage) {
+            offset = min(cap, NSMaxRange(source.lineRange(for: NSRange(location: offset, length: 0)))); count += 1
+        }
+        if offset < source.length, offset > start, (0xDC00...0xDFFF).contains(source.character(at: offset)) { offset -= 1 }
+        return TextPage(text: source.substring(with: NSRange(location: start, length: offset - start)), firstLine: line, hasNext: offset < source.length)
+    }
     /// Scans UTF-16 line boundaries without allocating an array for every line of the file.
     public static func page(_ text: String, index: Int, linesPerPage: Int = 500) -> TextPage {
         let ns = text as NSString

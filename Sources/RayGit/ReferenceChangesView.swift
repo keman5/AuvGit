@@ -57,7 +57,7 @@ struct ReferenceChangesView: View {
             snapshot = captured; files = result; selection = files.first?.path
             if files.isEmpty { loading = false } else { await loadDiff() }
         } catch is CancellationError { if loadRequest == token { loading = false } }
-        catch { if loadRequest == token { self.error = error.localizedDescription; loading = false } }
+        catch { if loadRequest == token { self.error = OperationFailure.message(error, repository: repository.url); loading = false } }
     }
     private func loadDiff() async {
         let token = UUID(); request = token
@@ -68,7 +68,7 @@ struct ReferenceChangesView: View {
             let result = try await repository.referenceFileDiff(left: captured.leftCommit, right: captured.rightCommit, file: file)
             if request == token, !Task.isCancelled { diff = result; error = "" }
         } catch is CancellationError { }
-        catch { if request == token { self.error = error.localizedDescription } }
+        catch { if request == token { self.error = OperationFailure.message(error, repository: repository.url) } }
         if request == token { loading = false }
     }
 }

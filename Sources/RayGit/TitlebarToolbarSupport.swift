@@ -2,14 +2,21 @@ import AppKit
 import SwiftUI
 import RayGitLocalization
 
-/// Extends the native customization menu without replacing SwiftUI's toolbar delegate.
-/// SwiftUI must own its item identifiers and restoration state through every view update.
+/// Installs a forwarding toolbar delegate to expose AppKit's repeatable spaces.
+/// SwiftUI's original delegate still creates and manages all ordinary toolbar items.
 struct TitlebarToolbarSupport: NSViewRepresentable {
-    func makeNSView(context: Context) -> TitlebarView { TitlebarView() }
-    func updateNSView(_ nsView: TitlebarView, context: Context) { nsView.scheduleToolbarConfiguration() }
+    var shellContent: ((BorderlessToolbarModel) -> NSView)? = nil
+    var hidesNativeToolbar = false
+    var shellWindowTitle: String? = nil
+    func makeNSView(context: Context) -> TitlebarView { let view = TitlebarView(); view.shellContent = shellContent; view.hidesNativeToolbar = hidesNativeToolbar; view.shellWindowTitle = shellWindowTitle; return view }
+    func updateNSView(_ nsView: TitlebarView, context: Context) { nsView.shellContent = shellContent; nsView.hidesNativeToolbar = hidesNativeToolbar; nsView.shellWindowTitle = shellWindowTitle; nsView.scheduleToolbarConfiguration() }
 
     final class TitlebarView: NSView {
+        var shellContent: ((BorderlessToolbarModel) -> NSView)?
+        var hidesNativeToolbar = false
+        var shellWindowTitle: String?
         private var eventMonitor: Any?
+        private var customizationDelegate: SpaceCustomizationDelegate?
         private var titleVisibilityObservation: NSKeyValueObservation?
 
         func scheduleToolbarConfiguration() {
@@ -18,9 +25,16 @@ struct TitlebarToolbarSupport: NSViewRepresentable {
 
         private func configureToolbar() {
             guard let window else { return }
-            // The unified window title reserves flexible width outside the toolbar.
-            // MainWindow displays the title as a normal item so native flexible
-            // spaces can use all remaining width within the single toolbar row.
+            if hidesNativeToolbar { window.toolbar?.isVisible = false; if let shellWindowTitle { window.title = shellWindowTitle; window.contentView?.needsLayout = true }; return }
+            EightPointWindowShell.install(on: window, content: shellContent)
+            if let toolbar = window.toolbar, let delegate = toolbar.delegate,
+               !(delegate is SpaceCustomizationDelegate) {
+                let proxy = SpaceCustomizationDelegate(original: delegate)
+                customizationDelegate = proxy
+                toolbar.delegate = proxy
+            }
+            // Hide the expanding unified title on older systems; newer systems
+            // remove it through MainWindow's toolbar title modifier.
             if #unavailable(macOS 15.0) {
                 window.titleVisibility = .hidden
                 if titleVisibilityObservation == nil {
@@ -72,3 +86,30 @@ struct TitlebarToolbarSupport: NSViewRepresentable {
     }
 }
 
+
+/// Forward SwiftUI item creation and restoration unchanged while exposing AppKit's
+/// repeatable spaces in the customization palette.
+private final class SpaceCustomizationDelegate: NSObject, NSToolbarDelegate {
+    private let original: NSToolbarDelegate
+    init(original: NSToolbarDelegate) { self.original = original; super.init() }
+    override func responds(to selector: Selector!) -> Bool {
+        super.responds(to: selector) || original.responds(to: selector)
+    }
+    override func forwardingTarget(for selector: Selector!) -> Any? {
+        original.responds(to: selector) ? original : super.forwardingTarget(for: selector)
+    }
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        var identifiers = original.toolbarAllowedItemIdentifiers?(toolbar) ?? []
+        for identifier in [NSToolbarItem.Identifier.space, .flexibleSpace] where !identifiers.contains(identifier) {
+            identifiers.append(identifier)
+        }
+        return identifiers
+    }
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        original.toolbarDefaultItemIdentifiers?(toolbar) ?? []
+    }
+    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        if identifier == .space || identifier == .flexibleSpace { return NSToolbarItem(itemIdentifier: identifier) }
+        return original.toolbar?(toolbar, itemForItemIdentifier: identifier, willBeInsertedIntoToolbar: flag)
+    }
+}

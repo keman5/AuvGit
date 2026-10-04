@@ -1,5 +1,5 @@
 "files" = "Files";
-"filter" = "Filter paths…";
+"filter" = "Filter files…";
 "stage" = "Stage";
 "unstage" = "Unstage";
 "stageAll" = "Stage All";

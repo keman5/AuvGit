@@ -1,0 +1,13 @@
+"Show author avatars" = "Show author avatars";
+"Show author names" = "Show author names";
+"Show remote branch labels" = "Show remote branch labels";
+"Show tag labels" = "Show tag labels";
+"History display options" = "History display options";
+"Author" = "Author";
+"Committer" = "Committer";
+"Author date" = "Author date";
+"Commit date" = "Commit date";
+"Different dates may reflect history rewriting or importing; they do not identify a specific operation." = "Different dates may reflect history rewriting or importing; they do not identify a specific operation.";
+"Empty tree" = "Empty tree";
+"Expanded" = "Expanded";
+"Collapsed" = "Collapsed";

@@ -1,0 +1,13 @@
+"Show author avatars" = "显示作者头像";
+"Show author names" = "显示作者名称";
+"Show remote branch labels" = "显示远程分支标签";
+"Show tag labels" = "显示标签";
+"History display options" = "日志显示设置";
+"Author" = "作者";
+"Committer" = "提交者";
+"Author date" = "作者时间";
+"Commit date" = "提交时间";
+"Different dates may reflect history rewriting or importing; they do not identify a specific operation." = "时间不同可能来自历史重写或导入，不能据此确定具体操作。";
+"Empty tree" = "空版本";
+"Expanded" = "已展开";
+"Collapsed" = "已折叠";

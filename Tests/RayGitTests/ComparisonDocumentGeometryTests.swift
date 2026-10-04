@@ -4,6 +4,40 @@ import AppKit
 
 @MainActor
 final class ComparisonDocumentGeometryTests: XCTestCase {
+    func testCurrentLogicalLineBackgroundIncludesEmptyEOFAndWrappedFragments() throws {
+        _ = NSApplication.shared
+        for value in ["", "line\n", String(repeating: "wrapped text ", count: 30)] {
+            let text = ComparisonTextView(frame: NSRect(x: 0, y: 0, width: 180, height: 800), textContainer: nil)
+            text.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+            text.string = value
+            text.textContainerInset = NSSize(width: 4, height: 3)
+            text.textContainer?.containerSize = NSSize(width: 170, height: 10000)
+            text.textContainer?.widthTracksTextView = false
+            text.setSelectedRange(NSRange(location: value.isEmpty || value.hasSuffix("\n") ? value.utf16.count : 1, length: 0))
+            let layout = try XCTUnwrap(text.layoutManager), container = try XCTUnwrap(text.textContainer)
+            layout.ensureLayout(for: container)
+            let targetY: CGFloat
+            if value.isEmpty || value.hasSuffix("\n") {
+                targetY = layout.extraLineFragmentRect.minY + text.textContainerInset.height + 2
+            } else {
+                let lastGlyph = layout.numberOfGlyphs - 1
+                let finalFragment = layout.lineFragmentRect(forGlyphAt: lastGlyph, effectiveRange: nil)
+                XCTAssertGreaterThan(finalFragment.minY, 0)
+                targetY = finalFragment.minY + text.textContainerInset.height + 2
+            }
+            func render(_ highlight: Bool) throws -> NSColor {
+                let image = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 180, pixelsHigh: 800, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+                let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: image))
+                NSGraphicsContext.saveGraphicsState(); defer { NSGraphicsContext.restoreGraphicsState() }
+                NSGraphicsContext.current = context
+                context.cgContext.translateBy(x: 0, y: 800); context.cgContext.scaleBy(x: 1, y: -1)
+                NSColor.white.setFill(); text.bounds.fill()
+                text.highlightCurrentLine = highlight; text.drawBackground(in: text.bounds)
+                return try XCTUnwrap(image.colorAt(x: 170, y: Int(targetY)))
+            }
+            XCTAssertNotEqual(try render(false), try render(true), "Current line must fill its final wrapped/EOF fragment for \(value.debugDescription)")
+        }
+    }
     func testLongDocumentsKeepTextAndDecorationsInSameCoordinatesAfterResize() async {
         _ = NSApplication.shared
         let prefix = (0..<160).map { "unchanged \($0)" }.joined(separator: "\n") + "\n"

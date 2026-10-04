@@ -1,0 +1,11 @@
+"Apply" = "適用";
+"Create" = "作成";
+"Discard" = "破棄";
+"More" = "その他";
+"Commit options" = "コミットのオプション";
+"Open operation log" = "操作ログを開く";
+"Stage selected files, or all eligible files when none are selected" = "選択したファイルをステージ。未選択の場合は対象の全ファイル";
+"Unstage selected files, or all eligible files when none are selected" = "選択したファイルのステージを解除。未選択の場合は対象の全ファイル";
+"Discard selected tracked changes, or all eligible tracked changes when none are selected" = "選択した追跡済みの変更を破棄。未選択の場合は対象の追跡済み変更すべて";
+"Choose a commit message template" = "コミットメッセージのテンプレートを選択";
+"Load configured template" = "設定済みテンプレートを読み込む";

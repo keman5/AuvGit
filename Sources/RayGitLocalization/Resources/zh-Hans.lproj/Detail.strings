@@ -4,7 +4,7 @@
 "diff.nextHunk" = "下一个变更块";
 "diff.view" = "视图";
 "diff.sideBySide" = "并排";
-"diff.unified" = "统一";
+"diff.unified" = "合并";
 "diff.loading" = "正在加载差异…";
 "diff.empty" = "没有可显示的差异";
 "diff.binary" = "二进制文件：无法显示文本差异";

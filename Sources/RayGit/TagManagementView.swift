@@ -161,28 +161,28 @@ struct TagManagementView: View {
         loading = true
         defer { loading = false }
         guard let repo = store.repository else { return }; let token = UUID(); reloadID = token
-        do { let newTags = try await repo.managedTags(); let newRemotes = try await repo.workflowRead(["remote"]).split(separator: "\n").map(String.init); let types = try await repo.workflowRead(["for-each-ref", "--format=%(refname:short)%00%(objecttype)", "refs/tags"]); guard reloadID == token, store.repositoryURL == repo.url else { return }; tags = newTags; tagTypes = Dictionary(uniqueKeysWithValues: types.split(separator: "\n").compactMap { line in let fields = line.split(separator: "\0").map(String.init); return fields.count == 2 ? (fields[0], fields[1]) : nil }); remotes = newRemotes; if let selection, !tags.contains(where: { $0.name == selection }) { self.selection = nil }; if !remotes.contains(remote) { remote = remotes.first ?? "" } } catch { output = error.localizedDescription }
+        do { let newTags = try await repo.managedTags(); let newRemotes = try await repo.workflowRead(["remote"]).split(separator: "\n").map(String.init); let types = try await repo.workflowRead(["for-each-ref", "--format=%(refname:short)%00%(objecttype)", "refs/tags"]); guard reloadID == token, store.repositoryURL == repo.url else { return }; tags = newTags; tagTypes = Dictionary(uniqueKeysWithValues: types.split(separator: "\n").compactMap { line in let fields = line.split(separator: "\0").map(String.init); return fields.count == 2 ? (fields[0], fields[1]) : nil }); remotes = newRemotes; if let selection, !tags.contains(where: { $0.name == selection }) { self.selection = nil }; if !remotes.contains(remote) { remote = remotes.first ?? "" } } catch { output = OperationFailure.message(error, repository: store.repositoryURL) }
     }
     private func create() {
         guard let repo = store.repository, !store.isBusy else { return }
         let tag = name, ref = revision, message = tagKind == "lightweight" ? "" : annotation, sign = tagKind == "signed"
         store.isBusy = true
-        Task { do { try await repo.createManagedTag(name: tag, revision: ref, message: message, signed: sign); output = workflowText("Completed"); showCreate = false; name = ""; annotation = "" } catch { output = error.localizedDescription }; store.isBusy = false; await reload(); await store.refresh() }
+        Task { do { try await repo.createManagedTag(name: tag, revision: ref, message: message, signed: sign); output = workflowText("Completed"); showCreate = false; name = ""; annotation = "" } catch { output = OperationFailure.message(error, repository: store.repositoryURL) }; store.isBusy = false; await reload(); await store.refresh() }
     }
     private func fetch() {
         guard let repo = store.repository, !store.isBusy else { return }; let target = remote
         store.isBusy = true
-        Task { do { output = try await repo.fetchTags(remote: target) } catch { output = error.localizedDescription }; store.isBusy = false; await reload(); await store.refresh() }
+        Task { do { output = try await repo.fetchTags(remote: target) } catch { output = OperationFailure.message(error, repository: store.repositoryURL) }; store.isBusy = false; await reload(); await store.refresh() }
     }
     private func preview(delete: Bool) {
         guard let repo = store.repository, let selected = selection, !store.isBusy else { return }
         let request = TagRequest(repo: repo, name: selected, remote: remote, delete: delete, local: false)
         store.isBusy = true
-        Task { do { output = try await repo.synchronizeTag(name: request.name, remote: request.remote, delete: delete, preview: true); pending = request } catch { output = error.localizedDescription }; store.isBusy = false }
+        Task { do { output = try await repo.synchronizeTag(name: request.name, remote: request.remote, delete: delete, preview: true); pending = request } catch { output = OperationFailure.message(error, repository: store.repositoryURL) }; store.isBusy = false }
     }
     private func publish(_ request: TagRequest) {
         guard store.repositoryURL == request.repo.url, !store.isBusy else { return }
         store.isBusy = true
-        Task { do { if request.local { output = try await request.repo.advancedOperation(.tagDelete, first: request.name, second: "") } else { output = try await request.repo.synchronizeTag(name: request.name, remote: request.remote, delete: request.delete, preview: false) } } catch { output = error.localizedDescription }; store.isBusy = false; await reload(); await store.refresh() }
+        Task { do { if request.local { output = try await request.repo.advancedOperation(.tagDelete, first: request.name, second: "") } else { output = try await request.repo.synchronizeTag(name: request.name, remote: request.remote, delete: request.delete, preview: false) } } catch { output = OperationFailure.message(error, repository: store.repositoryURL) }; store.isBusy = false; await reload(); await store.refresh() }
     }
 }

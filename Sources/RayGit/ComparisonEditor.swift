@@ -84,6 +84,8 @@ struct ComparisonEditor: NSViewRepresentable {
     var onCursorChange: ((ComparisonCursorStatus) -> Void)? = nil
     var editingCommands: ComparisonEditingCommands? = nil
     var scrollsToFirstChangeOnOpen = false
+    var searchOptions: ComparisonSearchOptions? = nil
+    var effectiveSearch: ComparisonSearchOptions { searchOptions ?? ComparisonSearchOptions(query: search) }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSSplitView {
@@ -110,6 +112,12 @@ struct ComparisonEditor: NSViewRepresentable {
         var scrolling = false
         var updating = false
         var didScrollToInitialChange = false
+        var searchIndices: [String: Int] = [:]
+        var navigationTexts: [String] = []
+        var navigationBaseline = -1
+        var navigationBands: [[Range<Int>]] = []
+        var changeBandIndex: Int?
+        var navigatingChange = false
         var lastNavigation: Int
         var lastChangeNavigation: Int
         var preferenceSignature = ""
@@ -123,23 +131,60 @@ struct ComparisonEditor: NSViewRepresentable {
             updating = true
             defer { updating = false }
             let rebuild = panes.map(\.id) != value.columns.map(\.id)
-            let previousSearch = model.search
+            let previousSearch = model.effectiveSearch
             let previousLanguage = model.languagePath
             let settings = "\(value.fontName)|\(value.fontSize)|\(value.tabWidth)|\(value.syntaxHighlight)|\(value.characterDiff)|\(value.showWhitespace)|\(value.highlightCurrentLine)|\(value.additionColor)|\(value.deletionColor)|\(value.modificationColor)|\(value.colorScheme)"
             let preferencesChanged = preferenceSignature != settings
             if preferencesChanged || rebuild { alignmentGeometry = "" }
             preferenceSignature = settings
+            if previousSearch != value.effectiveSearch { searchIndices = [:]; scheduleSearchStatus() }
             model = value
             value.resolver?.select = { [weak self] index in self?.selectConflict(index) }
             value.resolver?.accept = { [weak self] side, index in self?.acceptConflict(side, index: index) }
+            value.editingCommands?.focusEditorAction = { [weak self] in
+                guard let self, let pane = self.historyTarget() ?? self.panes.first(where: { $0.id == "worktree" }) ?? self.panes.first else { return }
+                pane.text.window?.makeFirstResponder(pane.text); self.active = pane.text
+            }
+            value.editingCommands?.selectReadOnlyRangeAction = { [weak self] id, range in
+                guard let self, let pane = self.panes.first(where: { $0.id == id }) else { return }
+                let location = min(range.location, pane.text.string.utf16.count)
+                pane.text.setSelectedRange(NSRange(location: location, length: min(range.length, pane.text.string.utf16.count - location)))
+                self.didScrollToInitialChange = true
+                self.scrollAll(to: pane.y(forLine: pane.line(atUTF16: location)) - 24)
+                self.active = pane.text
+            }
+            value.editingCommands?.revealLineAction = { [weak self] id, number in
+                guard let self, let pane = self.panes.first(where: { $0.id == id }) else { return }
+                let line = max(0, number - pane.gutter.firstLine)
+                if !pane.text.isEditable, let editable = self.historyTarget(), let sourceIndex = self.panes.firstIndex(where: { $0 === pane }), let targetIndex = self.panes.firstIndex(where: { $0 === editable }) {
+                    let texts = self.panes.map { $0.text.string }
+                    let baseline = self.model.resolver != nil ? targetIndex : 0
+                    let alignment = ComparisonAlignment(texts: texts, baseline: baseline, conflictBlocks: self.model.resolver != nil ? ConflictDraft.blocks(in: texts[baseline]) : [])
+                    if let band = alignment.bands.first(where: { $0[sourceIndex].contains(line) }) { self.revealLine(editable, line: band[targetIndex].lowerBound); return }
+                }
+                self.revealLine(pane, line: line)
+            }
+            value.editingCommands?.replaceSearchAction = { [weak self] options, replacement, all in
+                guard let self, let pane = self.panes.first(where: { $0.id == "worktree" && $0.text.isEditable }) else { return comparisonSearchText("This preview is read-only.") }
+                switch ComparisonSearch.replacing(in: pane.text.string, options: options, replacement: replacement, all: all, selected: pane.text.selectedRange()) {
+                case .failure(let error): return error.localizedDescription
+                case .success(let value):
+                    pane.text.replaceAsUndoableEdit(value, actionName: comparisonSearchText(all ? "Replace all" : "Replace"))
+                    self.active = pane.text
+                    return nil
+                }
+            }
             value.editingCommands?.connect(undo: { [weak self] in self?.performHistory(redo: false) }, redo: { [weak self] in self?.performHistory(redo: true) })
             if rebuild, let split {
                 NotificationCenter.default.removeObserver(self)
+                NotificationCenter.default.addObserver(self, selector: #selector(windowFocusChanged), name: NSWindow.didBecomeKeyNotification, object: nil)
+                NotificationCenter.default.addObserver(self, selector: #selector(windowFocusChanged), name: NSWindow.didResignKeyNotification, object: nil)
                 let focusedID = panes.first(where: { $0.text === active || $0.text === split.window?.firstResponder })?.id
                 split.subviews.forEach { $0.removeFromSuperview() }
                 panes = value.columns.map { column in
                     let pane = paneCache[column.id] ?? Pane(column: column)
                     paneCache[column.id] = pane
+                    pane.text.focusChanged = { [weak self] in self?.redrawCurrentLines() }
                     pane.text.historyChanged = { [weak self] in self?.scheduleCommandState() }
                     pane.text.delegate = self
                     pane.geometryChanged = { [weak self] in self?.scheduleAlignment() }
@@ -157,9 +202,10 @@ struct ComparisonEditor: NSViewRepresentable {
                 }
                 (split as? ComparisonSplitView)?.resetDistribution()
             }
-            var changed = preferencesChanged || rebuild || previousSearch != value.search || previousLanguage != value.languagePath
+            var changed = preferencesChanged || rebuild || previousSearch != value.effectiveSearch || previousLanguage != value.languagePath
             for (pane, column) in zip(panes, value.columns) {
                 pane.title.stringValue = column.title
+                pane.title.toolTip = column.title
                 pane.detail.stringValue = column.detail
                 pane.detail.toolTip = column.detail
                 pane.preservesUndo = pane.preservesUndo || column.preservesUndo || column.isEditable
@@ -216,6 +262,14 @@ struct ComparisonEditor: NSViewRepresentable {
                 didScrollToInitialChange = true
                 navigate(forward: value.navigation > lastNavigation)
                 lastNavigation = value.navigation
+            }
+        }
+        private func scheduleSearchStatus() {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let pane = self.panes.first(where: { $0.id == "worktree" }) ?? self.panes.first else { return }
+                let total = (try? ComparisonSearch.matches(in: pane.text.string, options: self.model.effectiveSearch).get().count) ?? 0
+                let current = self.searchIndices[pane.id].map { min($0 + 1, total) } ?? 0
+                self.model.editingCommands?.updateSearch(current: current, total: total)
             }
         }
         private var commandStateScheduled = false
@@ -281,6 +335,8 @@ struct ComparisonEditor: NSViewRepresentable {
             model.onCursorChange?(ComparisonCursorStatus(line: prefix.filter { $0 == "\n" }.count + pane.gutter.firstLine,
                 column: (prefix.components(separatedBy: "\n").last?.count ?? 0) + 1, selectedCharacters: selected.count))
             active = text
+            redrawCurrentLines()
+            if !navigatingChange { changeBandIndex = nil }
             scheduleCommandState()
             if model.resolver != nil, pane.id == "worktree", let index = ConflictDraft.blockIndex(atUTF16Offset: text.selectedRange().location, in: text.string) {
                 model.resolver?.selectedBlock = index
@@ -359,6 +415,7 @@ struct ComparisonEditor: NSViewRepresentable {
             pane.gutter.needsDisplay = true
             model.onEdit(pane.id, text.string)
             decorate()
+            scheduleSearchStatus()
             updateConflictGutters()
             scheduleAlignment()
         }
@@ -586,6 +643,7 @@ struct ComparisonEditor: NSViewRepresentable {
                 let conflictLines = Set(conflictBlocks.flatMap { ($0.startLine - 1)..<$0.endLine })
                 let conflictColor = EditorPreferences.color(model.deletionColor, fallback: .systemRed)
                 let changedLines = (lineChanges[pane.id] ?? []).union(conflictLines).union(pane.gutter.lineSigns.keys)
+                pane.gutter.lineBackgrounds = [:]
                 pane.gutter.changedLines = changedLines
                 pane.gutter.needsDisplay = true
                 var offset = 0
@@ -603,6 +661,7 @@ struct ComparisonEditor: NSViewRepresentable {
                             if (model.resolver == nil || pane.id != "worktree"), let addition = pane.gutter.lineSigns[index] {
                                 color = EditorPreferences.color(addition ? model.additionColor : model.deletionColor, fallback: addition ? .systemGreen : .systemRed)
                             }
+                            pane.gutter.lineBackgrounds[index] = DiffVisualStyle.lineBackground(color, dark: dark)
                             layout.addTemporaryAttribute(.backgroundColor, value: DiffVisualStyle.lineBackground(color, dark: dark), forCharacterRange: NSRange(location: offset, length: displayedLength))
                         }
                     }
@@ -647,14 +706,16 @@ struct ComparisonEditor: NSViewRepresentable {
                     }
                 }
                 changedRanges[pane.id] = changes.sorted { $0.location < $1.location }
-                guard !model.search.isEmpty else { continue }
-                var range = whole
-                while range.length > 0 {
-                    let match = content.range(of: model.search, options: [.caseInsensitive], range: range)
-                    if match.location == NSNotFound { break }
-                    layout.addTemporaryAttribute(.backgroundColor, value: NSColor.systemYellow.withAlphaComponent(0.45), forCharacterRange: match)
-                    let next = NSMaxRange(match)
-                    range = NSRange(location: next, length: content.length - next)
+                if case .success(let matches) = ComparisonSearch.matches(in: pane.text.string, options: model.effectiveSearch) {
+                    for match in matches {
+                        if match.length > 0 { layout.addTemporaryAttribute(.backgroundColor, value: NSColor.systemYellow.withAlphaComponent(0.45), forCharacterRange: match) }
+                        for (line, start) in pane.gutter.starts.enumerated() {
+                            let end = line + 1 < pane.gutter.starts.count ? pane.gutter.starts[line + 1] : content.length + 1
+                            if (start..<end).contains(match.location) || (match.length > 0 && NSIntersectionRange(NSRange(location: start, length: end - start), match).length > 0) {
+                                pane.gutter.lineBackgrounds[line] = NSColor.systemYellow.withAlphaComponent(0.45)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -662,32 +723,67 @@ struct ComparisonEditor: NSViewRepresentable {
             guard let responder = split?.window?.firstResponder as? NSTextView, panes.contains(where: { $0.text === responder }) else { return nil }
             return responder
         }
+        @objc private func windowFocusChanged(_ notification: Notification) { redrawCurrentLines() }
+        private func redrawCurrentLines() {
+            for pane in panes { pane.text.needsDisplay = true; pane.gutter.needsDisplay = true }
+        }
+        private func scrollAll(to y: CGFloat) {
+            scrolling = true
+            defer { scrolling = false }
+            for pane in panes where !pane.scroll.isHidden {
+                let clip = pane.scroll.contentView
+                clip.scroll(to: NSPoint(x: clip.bounds.minX, y: min(max(0, y), max(0, pane.text.bounds.height - clip.bounds.height))))
+                pane.scroll.reflectScrolledClipView(clip)
+                pane.gutter.needsDisplay = true; pane.leftRail.refresh(); pane.rightRail.refresh()
+            }
+        }
+        private func revealLine(_ pane: Pane, line: Int) {
+            let line = min(line, pane.gutter.starts.count - 1)
+            pane.text.setSelectedRange(NSRange(location: pane.gutter.starts[line], length: 0))
+            scrollAll(to: max(0, pane.y(forLine: line) - 24))
+            pane.text.window?.makeFirstResponder(pane.text); active = pane.text
+        }
         func navigateChange(forward: Bool) {
-            guard let text = focusedText ?? active ?? panes.first(where: { $0.text.isEditable })?.text ?? panes.first?.text,
-                  let pane = panes.first(where: { $0.text === text }),
-                  let ranges = changedRanges[pane.id], !ranges.isEmpty else { return }
-            let location = text.selectedRange().location
-            let target = forward ? (ranges.first(where: { $0.location > location }) ?? ranges[0]) : (ranges.last(where: { $0.location < location }) ?? ranges[ranges.count - 1])
-            text.setSelectedRange(target)
-            text.scrollRangeToVisible(target)
-            text.window?.makeFirstResponder(text)
-            active = text
+            guard !panes.isEmpty else { return }
+            let texts = panes.map { $0.text.string }
+            let baseline = model.resolver != nil ? panes.firstIndex(where: { $0.id == "worktree" }) ?? 0 : 0
+            if texts != navigationTexts || baseline != navigationBaseline {
+                navigationBaseline = baseline
+                navigationTexts = texts
+                navigationBands = ComparisonChangeNavigation(texts: texts, baseline: baseline, conflicts: model.resolver != nil ? ConflictDraft.blocks(in: texts[baseline]) : []).bands
+                changeBandIndex = nil
+            }
+            let groups = navigationBands
+            guard !groups.isEmpty else { return }
+            let focus = panes.firstIndex(where: { $0.text === focusedText || $0.text === active }) ?? baseline
+            let line = panes[focus].line(atUTF16: panes[focus].text.selectedRange().location)
+            let index: Int
+            if let current = changeBandIndex { index = (current + (forward ? 1 : groups.count - 1)) % groups.count }
+            else { index = forward ? groups.firstIndex(where: { $0[focus].lowerBound > line }) ?? 0 : groups.lastIndex(where: { $0[focus].lowerBound < line }) ?? groups.count - 1 }
+            navigatingChange = true
+            defer { navigatingChange = false }
+            let band = groups[index]
+            let top = panes.indices.compactMap { i -> CGFloat? in band[i].isEmpty ? nil : panes[i].y(forLine: band[i].lowerBound) }.min() ?? 0
+            for i in panes.indices {
+                let pane = panes[i], start = pane.gutter.starts[min(band[i].lowerBound, pane.gutter.starts.count - 1)]
+                let end = band[i].upperBound < pane.gutter.starts.count ? pane.gutter.starts[band[i].upperBound] : pane.text.string.utf16.count
+                pane.text.setSelectedRange(NSRange(location: start, length: max(0, end - start)))
+            }
+            changeBandIndex = index
+            scrollAll(to: top - 24)
+            panes[focus].text.window?.makeFirstResponder(panes[focus].text); active = panes[focus].text
         }
         func navigate(forward: Bool) {
-            guard !model.search.isEmpty, let text = focusedText ?? active ?? panes.first(where: { $0.text.isEditable })?.text ?? panes.first?.text else { return }
-            let content = text.string as NSString
-            let selected = text.selectedRange()
-            let start = min(forward ? NSMaxRange(selected) : selected.location, content.length)
-            let options: NSString.CompareOptions = forward ? [.caseInsensitive] : [.caseInsensitive, .backwards]
-            let range = forward ? NSRange(location: start, length: content.length - start) : NSRange(location: 0, length: start)
-            var found = content.range(of: model.search, options: options, range: range)
-            if found.location == NSNotFound { found = content.range(of: model.search, options: options) }
-            if found.location != NSNotFound {
-                text.setSelectedRange(found)
-                text.scrollRangeToVisible(found)
-                text.window?.makeFirstResponder(text)
-                active = text
-            }
+            guard let text = panes.first(where: { $0.id == "worktree" && !$0.scroll.isHidden })?.text ?? focusedText ?? active ?? panes.first?.text,
+                  let pane = panes.first(where: { $0.text === text }),
+                  case .success(let matches) = ComparisonSearch.matches(in: text.string, options: model.effectiveSearch), !matches.isEmpty else { return }
+            let current = searchIndices[pane.id]
+            let index = current.map { ($0 + (forward ? 1 : matches.count - 1)) % matches.count } ?? (forward ? 0 : matches.count - 1)
+            searchIndices[pane.id] = index
+            scheduleSearchStatus()
+            text.setSelectedRange(matches[index])
+            scrollAll(to: pane.y(forLine: pane.line(atUTF16: matches[index].location)) - 24)
+            active = text
         }
     }
 }
@@ -697,6 +793,7 @@ final class ComparisonSplitView: NSSplitView {
     override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); if window != nil { onAttach?() } }
     private var distributeEqually = true
     private var distributionGeneration = 0
+    private var lastDistributedWidth: CGFloat = -1
     func resetDistribution() {
         distributionGeneration += 1
         let generation = distributionGeneration
@@ -716,6 +813,7 @@ final class ComparisonSplitView: NSSplitView {
     private func equalizeDividers() {
         guard bounds.width > 0, !subviews.isEmpty else { return }
         distributeEqually = false
+        lastDistributedWidth = bounds.width
         let width = max(1, (bounds.width - CGFloat(subviews.count - 1) * dividerThickness) / CGFloat(subviews.count))
         for index in (0..<max(0, subviews.count - 1)).reversed() {
             setPosition(CGFloat(index + 1) * width + CGFloat(index) * dividerThickness, ofDividerAt: index)
@@ -724,10 +822,14 @@ final class ComparisonSplitView: NSSplitView {
     }
     override func layout() {
         super.layout()
-        if distributeEqually { equalizeDividers() }
+        // AppKit's divider constraints can overwrite frames assigned by
+        // resizeSubviews. Update the actual divider positions after that layout
+        // pass when the split width changes; manual drags at the same width remain.
+        if distributeEqually || bounds.width != lastDistributedWidth { equalizeDividers() }
     }
     override func resizeSubviews(withOldSize oldSize: NSSize) {
         guard !subviews.isEmpty else { return }
+        if oldSize.width != bounds.width { distributeEqually = true }
         let available = max(1, bounds.width - CGFloat(subviews.count - 1) * dividerThickness)
         var x: CGFloat = 0
         for view in subviews {
@@ -769,8 +871,12 @@ private enum ConflictVisualStyle {
     }
 }
 
-private final class ComparisonTextView: UndoableComparisonTextView {
+final class ComparisonTextView: UndoableComparisonTextView {
     var highlightCurrentLine = true
+    var focusChanged: (() -> Void)?
+    var currentLineFocused: Bool { window?.isKeyWindow == true && window?.firstResponder === self }
+    override func becomeFirstResponder() -> Bool { let accepted = super.becomeFirstResponder(); focusChanged?(); return accepted }
+    override func resignFirstResponder() -> Bool { let accepted = super.resignFirstResponder(); DispatchQueue.main.async { [weak self] in self?.focusChanged?() }; return accepted }
     var conflictBlocks: [ConflictDraft.Block] = []
     var selectedConflict = 0
     override func drawBackground(in rect: NSRect) {
@@ -797,13 +903,24 @@ private final class ComparisonTextView: UndoableComparisonTextView {
                 }
             }
         }
-        guard highlightCurrentLine, window?.firstResponder === self, let layoutManager, layoutManager.numberOfGlyphs > 0 else { return }
-        let character = min(selectedRange().location, max(0, string.utf16.count - 1))
-        let glyph = layoutManager.glyphIndexForCharacter(at: character)
-        var line = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        guard highlightCurrentLine, let layoutManager else { return }
+        let source = string as NSString
+        let character = min(selectedRange().location, source.length)
+        var line: NSRect
+        if layoutManager.numberOfGlyphs == 0 || (character == source.length && source.length > 0 && source.character(at: source.length - 1) == 10) {
+            line = layoutManager.extraLineFragmentRect
+            if line.height == 0 { line.size.height = layoutManager.defaultLineHeight(for: font ?? .monospacedSystemFont(ofSize: 12, weight: .regular)) }
+        } else {
+            let paragraph = source.lineRange(for: NSRange(location: min(character, max(0, source.length - 1)), length: 0))
+            let first = layoutManager.glyphIndexForCharacter(at: paragraph.location)
+            let last = layoutManager.glyphIndexForCharacter(at: max(paragraph.location, NSMaxRange(paragraph) - 1))
+            let top = layoutManager.lineFragmentRect(forGlyphAt: first, effectiveRange: nil)
+            let bottom = layoutManager.lineFragmentRect(forGlyphAt: last, effectiveRange: nil)
+            line = NSRect(x: 0, y: top.minY, width: bounds.width, height: bottom.maxY - top.minY)
+        }
         line.origin.y += textContainerInset.height
         line.origin.x = 0; line.size.width = bounds.width
-        NSColor.selectedTextBackgroundColor.withAlphaComponent(0.10).setFill()
+        NSColor.selectedTextBackgroundColor.withAlphaComponent(currentLineFocused ? 0.10 : 0.035).setFill()
         line.intersection(rect).fill()
     }
     override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
@@ -924,6 +1041,7 @@ private final class Pane: NSView {
         let width = gutter.preferredWidth
         if gutterWidth.constant != width { gutterWidth.constant = width; needsLayout = true }
     }
+    func line(atUTF16 location: Int) -> Int { max(0, (gutter.starts.lastIndex(where: { $0 <= location }) ?? 0)) }
     func line(atY y: CGFloat) -> Int {
         guard let layout = text.layoutManager, let container = text.textContainer, layout.numberOfGlyphs > 0 else { return 0 }
         let glyph = layout.glyphIndex(for: NSPoint(x: 0, y: max(0, y - text.textContainerInset.height)), in: container)
@@ -990,6 +1108,7 @@ private final class LineGutter: NSView {
     weak var scroll: NSScrollView?
     private var content = ""
     fileprivate var starts = [0]
+    var lineBackgrounds: [Int: NSColor] = [:]
     var changedLines = Set<Int>()
     var firstLine = 1
     var showsLineNumbers = true
@@ -1024,6 +1143,11 @@ private final class LineGutter: NSView {
                 let gutterRect = NSRect(x: 0, y: blockRect.minY - visible.minY, width: bounds.width, height: blockRect.height)
                 ConflictVisualStyle.fill(.systemOrange, emphasis: index == selectedConflict ? 0.20 : 0.11).setFill()
                 gutterRect.intersection(bounds).fill()
+                for section in ConflictVisualStyle.sections(block, in: text.string) {
+                    guard let sectionRect = ConflictVisualStyle.rect(section.0, in: text, layout: layout) else { continue }
+                    ConflictVisualStyle.fill(section.1, emphasis: index == selectedConflict ? 0.22 : 0.15).setFill()
+                    NSRect(x: 0, y: sectionRect.minY - visible.minY, width: bounds.width, height: sectionRect.height).intersection(bounds).fill()
+                }
                 NSColor.systemOrange.withAlphaComponent(index == selectedConflict ? 0.95 : 0.5).setFill()
                 NSRect(x: bounds.width - 3, y: gutterRect.minY, width: 3, height: gutterRect.height).intersection(bounds).fill()
             }
@@ -1038,25 +1162,51 @@ private final class LineGutter: NSView {
         let baselineOffset = codeFont.ascender - numberFont.ascender
         let attrs: [NSAttributedString.Key: Any] = [.font: numberFont, .foregroundColor: DiffVisualStyle.lineNumberColor]
         guard layout.numberOfGlyphs > 0 else {
-            guard showsLineNumbers else { return }
-            let label = "\(firstLine)" as NSString
-            label.draw(at: NSPoint(x: bounds.width - label.size(withAttributes: attrs).width - signWidth - 3, y: inset.height - visible.minY + baselineOffset), withAttributes: attrs)
+            let y = inset.height - visible.minY
+            var numberAttributes = attrs
+            if let native = text as? ComparisonTextView, native.highlightCurrentLine {
+                let focused = native.currentLineFocused
+                NSColor.selectedTextBackgroundColor.withAlphaComponent(focused ? 0.10 : 0.035).setFill()
+                NSRect(x: 0, y: y, width: bounds.width, height: layout.defaultLineHeight(for: codeFont)).intersection(bounds).fill()
+                numberAttributes[.font] = NSFont.monospacedDigitSystemFont(ofSize: numberFont.pointSize, weight: focused ? .semibold : .medium)
+                numberAttributes[.foregroundColor] = focused ? NSColor.labelColor : DiffVisualStyle.lineNumberColor
+            }
+            if showsLineNumbers {
+                let label = "\(firstLine)" as NSString
+                label.draw(at: NSPoint(x: bounds.width - label.size(withAttributes: numberAttributes).width - signWidth - 3, y: y + baselineOffset), withAttributes: numberAttributes)
+            }
             return
         }
         layout.enumerateLineFragments(forGlyphRange: glyphs) { rect, _, _, glyphRange, _ in
             let character = layout.characterIndexForGlyph(at: glyphRange.location)
+            var lower = 0
+            var upper = self.starts.count
+            while lower < upper {
+                let middle = (lower + upper) / 2
+                if self.starts[middle] <= character { lower = middle + 1 } else { upper = middle }
+            }
+            let line = max(lower, 1) - 1
+            let y = rect.minY + inset.height - visible.minY
+            if let color = self.lineBackgrounds[line] {
+                color.setFill()
+                NSRect(x: 0, y: y, width: self.bounds.width, height: rect.height).intersection(self.bounds).fill()
+            }
+            let selectedLine = self.starts.lastIndex(where: { $0 <= text.selectedRange().location }) ?? 0
+            let current = line == selectedLine && (text as? ComparisonTextView)?.highlightCurrentLine == true
+            let focused = (text as? ComparisonTextView)?.currentLineFocused == true
+            if current {
+                NSColor.selectedTextBackgroundColor.withAlphaComponent(focused ? 0.10 : 0.035).setFill()
+                NSRect(x: 0, y: y, width: self.bounds.width, height: rect.height).intersection(self.bounds).fill()
+            }
             if character == 0 || (character <= content.length && content.character(at: character - 1) == 10) {
-                var lower = 0
-                var upper = self.starts.count
-                while lower < upper {
-                    let middle = (lower + upper) / 2
-                    if self.starts[middle] <= character { lower = middle + 1 } else { upper = middle }
-                }
-                let line = max(lower, 1) - 1
-                let y = rect.minY + inset.height - visible.minY
                 if self.showsLineNumbers {
                     let label = "\(self.firstLine + line)" as NSString
-                    label.draw(at: NSPoint(x: self.bounds.width - label.size(withAttributes: attrs).width - self.signWidth - 3, y: y + baselineOffset), withAttributes: attrs)
+                    var numberAttributes = attrs
+                    if current {
+                        numberAttributes[.font] = NSFont.monospacedDigitSystemFont(ofSize: numberFont.pointSize, weight: focused ? .semibold : .medium)
+                        numberAttributes[.foregroundColor] = focused ? NSColor.labelColor : DiffVisualStyle.lineNumberColor
+                    }
+                    label.draw(at: NSPoint(x: self.bounds.width - label.size(withAttributes: numberAttributes).width - self.signWidth - 3, y: y + baselineOffset), withAttributes: numberAttributes)
                 }
                 if let addition = self.lineSigns[line] {
                     let label = (addition ? "+" : "−") as NSString
@@ -1067,12 +1217,22 @@ private final class LineGutter: NSView {
                 }
             }
         }
-        if showsLineNumbers, content.length > 0, content.character(at: content.length - 1) == 10 {
+        if content.length == 0 || content.character(at: content.length - 1) == 10 {
             let rect = layout.extraLineFragmentRect
             let y = rect.minY + inset.height - visible.minY
             if y >= -20 && y <= bounds.height {
-                let label = "\(firstLine + starts.count - 1)" as NSString
-                label.draw(at: NSPoint(x: bounds.width - label.size(withAttributes: attrs).width - signWidth - 3, y: y + baselineOffset), withAttributes: attrs)
+                var numberAttributes = attrs
+                if text.selectedRange().location == content.length, let native = text as? ComparisonTextView, native.highlightCurrentLine {
+                    let focused = native.currentLineFocused
+                    NSColor.selectedTextBackgroundColor.withAlphaComponent(focused ? 0.10 : 0.035).setFill()
+                    NSRect(x: 0, y: y, width: bounds.width, height: rect.height).intersection(bounds).fill()
+                    numberAttributes[.font] = NSFont.monospacedDigitSystemFont(ofSize: numberFont.pointSize, weight: focused ? .semibold : .medium)
+                    numberAttributes[.foregroundColor] = focused ? NSColor.labelColor : DiffVisualStyle.lineNumberColor
+                }
+                if showsLineNumbers {
+                    let label = "\(firstLine + starts.count - 1)" as NSString
+                    label.draw(at: NSPoint(x: bounds.width - label.size(withAttributes: numberAttributes).width - signWidth - 3, y: y + baselineOffset), withAttributes: numberAttributes)
+                }
             }
         }
     }

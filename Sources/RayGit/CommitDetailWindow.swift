@@ -93,7 +93,7 @@ private struct CommitDetailView: View {
                     let result = try await repository.commitFiles(hash: commit.hash)
                     guard !Task.isCancelled else { return }
                     files = result; selection = result.first?.path; filesError = nil
-                } catch { if !Task.isCancelled { filesError = error.localizedDescription } }
+                } catch { if !Task.isCancelled { filesError = OperationFailure.message(error, repository: repository.url) } }
                 loadingFiles = false
             }
             .task(id: selection) {
@@ -106,7 +106,7 @@ private struct CommitDetailView: View {
                     diff = result
                 } catch {
                     guard !Task.isCancelled, selection == path else { return }
-                    diffError = error.localizedDescription
+                    diffError = OperationFailure.message(error, repository: repository.url)
                 }
                 loadingDiff = false
             }

@@ -10,6 +10,9 @@ public struct WorkspaceFileNode: Identifiable, Sendable {
     public var id: String { path }
     public let isDirectory: Bool
     public let children: [WorkspaceFileNode]
+    public init(path: String, isDirectory: Bool, children: [WorkspaceFileNode]) {
+        self.path = path; self.isDirectory = isDirectory; self.children = children
+    }
 }
 
 extension GitRepository {

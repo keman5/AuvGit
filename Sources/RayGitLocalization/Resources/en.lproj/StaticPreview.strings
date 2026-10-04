@@ -1,0 +1,13 @@
+"Revision has no file" = "Revision has no file";
+"File exceeds preview limit" = "File exceeds preview limit";
+"No supported static preview" = "No supported static preview";
+"bytes" = "bytes";
+"characters" = "characters";
+"Character count unavailable for binary or unread content" = "Character count unavailable for binary or unread content";
+"Comparison skipped above 32 MiB; file content was not loaded" = "Comparison skipped above 32 MiB; file content was not loaded";
+"Original" = "Original";
+"Modified" = "Modified";
+"Parent revision" = "Parent revision";
+"Commit revision" = "Commit revision";
+"Supported: PNG, JPEG, GIF, TIFF, BMP, WebP, HEIC, PDF first page and safe SVG" = "Supported: PNG, JPEG, GIF, TIFF, BMP, WebP, HEIC, PDF first page and safe SVG";
+"PDF page 1 of %@" = "PDF page 1 of %@";

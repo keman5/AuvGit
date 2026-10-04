@@ -1,0 +1,10 @@
+"Changes only" = "変更行のみ表示";
+"Compare source" = "比較元のリビジョン";
+"Parent revision" = "親コミットのバージョン";
+"Result limit reached; narrow the query." = "結果の上限に達しました。検索条件を絞ってください。";
+"Search scans the complete UTF-8 file line by line. Regex is line-based; lines above 1 MiB are reported. Results are capped at 10,000." = "UTF-8 ファイル全体を行単位で検索します。正規表現は行ごとに評価し、1 MiB を超える行は報告します。結果は最大 10,000 件です。";
+"Search scans complete revisions line by line. Regex is line-based; lines above 1 MiB are reported. Results are capped at 10,000 per revision." = "リビジョン全体を行単位で検索します。正規表現は行ごとに評価し、1 MiB を超える行は報告します。結果はリビジョンごとに最大 10,000 件です。";
+"Streaming search requires valid UTF-8 text." = "ストリーミング検索には有効な UTF-8 テキストが必要です。";
+"Streaming search cannot scan a line larger than 1 MiB." = "1 MiB を超える行はストリーミング検索できません。";
+"Page starts at column %@; this is a continuation of source line %@." = "このページは列 %@ から始まり、元ファイルの行 %@ の続きです。";
+"The source line continues on the next page." = "この行の内容は次のページに続きます。";

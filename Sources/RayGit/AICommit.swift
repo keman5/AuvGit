@@ -218,7 +218,7 @@ struct AICommitSettingsSheet: View {
             if !error.isEmpty { Text(error).foregroundStyle(.orange).font(.caption) }
             HStack { Spacer(); Button(aiCommitText("Cancel")) { dismiss() }; Button(aiCommitText("Save")) {
                 do { if !key.isEmpty { try AICommitSecret.save(key) }; configuration.save(); dismiss() }
-                catch { self.error = error.localizedDescription }
+                catch { self.error = OperationFailure.message(error) }
             }.buttonStyle(.borderedProminent).disabled(configuration.provider.isEmpty || configuration.model.trimmingCharacters(in: .whitespaces).isEmpty) }
         }.textFieldStyle(.roundedBorder).padding(22).frame(width: 520)
     }

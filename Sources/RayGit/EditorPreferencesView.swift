@@ -117,8 +117,12 @@ struct EditorPreferencesView: View {
         }
     }
     private func settingToggle(_ key: String, _ binding: Binding<Bool>, _ detail: String = "") -> some View {
-        DesignSettingRow(editorPrefsText(key), detail: detail.isEmpty ? "" : designText(detail)) {
-            Toggle(editorPrefsText(key), isOn: binding).labelsHidden().toggleStyle(.switch).controlSize(.small)
-        }
+        Toggle(isOn: binding) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(editorPrefsText(key)).font(.system(size: 13, weight: .medium))
+                if !detail.isEmpty { Text(designText(detail)).font(.system(size: 11)).foregroundStyle(.secondary) }
+            }.frame(maxWidth: .infinity, alignment: .leading)
+        }.toggleStyle(.switch).controlSize(.small).padding(.vertical, 7)
+
     }
 }

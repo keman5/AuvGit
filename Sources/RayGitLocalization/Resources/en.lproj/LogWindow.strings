@@ -1,0 +1,14 @@
+"Log" = "Log";
+"Filter references" = "Filter references";
+"All branches" = "All branches";
+"Local branches" = "Local branches";
+"Remote branches" = "Remote branches";
+"Tags" = "Tags";
+"File history" = "File history";
+"Repository-relative path" = "Repository-relative path";
+"Clear file filter" = "Clear file filter";
+"Commit" = "Commit";
+"Parents" = "Parents";
+"Select a commit" = "Select a commit";
+"Name" = "Name";
+"This operation changes the repository. Review the selected commit before continuing." = "This operation changes the repository. Review the selected commit before continuing.";

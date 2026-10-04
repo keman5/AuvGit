@@ -94,9 +94,10 @@ struct PreferencesWindow: View {
                         ForEach(filtered, id: \.self) { category in
                             Button { selected = category } label: {
                                 Label { Text(prefsText(category)).lineLimit(1) } icon: {
-                                    Image(systemName: categoryIcon(category)).font(.system(size: 18)).frame(width: 25)
+                                    Image(systemName: categoryIcon(category)).font(.system(size: 14)).frame(width: 21)
                                 }.font(.system(size: 13, weight: selected == category ? .semibold : .regular))
                                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 11)
+                                    .contentShape(Rectangle())
                                     .foregroundStyle(selected == category ? Color.white : Color.primary)
                                     .background(selected == category ? Color.blue : Color.clear, in: RoundedRectangle(cornerRadius: 8))
                             }.buttonStyle(.plain)
@@ -119,7 +120,7 @@ struct PreferencesWindow: View {
                     page.frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-        }.background(RayGitStyle.canvas).frame(minWidth: 760, idealWidth: 1040, minHeight: 620, idealHeight: 780)
+        }.background(RayGitStyle.canvas).buttonBorderShape(.roundedRectangle(radius: 6)).frame(minWidth: 760, idealWidth: 1040, minHeight: 620, idealHeight: 780)
             .onChange(of: query) { _, _ in if !filtered.contains(selected), let first = filtered.first { selected = first } }
             .onChange(of: theme) { _, _ in RayGitPreferences.applyAppearance() }
             .alert(prefsText("Clear local records?"), isPresented: Binding(get: { clearAction != nil }, set: { if !$0 { clearAction = nil } })) {

@@ -1,0 +1,20 @@
+"Search and replace" = "搜尋與取代";
+"Find" = "尋找";
+"Previous match" = "上一個符合項";
+"Next match" = "下一個符合項";
+"Case sensitive" = "區分大小寫";
+"Regular expression" = "正則表達式";
+"Replace with" = "取代為";
+"Replace" = "取代";
+"Replace all" = "全部取代";
+"Open editor to replace" = "開啟編輯器進行取代";
+"Replacements change the draft only. Use Undo to revert." = "取代只會修改草稿，可用復原恢復。";
+"This preview is read-only." = "此預覽為唯讀。";
+"Compact differences" = "精簡差異";
+"Compact differences are read-only." = "精簡差異為唯讀。";
+"Return to editor" = "返回編輯器";
+"No differences" = "沒有差異";
+"Invalid regular expression" = "無效的正則表達式";
+"Paged previews are read-only; search and compact differences are unavailable." = "分頁預覽為唯讀，暫不支援搜尋和精簡差異。";
+
+"Cancel search" = "取消搜尋";

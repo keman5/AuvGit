@@ -1,0 +1,20 @@
+"Search and replace" = "検索と置換";
+"Find" = "検索";
+"Previous match" = "前の一致";
+"Next match" = "次の一致";
+"Case sensitive" = "大文字と小文字を区別";
+"Regular expression" = "正規表現";
+"Replace with" = "置換後の文字列";
+"Replace" = "置換";
+"Replace all" = "すべて置換";
+"Open editor to replace" = "エディタで置換";
+"Replacements change the draft only. Use Undo to revert." = "置換は下書きのみ変更します。取り消しで戻せます。";
+"This preview is read-only." = "このプレビューは読み取り専用です。";
+"Compact differences" = "差分のみ表示";
+"Compact differences are read-only." = "差分のみの表示は読み取り専用です。";
+"Return to editor" = "エディタに戻る";
+"No differences" = "差分なし";
+"Invalid regular expression" = "無効な正規表現";
+"Paged previews are read-only; search and compact differences are unavailable." = "ページ単位のプレビューは読み取り専用で、検索と差分のみの表示は利用できません。";
+
+"Cancel search" = "検索をキャンセル";

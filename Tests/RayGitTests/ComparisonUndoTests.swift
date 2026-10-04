@@ -60,8 +60,9 @@ final class ComparisonUndoTests: XCTestCase {
         let original = view.string
         let source = original as NSString
         let range = source.range(of: "<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\n")
-        view.replaceAsUndoableEdit("a\n", range: range)
+        view.replaceAsUndoableEdit("a\n", range: range, actionName: "Resolve Conflict")
         XCTAssertEqual(view.string, "前\na\n後")
+        XCTAssertEqual(view.editingUndoManager.undoActionName, "Resolve Conflict")
         view.editingUndoManager.undo(); XCTAssertEqual(view.string, original)
         view.editingUndoManager.redo(); XCTAssertEqual(view.string, "前\na\n後")
     }

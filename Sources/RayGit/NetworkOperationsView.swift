@@ -175,7 +175,7 @@ struct NetworkOperationsView: View {
     }
     private func loadCredentials() async {
         guard let repository = store.repository else { return }
-        do { credentials = try await repository.credentialConfiguration() } catch { output = error.localizedDescription }
+        do { credentials = try await repository.credentialConfiguration() } catch { output = OperationFailure.message(error, repository: store.repositoryURL) }
     }
     private func loadRepositoryContext() async {
         guard let repository = store.repository else { return }
@@ -199,7 +199,7 @@ struct NetworkOperationsView: View {
                 if values.count == 2 { divergence = (values[0], values[1]) }
                 outgoing = commits
             }
-        } catch { output = GitProgressParser.redact(error.localizedDescription) }
+        } catch { output = GitProgressParser.redact(OperationFailure.message(error, repository: store.repositoryURL)) }
     }
     private func run(_ operation: NetworkOperation) {
         guard let repository = store.repository, !store.isBusy, task == nil else { return }
@@ -223,7 +223,7 @@ struct NetworkOperationsView: View {
                     if !previewReady { output += "\n" + networkText("previewExpired") }
                 }
             } catch is CancellationError { output = networkText("cancelled") }
-            catch { output = GitProgressParser.redact(error.localizedDescription) }
+            catch { output = GitProgressParser.redact(OperationFailure.message(error, repository: store.repositoryURL)) }
             store.isBusy = false; task = nil
             if operation != .pushPreview { await store.refresh() }
             await loadRepositoryContext()
@@ -234,7 +234,7 @@ struct NetworkOperationsView: View {
         store.isBusy = true
         task = Task { @MainActor in
             do { try await repository.configureKeychainHelper(); await loadCredentials() }
-            catch { output = error.localizedDescription }
+            catch { output = OperationFailure.message(error, repository: store.repositoryURL) }
             store.isBusy = false; task = nil
         }
     }

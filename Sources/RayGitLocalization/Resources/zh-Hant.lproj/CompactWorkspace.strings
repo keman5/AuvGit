@@ -1,0 +1,14 @@
+"all" = "全部";
+"modified" = "已修改";
+"added" = "新增";
+"deleted" = "已刪除";
+"conflict" = "衝突";
+"untracked" = "未追蹤";
+"renamed" = "已重新命名";
+"staged" = "已暫存";
+"Show hidden files" = "顯示隱藏檔案";
+"Show ignored files (read-only)" = "顯示忽略檔案（唯讀）";
+"On" = "開啟";
+"Off" = "關閉";
+"Ignored · read-only" = "已忽略 · 唯讀";
+"Ignored files could not be loaded" = "無法載入忽略檔案";

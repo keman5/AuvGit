@@ -50,10 +50,10 @@ struct StructuredHistoryView: View {
     private func load() async {
         let token = UUID(); request = token; loading = true; error = ""; selection = nil; lines = []; entries = []
         do { if let blamePath { let result = try await repository.blameLines(path: blamePath, revision: revision); if request == token, !Task.isCancelled { lines = result } } else { let result = try await repository.reflogEntries(); if request == token, !Task.isCancelled { entries = result } } }
-        catch is CancellationError {} catch { if request == token { self.error = error.localizedDescription } }
+        catch is CancellationError {} catch { if request == token { self.error = OperationFailure.message(error, repository: repository.url) } }
         if request == token { loading = false }
     }
     private func openSelected() { open(selectedHash) }
-    private func open(_ hash: String?) { guard let hash else { return }; Task { do { if let commit = try await repository.log(limit: 1, ref: hash).first { CommitDetailPresenter.show(commit: commit, repository: repository) } } catch { self.error = error.localizedDescription } } }
+    private func open(_ hash: String?) { guard let hash else { return }; Task { do { if let commit = try await repository.log(limit: 1, ref: hash).first { CommitDetailPresenter.show(commit: commit, repository: repository) } } catch { self.error = OperationFailure.message(error, repository: repository.url) } } }
     private func copySelected() { let content = blamePath != nil ? lines.first { $0.id == selection }?.code : entries.first { $0.id == selection }?.action; if let content { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(content, forType: .string) } }
 }

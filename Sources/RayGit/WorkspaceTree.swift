@@ -4,6 +4,7 @@ import GitCore
 struct WorkspaceTree: View {
     let repository: GitRepository
     let openFile: (String) -> Void
+    var visiblePaths: Set<String>? = nil
     var primaryAction: ((String) -> Void)? = nil
     var isBusy: Bool = false
     var setBusy: (Bool) -> Void = { _ in }
@@ -24,17 +25,21 @@ struct WorkspaceTree: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Button(compareText("Edit .gitignore")) { loadIgnoreEditor() }
-                Button(compareText("Ignored Files")) { Task { do { ignored = try await repository.ignoredWorkspacePaths(); showIgnored = true } catch { self.error = compareText(error.localizedDescription) } } }
-                Menu(compareText("Restore from Trash")) {
+                Button { loadIgnoreEditor() } label: { Image(systemName: "doc.badge.gearshape") }
+                    .help(compareText("Edit .gitignore")).accessibilityLabel(compareText("Edit .gitignore"))
+                Button { Task { do { ignored = try await repository.ignoredWorkspacePaths(); showIgnored = true } catch { self.error = compareText(OperationFailure.message(error, repository: repository.url)) } } } label: { Image(systemName: "eye.slash") }
+                    .help(compareText("Ignored Files")).accessibilityLabel(compareText("Ignored Files"))
+                Menu {
                     ForEach(trashed.indices, id: \.self) { index in Button(trashed[index].originalPath) { perform { try await repository.restoreWorkspaceFile(trashed[index]); trashed.remove(at: index) } } }
-                }.disabled(trashed.isEmpty)
+                } label: { Image(systemName: "ellipsis") }
+                    .menuIndicator(.hidden).menuStyle(.borderlessButton).frame(width: 24)
+                    .help(compareText("Restore from Trash")).accessibilityLabel(compareText("Restore from Trash")).disabled(trashed.isEmpty)
                 Spacer()
             }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8)
             Divider()
             if let error { Text(error).foregroundStyle(.orange).font(.caption).padding(.horizontal, 12).padding(.vertical, 8).textSelection(.enabled) }
             List {
-                OutlineGroup(nodes, children: \.outlineChildren) { node in
+                OutlineGroup(filteredNodes, children: \.outlineChildren) { node in
                     Label(node.path.split(separator: "/").last.map(String.init) ?? node.path, systemImage: node.isDirectory ? "folder" : "doc")
                         .font(.system(size: 12)).lineLimit(1).truncationMode(.middle).help(node.path)
                         .onTapGesture(count: 2) { if !node.isDirectory { (primaryAction ?? openFile)(node.path) } }
@@ -84,12 +89,21 @@ struct WorkspaceTree: View {
                             Task {
                                 defer { mutationBusy = false; setBusy(false) }
                                 do { try await repository.saveGitignore(text: ignoreDraft, expected: expectedIgnore); editorError = nil; showIgnoreEditor = false; changed() }
-                                catch { editorError = compareText(error.localizedDescription) }
+                                catch { editorError = compareText(OperationFailure.message(error, repository: repository.url)) }
                             }
                         }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(mutationBusy || isBusy)
                     }
                 }.controlSize(.small).padding(20).frame(width: 650, height: 500)
             }
+    }
+    private var filteredNodes: [WorkspaceFileNode] {
+        guard let visiblePaths else { return nodes }
+        func filtered(_ node: WorkspaceFileNode) -> WorkspaceFileNode? {
+            if !node.isDirectory { return visiblePaths.contains(node.path) ? node : nil }
+            let children = node.children.compactMap(filtered)
+            return children.isEmpty ? nil : WorkspaceFileNode(path: node.path, isDirectory: true, children: children)
+        }
+        return nodes.compactMap(filtered)
     }
     private func loadIgnoreEditor() {
         do {
@@ -99,18 +113,18 @@ struct WorkspaceTree: View {
             expectedIgnore = FileManager.default.fileExists(atPath: file.path) ? try Data(contentsOf: file) : nil
             guard let text = String(data: expectedIgnore ?? Data(), encoding: .utf8) else { throw GitError("The .gitignore file must use UTF-8.") }
             ignoreDraft = text; editorError = nil; showIgnoreEditor = true
-        } catch { self.error = compareText(error.localizedDescription) }
+        } catch { self.error = compareText(OperationFailure.message(error, repository: repository.url)) }
     }
     private func perform(_ action: @escaping () async throws -> Void) {
         guard !isBusy, !mutationBusy else { return }
         mutationBusy = true; setBusy(true)
-        Task { defer { mutationBusy = false; setBusy(false) }; do { try await action(); saveTrash(); error = nil; changed() } catch { self.error = compareText(error.localizedDescription) } }
+        Task { defer { mutationBusy = false; setBusy(false) }; do { try await action(); saveTrash(); error = nil; changed() } catch { self.error = compareText(OperationFailure.message(error, repository: repository.url)) } }
     }
     private var trashKey: String { "RayGit.TrashRecords." + repository.url.standardizedFileURL.path }
     private func loadTrash() { if let data = UserDefaults.standard.data(forKey: trashKey), let records = try? JSONDecoder().decode([TrashedRepositoryFile].self, from: data) { trashed = records.filter { FileManager.default.fileExists(atPath: $0.trashURL.path) }; saveTrash() } }
     private func saveTrash() { if let data = try? JSONEncoder().encode(trashed) { UserDefaults.standard.set(data, forKey: trashKey) } }
     private func changed() { NotificationCenter.default.post(name: .rayGitWorktreeChanged, object: repository.url) }
-    private func reload() async { loading = true; defer { loading = false }; do { nodes = try await repository.workspaceTree(); error = nil } catch { self.error = compareText(error.localizedDescription) } }
+    private func reload() async { loading = true; defer { loading = false }; do { nodes = try await repository.workspaceTree(); error = nil } catch { self.error = compareText(OperationFailure.message(error, repository: repository.url)) } }
 }
 private extension WorkspaceFileNode {
     var outlineChildren: [WorkspaceFileNode]? { isDirectory ? children : nil }

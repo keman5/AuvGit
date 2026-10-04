@@ -1,0 +1,13 @@
+"Revision has no file" = "此版本没有文件";
+"File exceeds preview limit" = "文件超过预览大小上限";
+"No supported static preview" = "没有可用的静态预览";
+"bytes" = "字节";
+"characters" = "字符";
+"Character count unavailable for binary or unread content" = "二进制或未读取内容无法提供字符数";
+"Comparison skipped above 32 MiB; file content was not loaded" = "超过 32 MiB，已跳过比较，未加载文件内容";
+"Original" = "原始版本";
+"Modified" = "修改版本";
+"Parent revision" = "父提交版本";
+"Commit revision" = "提交版本";
+"Supported: PNG, JPEG, GIF, TIFF, BMP, WebP, HEIC, PDF first page and safe SVG" = "支持 PNG、JPEG、GIF、TIFF、BMP、WebP、HEIC、PDF 首页及安全 SVG";
+"PDF page 1 of %@" = "PDF 第 1 页，共 %@ 页";

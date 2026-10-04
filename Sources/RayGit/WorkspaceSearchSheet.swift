@@ -30,9 +30,9 @@ struct WorkspaceSearchSheet: View {
                     }
                 }
                 Section(designWorkspaceText("Commits")) {
-                    Button { store.historySearch = query; store.mode = "history"; dismiss() } label: { Label(designWorkspaceText("Search all commit history"), systemImage: "clock.arrow.circlepath") }
+                    Button { if let repository = store.repository { LogPresenter.show(repository: repository, search: query, applyFilter: true) }; dismiss() } label: { Label(designWorkspaceText("Search all commit history"), systemImage: "clock.arrow.circlepath") }
                     ForEach(store.commits.filter { matches($0.subject + " " + $0.hash) }.prefix(20)) { commit in
-                        Button { store.mode = "history"; store.selectedCommit = commit.hash; dismiss() } label: { HStack { Text(commit.subject).lineLimit(1); Spacer(); Text(commit.shortHash).foregroundStyle(.secondary) } }
+                        Button { if let repository = store.repository { LogPresenter.show(repository: repository, selectedCommit: commit.hash, applyFilter: true) }; dismiss() } label: { HStack { Text(commit.subject).lineLimit(1); Spacer(); Text(commit.shortHash).foregroundStyle(.secondary) } }
                     }
                 }
             }.listStyle(.plain).buttonStyle(.plain)

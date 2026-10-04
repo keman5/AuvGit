@@ -230,3 +230,6 @@
 "Base (Stage 1)" = "共同祖先（階段 1）";
 "Ours (Stage 2)" = "我們的版本（階段 2）";
 "Theirs (Stage 3)" = "他們的版本（階段 3）";
+
+"File exceeds preview limit." = "檔案超過預覽大小上限。";
+"Working Tree" = "工作區";

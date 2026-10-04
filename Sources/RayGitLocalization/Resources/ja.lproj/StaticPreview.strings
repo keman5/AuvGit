@@ -1,0 +1,13 @@
+"Revision has no file" = "このリビジョンにファイルはありません";
+"File exceeds preview limit" = "プレビューのサイズ上限を超えています";
+"No supported static preview" = "対応する静的プレビューはありません";
+"bytes" = "バイト";
+"characters" = "文字";
+"Character count unavailable for binary or unread content" = "バイナリまたは未読込の内容の文字数は取得できません";
+"Comparison skipped above 32 MiB; file content was not loaded" = "32 MiB を超えるため比較を省略しました。内容は読み込んでいません";
+"Original" = "元のバージョン";
+"Modified" = "変更後のバージョン";
+"Parent revision" = "親コミットのバージョン";
+"Commit revision" = "コミットのバージョン";
+"Supported: PNG, JPEG, GIF, TIFF, BMP, WebP, HEIC, PDF first page and safe SVG" = "PNG、JPEG、GIF、TIFF、BMP、WebP、HEIC、PDF の最初のページ、安全な SVG に対応";
+"PDF page 1 of %@" = "PDF 1 / %@ ページ";

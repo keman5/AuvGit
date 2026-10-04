@@ -1,0 +1,7 @@
+"conflicts" = "%d 個衝突檔案";
+"pushPull" = "可推送 %d 個提交，可拉取 %d 個提交";
+"pull" = "可拉取 %d 個提交";
+"push" = "可推送 %d 個提交";
+"operationLog" = "開啟操作日誌";
+"viewLog" = "檢視日誌";
+"commitDetails" = "提交詳情";

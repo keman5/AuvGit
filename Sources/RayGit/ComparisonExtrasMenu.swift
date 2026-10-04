@@ -51,7 +51,7 @@ struct ComparisonExtrasMenu: View {
         session.isBusy = true
         Task { @MainActor in
             do { try await body(snapshot); try await session.refreshExpectations(replacingDraft: true); NotificationCenter.default.post(name: .rayGitWorktreeChanged, object: session.repository.url); session.isBusy = false }
-            catch { session.error = compareExtra(error.localizedDescription); session.isBusy = false }
+            catch { session.error = compareExtra(OperationFailure.message(error, repository: session.repository.url)); session.isBusy = false }
         }
     }
 }
@@ -100,7 +100,7 @@ private struct EncodingConversionSheet: View {
                 try await session.refreshExpectations(replacingDraft: true, preservingIndexExpectation: true)
                 session.isBusy = false
                 NotificationCenter.default.post(name: .rayGitWorktreeChanged, object: session.repository.url); dismiss()
-            } catch { self.error = compareExtra(error.localizedDescription); session.isBusy = false }
+            } catch { self.error = compareExtra(OperationFailure.message(error, repository: session.repository.url)); session.isBusy = false }
         }
     }
 }
@@ -120,14 +120,14 @@ private struct RenameIdentitySheet: View {
             if let error { Text(error).foregroundStyle(.orange) }
             HStack { Button(compareExtra("cancel")) { dismiss() }; Spacer(); Button(compareExtra("apply")) { apply() }.buttonStyle(.borderedProminent).disabled(original.isEmpty || session.isBusy) }
         }.controlSize(.small).padding(20).frame(width: 620)
-        .task { do { candidates = try await session.repository.status().filter { $0.worktreeStatus == "D" && $0.indexStatus != "D" && !$0.isConflict }.map(\.path) } catch { self.error = compareExtra(error.localizedDescription) } }
+        .task { do { candidates = try await session.repository.status().filter { $0.worktreeStatus == "D" && $0.indexStatus != "D" && !$0.isConflict }.map(\.path) } catch { self.error = compareExtra(OperationFailure.message(error, repository: session.repository.url)) } }
     }
     private func apply() {
         guard let expected = session.latestSnapshot else { return }
         session.isBusy = true
         Task { @MainActor in
             do { try await session.repository.prepareRenameIdentity(path: session.path, originalPath: original, expected: expected); try await session.refreshExpectations(); session.isBusy = false; NotificationCenter.default.post(name: .rayGitWorktreeChanged, object: session.repository.url); dismiss() }
-            catch { self.error = compareExtra(error.localizedDescription); session.isBusy = false }
+            catch { self.error = compareExtra(OperationFailure.message(error, repository: session.repository.url)); session.isBusy = false }
         }
     }
 }

@@ -1,0 +1,70 @@
+import XCTest
+@testable import GitCore
+
+private final class CommandRecordCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var records: [GitCommandRecord] = []
+    func append(_ record: GitCommandRecord) { lock.lock(); records.append(record); lock.unlock() }
+    var values: [GitCommandRecord] { lock.lock(); defer { lock.unlock() }; return records }
+}
+final class GitCommandLogTests: XCTestCase {
+    func testLongSanitizedOutputKeepsTailAndPreviewPrefix() {
+        let source = "token=private\n" + String(repeating: "line\n", count: 20_000) + "END_OF_COMPLETE_LOG_OUTPUT"
+        let safe = GitCommandLog.redact(source)
+        let record = GitCommandRecord(date: Date(), directory: "", command: "git diff", output: safe, error: nil, duration: 0, exitCode: 0, operation: "diff")
+        XCTAssertTrue(record.previewTruncated); XCTAssertTrue(record.fullOutputAvailable)
+        XCTAssertEqual(record.output, String(record.fullOutput.prefix(32_768)))
+        XCTAssertTrue(record.fullOutput.hasSuffix("END_OF_COMPLETE_LOG_OUTPUT"))
+        XCTAssertFalse(record.fullOutput.contains("private"))
+    }
+    func testArchiveIsRemovedWhenRecordIsReleased() throws {
+        func files() throws -> Set<String> {
+            Set(try FileManager.default.contentsOfDirectory(atPath: FileManager.default.temporaryDirectory.path).filter { $0.hasPrefix("raygit-log-") })
+        }
+        let before = try files()
+        var record: GitCommandRecord? = GitCommandRecord(date: Date(), directory: "", command: "git diff", output: String(repeating: "x", count: 40_000), error: nil, duration: 0, exitCode: 0, operation: "diff")
+        XCTAssertTrue(try XCTUnwrap(record).fullOutputAvailable)
+        let created = try files().subtracting(before)
+        XCTAssertEqual(created.count, 1)
+        record = nil
+        XCTAssertTrue(try files().isDisjoint(with: created))
+    }
+    func testAdditionalFailureCategoriesTakePriorityOverGenericConnection() {
+        XCTAssertEqual(GitFailureSummary.key(for: "unable to access: SSL certificate problem"), "TLS certificate verification failed")
+        XCTAssertEqual(GitFailureSummary.key(for: "unable to access: proxy authentication failed"), "Proxy connection or authentication failed")
+        XCTAssertEqual(GitFailureSummary.key(for: "Host key verification failed"), "SSH host key verification failed")
+        XCTAssertEqual(GitFailureSummary.key(for: "gpg failed to sign the data"), "Commit signing failed")
+        XCTAssertEqual(GitFailureSummary.key(for: "pre-receive hook declined"), "Git hook rejected the operation")
+        XCTAssertEqual(GitFailureSummary.key(for: "git-lfs filter failed"), "Git LFS operation failed")
+        XCTAssertEqual(GitFailureSummary.key(for: "No space left on device"), "Disk is full")
+    }
+    func testCommonFailureClassificationAndRedaction() {
+        XCTAssertEqual(GitFailureSummary.key(for: "fatal: not a git repository (or any parent directory): .git"), "Not a Git repository")
+        XCTAssertEqual(GitFailureSummary.key(for: "fatal: could not read Username: terminal prompts disabled"), "Authentication required")
+        XCTAssertEqual(GitFailureSummary.key(for: "! [rejected] main -> main (non-fast-forward)"), "Remote and local branches have diverged")
+        let safe = GitCommandLog.redact("https://user:private@host/repo token=private Authorization: Bearer private gho_private")
+        XCTAssertFalse(safe.contains("private"))
+    }
+    func testRealCommandCaptureAndSensitiveConfigurationOmission() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let capture = CommandRecordCapture()
+        let observer = NotificationCenter.default.addObserver(forName: GitCommandLog.notification, object: nil, queue: nil) { notification in
+            if let record = notification.object as? GitCommandRecord, record.directory == directory.path { capture.append(record) }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        _ = try await GitProcess.run(at: directory, arguments: ["init"])
+        _ = try await GitProcess.run(at: directory, arguments: ["config", "credential.helper", "!echo private-value"])
+        do { _ = try await GitProcess.run(at: directory, arguments: ["rev-parse", "--verify", "missing"]); XCTFail("Expected failure") } catch {}
+        XCTAssertEqual(capture.values.count, 3)
+        XCTAssertTrue(capture.values[0].command.contains("'init'"))
+        XCTAssertTrue(capture.values[0].command.contains("'--no-pager'"))
+        XCTAssertEqual(capture.values[0].operation, "init")
+        XCTAssertEqual(capture.values[0].exitCode, 0)
+        XCTAssertFalse(capture.values[0].output.isEmpty)
+        XCTAssertFalse(capture.values[1].command.contains("private-value"))
+        XCTAssertNotNil(capture.values[2].error)
+        XCTAssertEqual(capture.values[2].exitCode, 128)
+    }
+}

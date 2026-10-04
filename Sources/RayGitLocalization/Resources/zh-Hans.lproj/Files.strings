@@ -1,5 +1,5 @@
 "files" = "文件";
-"filter" = "筛选路径…";
+"filter" = "筛选文件…";
 "stage" = "暂存";
 "unstage" = "取消暂存";
 "stageAll" = "全部暂存";
@@ -17,7 +17,7 @@
 "copyName" = "复制名称";
 "copyPath" = "复制路径";
 "copyRelativePath" = "复制相对路径";
-"clean" = "工作区干净";
+"clean" = "工作区很干净";
 "noFiles" = "没有匹配的文件";
 "none" = "—";
 "untracked" = "未跟踪";

@@ -2,12 +2,13 @@
 set -euo pipefail
 cd "${0:A:h:h}"
 swift build --build-system native -c release
+BUILD_BIN_PATH="$(swift build --build-system native -c release --show-bin-path)"
 APP="$PWD/.artifacts/RayGit.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp Resources/THIRD_PARTY_NOTICES.txt "$APP/Contents/Resources/THIRD_PARTY_NOTICES.txt"
-cp .build/release/RayGit "$APP/Contents/MacOS/RayGit"
-RESOURCE_BUNDLE="$PWD/.build/release/RayGit_RayGitLocalization.bundle"
+cp "$BUILD_BIN_PATH/RayGit" "$APP/Contents/MacOS/RayGit"
+RESOURCE_BUNDLE="$BUILD_BIN_PATH/RayGit_RayGitLocalization.bundle"
 if [[ ! -d "$RESOURCE_BUNDLE" ]]; then
   print -u2 "Missing localization resource bundle: $RESOURCE_BUNDLE"
   exit 1
@@ -15,7 +16,7 @@ fi
 # Keep translated resources self-contained in the distributable app.
 rm -rf "$APP/Contents/Resources/RayGit_RayGitLocalization.bundle"
 cp -R "$RESOURCE_BUNDLE" "$APP/Contents/Resources/"
-TERMINAL_RESOURCE_BUNDLE="$PWD/.build/release/SwiftTerm_SwiftTerm.bundle"
+TERMINAL_RESOURCE_BUNDLE="$BUILD_BIN_PATH/SwiftTerm_SwiftTerm.bundle"
 if [[ ! -d "$TERMINAL_RESOURCE_BUNDLE" ]]; then
   print -u2 "Missing terminal resource bundle: $TERMINAL_RESOURCE_BUNDLE"
   exit 1

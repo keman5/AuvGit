@@ -1,0 +1,10 @@
+"Changes only" = "僅顯示差異行";
+"Compare source" = "比較來源版本";
+"Parent revision" = "父提交版本";
+"Result limit reached; narrow the query." = "比對結果達到上限，請縮小搜尋範圍。";
+"Search scans the complete UTF-8 file line by line. Regex is line-based; lines above 1 MiB are reported. Results are capped at 10,000." = "逐行搜尋整個 UTF-8 檔案；正則按行比對。超過 1 MiB 的單行會顯示提示；最多回傳 10,000 項結果。";
+"Search scans complete revisions line by line. Regex is line-based; lines above 1 MiB are reported. Results are capped at 10,000 per revision." = "逐行搜尋完整版本；正則按行比對。超過 1 MiB 的單行會顯示提示；每個版本最多回傳 10,000 項結果。";
+"Streaming search requires valid UTF-8 text." = "串流搜尋需要有效的 UTF-8 文字。";
+"Streaming search cannot scan a line larger than 1 MiB." = "串流搜尋無法掃描超過 1 MiB 的單行。";
+"Page starts at column %@; this is a continuation of source line %@." = "此頁從第 %@ 欄開始，是原始檔案第 %@ 行的續頁。";
+"The source line continues on the next page." = "此原始行的內容在下一頁繼續。";

@@ -43,6 +43,20 @@ public struct CredentialConfiguration: Sendable {
     public let helpers: [String]
     public let sshAgentAvailable: Bool
 }
+enum NetworkAuthentication {
+    // Command-local configuration leaves repository and global credential settings untouched.
+    // Existing helpers are tried first; gh supplies an already signed-in GitHub account.
+    static func arguments(ghPath: String?) -> [String] {
+        guard let ghPath else { return [] }
+        let quoted = "'" + ghPath.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        return ["-c", "credential.https://github.com.helper=!\(quoted) auth git-credential"]
+    }
+    static var arguments: [String] {
+        let path = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"]
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
+        return arguments(ghPath: path)
+    }
+}
 extension GitRepository {
     /// Hash configuration rather than retaining or displaying remote URLs that can contain credentials.
     public func networkPreviewIdentity() async throws -> String {
@@ -63,8 +77,8 @@ extension GitRepository {
         case .push: args = ["push", "--porcelain", "--progress"]
         }
         let lines = ProgressLines(progress)
-        let result = try await GitProcess.run(at: url, arguments: args, progress: { lines.accept($0) })
-        lines.finish()
+        defer { lines.finish() }
+        let result = try await GitProcess.run(at: url, arguments: NetworkAuthentication.arguments + args, progress: { lines.accept($0) })
         return NetworkOperationResult(output: GitProgressParser.redact(result.text + (result.error.isEmpty ? "" : "\n" + result.error)))
     }
     public func credentialConfiguration() async throws -> CredentialConfiguration {

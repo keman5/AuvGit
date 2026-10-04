@@ -230,3 +230,6 @@
 "Base (Stage 1)" = "Base (Stage 1)";
 "Ours (Stage 2)" = "Ours (Stage 2)";
 "Theirs (Stage 3)" = "Theirs (Stage 3)";
+
+"File exceeds preview limit." = "File exceeds preview limit.";
+"Working Tree" = "Working Tree";

@@ -17,7 +17,7 @@ private let knownGitPrefsErrors: Set<String> = [
     "Sign commits must be true, false or empty.",
 ]
 private func gitPrefsError(_ error: Error) -> String {
-    let message = error.localizedDescription
+    let message = OperationFailure.message(error)
     return knownGitPrefsErrors.contains(message) ? gitPrefsText(message) : message
 }
 

@@ -1,9 +1,73 @@
 import SwiftUI
 import AppKit
+import ImageIO
 import GitCore
 import RayGitLocalization
 
 private func advancedText(_ key: String) -> String { L10n.text(key, table: "AdvancedDiff") }
+
+enum StaticImagePreview {
+    static let maximumPixels = 64_000_000
+    static func dimensions(_ data: Data) -> (Int, Int)? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+              let height = properties[kCGImagePropertyPixelHeight] as? NSNumber else { return nil }
+        return (width.intValue, height.intValue)
+    }
+    static func image(_ data: Data) -> NSImage? {
+        guard data.count <= FileComparisonLimits.previewBytes else { return nil }
+        if let document = SafeStaticDocument.image(data) { return document }
+        guard data.count <= FileComparisonLimits.previewBytes,
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let type = CGImageSourceGetType(source) as String?,
+              ["public.png", "public.jpeg", "com.compuserve.gif", "public.tiff", "com.microsoft.bmp", "org.webmproject.webp", "public.heic", "public.heif", "com.apple.icns"].contains(type),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+              let height = properties[kCGImagePropertyPixelHeight] as? NSNumber,
+              width.doubleValue > 0, height.doubleValue > 0,
+              width.doubleValue * height.doubleValue <= Double(maximumPixels),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 2048, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceShouldCacheImmediately: false] as CFDictionary) else { return nil }
+        return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
+    }
+}
+
+struct FileContentSummary: View {
+    let content: FileRevisionContent
+    private func text(_ key: String) -> String { L10n.text(key, table: "StaticPreview") }
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: content.exists ? "doc.zipper" : "doc").font(.system(size: 30)).foregroundStyle(.secondary)
+            Text(text(!content.exists ? "Revision has no file" : content.exceedsPreviewLimit ? "File exceeds preview limit" : "No supported static preview"))
+            if let size = content.byteCount ?? content.data?.count { Text("\(size.formatted()) " + text("bytes")).monospacedDigit() }
+            if let count = content.characterCount { Text("\(count.formatted()) " + text("characters")).monospacedDigit() }
+            else if content.exists { Text(text("Character count unavailable for binary or unread content")).font(.caption).foregroundStyle(.secondary) }
+            if content.exceedsPreviewLimit { Text(text("Comparison skipped above 32 MiB; file content was not loaded")).font(.caption).foregroundStyle(.secondary) }
+            else if content.exists { Text(text("Supported: PNG, JPEG, GIF, TIFF, BMP, WebP, HEIC, PDF first page and safe SVG")).font(.caption).foregroundStyle(.secondary) }
+        }.padding(20).frame(maxWidth: .infinity, maxHeight: .infinity).textSelection(.enabled)
+    }
+}
+
+struct StaticComparisonView: View {
+    let snapshot: FileComparisonSnapshot
+    private var summaries: [(String, FileRevisionContent)] {
+        if snapshot.isConflict {
+            return [(compareText("Ours (HEAD)"), snapshot.ours ?? snapshot.head), (advancedText("worktree"), snapshot.worktree), (advancedText("theirs"), snapshot.theirs ?? snapshot.index)]
+        }
+        let labels = MediaCompareView.previewLabels(snapshot)
+        return [(labels.0, snapshot.previewTarget != nil || snapshot.presentation.leftRevision == .head ? snapshot.head : snapshot.index), (labels.1, snapshot.worktree)]
+    }
+    var body: some View {
+        if MediaCompareView.supports(snapshot) { MediaCompareView(snapshot: snapshot) }
+        else {
+            HStack(spacing: 1) {
+                ForEach(Array(summaries.enumerated()), id: \.offset) { _, revision in
+                    VStack { Text(revision.0).font(.caption); FileContentSummary(content: revision.1) }
+                }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
 
 struct MediaCompareView: View {
     let snapshot: FileComparisonSnapshot
@@ -12,12 +76,24 @@ struct MediaCompareView: View {
     @State private var left = "head"
     @State private var right = "worktree"
     static func supports(_ snapshot: FileComparisonSnapshot) -> Bool {
-        [snapshot.head, snapshot.index, snapshot.worktree, snapshot.base, snapshot.ours, snapshot.theirs].compactMap { $0 }.contains { content in content.data.flatMap(NSImage.init(data:)) != nil }
+        [snapshot.head, snapshot.index, snapshot.worktree, snapshot.base, snapshot.ours, snapshot.theirs].compactMap { $0 }.contains { content in content.data.flatMap(StaticImagePreview.image) != nil }
+    }
+    static func previewLabels(_ snapshot: FileComparisonSnapshot) -> (String, String) {
+        switch snapshot.previewTarget {
+        case .worktree: return (advancedText("index"), advancedText("worktree"))
+        case .staged: return ("HEAD", advancedText("index"))
+        case .commit: return (L10n.text("Parent revision", table: "StaticPreview"), L10n.text("Commit revision", table: "StaticPreview"))
+        case nil: return (L10n.text("Original", table: "StaticPreview"), L10n.text("Modified", table: "StaticPreview"))
+        }
     }
     private var revisions: [(String, String, FileRevisionContent)] {
+        if snapshot.previewTarget != nil {
+            let labels = Self.previewLabels(snapshot)
+            return [("head", labels.0, snapshot.head), ("worktree", labels.1, snapshot.worktree)]
+        }
         var values = [("head", "HEAD", snapshot.head), ("index", advancedText("index"), snapshot.index), ("worktree", advancedText("worktree"), snapshot.worktree)]
         for (id, content) in [("base", snapshot.base), ("ours", snapshot.ours), ("theirs", snapshot.theirs)] { if let content { values.append((id, advancedText(id), content)) } }
-        return values.filter { $0.2.data.flatMap(NSImage.init(data:)) != nil }
+        return values.filter { $0.2.exists || $0.0 == "head" || $0.0 == "worktree" }
     }
     var body: some View {
         VStack(spacing: 0) {
@@ -32,73 +108,36 @@ struct MediaCompareView: View {
             Divider()
             if overlay {
                 ZStack {
-                    if let data = revisions.first(where: { $0.0 == left })?.2.data, let image = NSImage(data: data) { Image(nsImage: image).resizable().scaledToFit() }
-                    if let data = revisions.first(where: { $0.0 == right })?.2.data, let image = NSImage(data: data) { Image(nsImage: image).resizable().scaledToFit().opacity(opacity) }
+                    if let data = revisions.first(where: { $0.0 == left })?.2.data, let image = StaticImagePreview.image(data) { Image(nsImage: image).resizable().scaledToFit() }
+                    if let data = revisions.first(where: { $0.0 == right })?.2.data, let image = StaticImagePreview.image(data) { Image(nsImage: image).resizable().scaledToFit().opacity(opacity) }
                 }.padding(12).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 HStack(alignment: .top, spacing: 12) {
                     ForEach(revisions.filter { $0.0 == left || $0.0 == right }, id: \.0) { revision in
                         VStack(spacing: 8) {
                             Text(revision.1).font(.system(size: 12, weight: .semibold))
-                            if let data = revision.2.data, let image = NSImage(data: data) {
-                                Text("\(Int(image.size.width)) × \(Int(image.size.height)) · \(data.count) B").font(.caption).foregroundStyle(.secondary)
+                            if let data = revision.2.data, let image = StaticImagePreview.image(data) {
+                                let dimensions = StaticImagePreview.dimensions(data)
+                                Text("\(dimensions?.0 ?? Int(image.size.width)) × \(dimensions?.1 ?? Int(image.size.height)) · \(data.count) B").font(.caption).foregroundStyle(.secondary)
+                                if let pages = SafeStaticDocument.pdfPageCount(data) { Text(L10n.text("PDF page 1 of %@", table: "StaticPreview", arguments: [String(pages)])).font(.caption).foregroundStyle(.secondary) }
                                 Image(nsImage: image).resizable().scaledToFit()
-                            } else { ContentUnavailableView(advancedText("noImage"), systemImage: "photo") }
+                            } else { FileContentSummary(content: revision.2) }
                         }.frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }.padding(12)
             }
         }.onAppear {
+            if snapshot.isConflict { left = "ours"; right = "worktree" }
             if !revisions.contains(where: { $0.0 == left }) { left = revisions.first?.0 ?? "head" }
             if !revisions.contains(where: { $0.0 == right }) { right = revisions.last?.0 ?? left }
         }
     }
 }
 
-struct PagedComparisonView: View {
-    let snapshot: FileComparisonSnapshot
-    var layout = "automatic"
-    var baseline = "index"
-    var showBase = false
-    @State private var page = 0
-    private var revisions: [(String, String, FileRevisionContent)] {
-        let three = layout == "three" || (layout == "automatic" && snapshot.presentation.layout == .three)
-        if snapshot.isConflict {
-            let left = showBase ? ("base", advancedText("base"), snapshot.base) : ("ours", compareText("Ours (HEAD)"), snapshot.ours)
-            let result = ("worktree", advancedText("worktree"), Optional(snapshot.worktree))
-            let versions = three ? [left, result, ("theirs", advancedText("theirs"), snapshot.theirs)] : [left, result]
-            return versions.compactMap { id, title, content in content.map { (id, title, $0) } }
-        }
-        let working = ("worktree", advancedText("worktree"), snapshot.worktree)
-        if three { return [("head", "HEAD", snapshot.head), working, ("index", advancedText("index"), snapshot.index)] }
-        let head = layout == "automatic" ? snapshot.presentation.leftRevision == .head : baseline == "head"
-        return [head ? ("head", "HEAD", snapshot.head) : ("index", advancedText("index"), snapshot.index), working]
-    }
-    private var columns: [ComparisonEditorColumn] {
-        revisions.map { id, title, revision in
-            let content = revision.text.map { TextPager.page($0, index: page) }
-            return ComparisonEditorColumn(id: id, title: title, text: content?.text ?? "", isEditable: false, message: revision.text == nil ? revision.unavailableReason : nil, firstLine: content?.firstLine ?? 1)
-        }
-    }
-    private var hasNext: Bool { revisions.contains { $0.2.text.map { TextPager.page($0, index: page).hasNext } ?? false } }
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(advancedText("pagedReadOnly")).font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Button(advancedText("previousPage")) { page = max(0, page - 1) }.disabled(page == 0)
-                Text(L10n.text("page", table: "AdvancedDiff", arguments: [page + 1, TextPager.page(snapshot.worktree.text ?? snapshot.head.text ?? "", index: page).firstLine]))
-                Button(advancedText("nextPage")) { page += 1 }.disabled(!hasNext)
-                ExternalComparisonButton(snapshot: snapshot)
-            }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8).background(.bar)
-            Divider()
-            ComparisonEditor(columns: columns, wrapLines: false, showLineNumbers: true, synchronizeScroll: true, search: "", navigation: 0, changeNavigation: 0, onEdit: { _, _ in }, languagePath: snapshot.path)
-        }
-    }
-}
 
 struct ExternalComparisonButton: View {
     let snapshot: FileComparisonSnapshot
+    var iconOnly = false
     var resultText: String? = nil
     var resultEncoding: ComparisonEncoding? = nil
     var onResult: ((String) -> Void)? = nil
@@ -131,8 +170,12 @@ struct ExternalComparisonButton: View {
                 executablePath = executable.path
                 launch(executable)
             }
-        } label: { Text(advancedText("external")) }
-        .menuStyle(.borderlessButton).fixedSize()
+        } label: {
+            if iconOnly { Image(systemName: "arrow.up.forward.square") }
+            else { Text(advancedText("external")) }
+        }
+        .menuStyle(.borderlessButton).menuIndicator(iconOnly ? .hidden : .visible).fixedSize()
+        .help(advancedText("external")).accessibilityLabel(advancedText("external"))
         .onAppear { if !revisions.contains(where: { $0.0 == base }) { base = revisions.first?.0 ?? "head" } }
         .sheet(isPresented: $settings) {
             VStack {
@@ -150,7 +193,7 @@ struct ExternalComparisonButton: View {
             if let common = revisions.first(where: { $0.0 == base }) { contents["base"] = common.2 }
             contents["result"] = snapshot.worktree
             try ExternalComparison.launch(executable: executable, path: snapshot.path, contents: contents, template: template, resultText: resultText, resultEncoding: resultEncoding, onResult: onResult)
-        } catch { self.error = compareExtra(error.localizedDescription) }
+        } catch { self.error = compareExtra(OperationFailure.message(error)) }
     }
 }
 
