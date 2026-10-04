@@ -21,10 +21,10 @@ final class ComparisonActionRail: NSView {
             let button = NSButton(title: pointsRight ? "→" : "←", target: self, action: #selector(accept(_:)))
             button.tag = index
             button.isBordered = false
-            button.font = .systemFont(ofSize: 19, weight: .semibold)
+            button.font = .systemFont(ofSize: 13, weight: .semibold)
             button.contentTintColor = color
             button.wantsLayer = true
-            button.layer?.cornerRadius = 7
+            button.layer?.cornerRadius = 5
             button.layer?.borderWidth = 1
             button.layer?.borderColor = color.withAlphaComponent(0.25).cgColor
             button.layer?.backgroundColor = color.withAlphaComponent(0.09).cgColor
@@ -60,10 +60,13 @@ final class ComparisonActionRail: NSView {
             guard let rect = documentRect(entry) else { button.isHidden = true; continue }
             let top = rect.minY - (scroll?.contentView.bounds.minY ?? 0)
             let visible = NSRect(x: 0, y: top, width: bounds.width, height: rect.height).intersection(bounds)
-            button.isHidden = visible.isEmpty || bounds.width < 32
+            let buttonWidth = ComparisonEditorMetrics.actionButtonWidth
+            let buttonHeight = ComparisonEditorMetrics.actionButtonHeight
+            let halfHeight = buttonHeight / 2
+            button.isHidden = visible.isEmpty || bounds.width < buttonWidth
             // Keep a tall block's control usable while only part of it is in view.
-            let center = min(max(top + rect.height / 2, CGFloat(16)), max(CGFloat(16), bounds.height - 16))
-            button.frame = NSRect(x: max(0, (bounds.width - 32) / 2), y: center - 16, width: 32, height: 32)
+            let center = min(max(top + rect.height / 2, halfHeight), max(halfHeight, bounds.height - halfHeight))
+            button.frame = NSRect(x: max(0, (bounds.width - buttonWidth) / 2), y: center - halfHeight, width: buttonWidth, height: buttonHeight)
         }
         needsDisplay = true
     }
@@ -73,7 +76,7 @@ final class ComparisonActionRail: NSView {
         dirtyRect.fill()
         for entry in entries {
             guard let rect = documentRect(entry) else { continue }
-            let edge = NSRect(x: pointsRight ? bounds.width - 3 : 0, y: rect.minY - (scroll?.contentView.bounds.minY ?? 0), width: 3, height: rect.height).intersection(bounds)
+            let edge = NSRect(x: pointsRight ? bounds.width - 2 : 0, y: rect.minY - (scroll?.contentView.bounds.minY ?? 0), width: 2, height: rect.height).intersection(bounds)
             color.withAlphaComponent(0.85).setFill()
             edge.fill()
         }

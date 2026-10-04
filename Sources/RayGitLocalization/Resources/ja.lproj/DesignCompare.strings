@@ -16,3 +16,6 @@
 "Read-only" = "読み取り専用";
 "Line %d, column %d" = "行 %d、列 %d";
 "%d selected" = "%d 文字選択";
+
+"Undo" = "取り消す";
+"Redo" = "やり直す";

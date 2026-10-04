@@ -283,3 +283,29 @@
 - 新增同一组 AppKit 视图重复调整栏宽、36pt箭头占宽、换行开关和 Unicode 内容的回归测试，检查尾部锚点同高、容器宽度稳定和原文不变。修复后的28项相关测试全部通过。
 - 最终安装版 GUI 再验：三栏打开、两次分隔调整、关闭/恢复行号后，HEAD第9行、Index第10行、Worktree第12行的 `anchor C` 均同高；蓝色箭头采用后撤销恢复干净草稿。冲突绿色箭头采用使3块变2块，撤销恢复3块且保存禁用，冲突后的共同上下文仍同高。换行和行号均保留开启，4个fixture文件最终SHA256均不变。
 - 最终有效截图：`/tmp/raygit-markers-review/ordinary-aligned-final.png`、`/tmp/raygit-markers-review/conflict-aligned-final.png`。`ordinary-final.png` 保留作为修复前的一行偏移证据。
+
+### 2026-10-04 保存解决后保留比较来源与编辑撤销
+
+- 比较窗口保留打开时的 HEAD / Index / Ours / Theirs / Base；保存、暂存及标记解决只更新磁盘与索引操作的预期状态，不自动重新加载比较来源。手动重新加载仍可更新来源。历史保留范围为当前打开的比较窗口，不跨关闭或应用重启。
+- 结果编辑器使用独立原生 UndoManager；键入、粘贴、冲突块选择、栏间采用、整份版本替换共用撤销历史。临时忙碌和切换补丁视图不销毁编辑器历史，独立窗口处理 Cmd-Z / Shift-Cmd-Z，增加撤销/重做按钮。
+- 全量127项测试通过（`/tmp/raygit-undo-tests.log`）；最终快捷键修正后8项定向 AppKit / 会话测试通过（`/tmp/raygit-undo-final-tests.log`）。覆盖独立撤销分组、Unicode、临时只读，以及真实 Git 保存解决后来源保留、再次保存、外部磁盘/索引变更拒绝。
+- 安装版真实 fixture `raygit-undo-nw6mag0i`：第一块采用我方、第二块采用对方，保存并标记解决后，两次 Cmd-Z 恢复两块原始冲突，两次 Shift-Cmd-Z 恢复已保存结果；来源仍为 Ours `3d17a6b5`、Theirs `2440ad64`、Base `4b4d5930`。
+- GUI 另验粘贴的撤销与重做、整份我方替换的撤销、补丁→自动布局后继续快捷键撤销。搜索框获得焦点时 Cmd-Z 未改动结果草稿；本次没有证明搜索框自身的文本撤销有效。
+- 撤销只更新草稿：草稿恢复冲突期间，磁盘和索引均保持已解决内容，`git status --short` 为 `M  Undo.txt`。写回仍需显式保存/暂存。此次 Git 写操作仅用于新建的可丢弃 fixture。
+- 最终截图检查发现 ZStack 可能把正文压缩为零，已补齐剩余高度和最小高度约束。本地再次 Release 打包通过（`/tmp/raygit-undo-layout-build.log`），安装副本严格签名及二进制 `cmp` 通过。最终安装版再次用两侧栏间箭头解决两块、保存暂存、连续快捷键撤销/重做，正文完整可见，原始来源不变。最终有效截图：`/tmp/raygit-undo-review/final-restored-conflicts.png`、`/tmp/raygit-undo-review/final-resolved-with-history.png`；较早 `resolved-with-history.png` 是高度修复前证据。
+
+### 2026-10-04 对比工具首次自动定位差异
+
+- 独立原生文本对比窗口显式开启首次定位；等待窗口挂载、各栏视口有效和严格对齐布局稳定后，直接读取最早实际差异范围，统一滚动各栏并保留24pt上文。首次处理一次，无差异也消费标记；后续编辑、布局及搜索/手动导航不重复触发。共享工作区与Base只读面板保持原行为。
+- `swift test --build-system native --filter 'ComparisonInitialNavigationTests|ComparisonUndoTests|FileCompareSessionTests'` 共12项通过。新增4项覆盖首个差异在长文件中、首行差异不跳第二块、无差异后的来源刷新不重跳、仅删除与默认关闭。首次测试窗口生命周期/分栏几何问题已修复，最终无失败。
+- 本地release打包通过；更新`/Applications/RayGit.app`后严格签名和二进制cmp通过。真实GUI fixture `raygit-first-change-8epcvg05`：双栏打开LongCompare.txt直接显示160行首个差异，切换三栏三侧滚动值均0.7875664893617021；ConflictLater.txt直接显示140行冲突，三侧滚动值均0.7963818321785989。无保存/暂存操作。
+- 截图：`/tmp/raygit-first-change-three.png`、`/tmp/raygit-first-change-conflict.png`。本轮覆盖普通原生双/三栏及冲突编辑器；未更改大文件分页/流式、媒体或历史补丁的展示逻辑。
+
+### 2026-10-04 对比窗口紧凑布局
+
+- 普通对比顶部合并为两行32pt工具栏，冲突对比仅增加一行32pt冲突操作；移除独立关系说明条，帮助保留在图标提示/弹出内容中，组合采用收进更多菜单。布局切换改为菜单，显示开关改为带辅助功能标签的图标按钮；保存/暂存保持可见。
+- 行号栏从固定72pt改为按行号位数与字体测量，文本水平inset由8pt缩为3pt、lineFragmentPadding由5pt缩为2pt，箭头栏36→28pt、点击区域24×32pt，分栏标题44→28pt。工作区共享编辑器同步受益。
+- GUI发现长文本的NSTextView在初始赋值/sizeToFit后可留下负frame.origin，导致正文与gutter/箭头坐标不一致；在挂载文档前及fitDocument后归零。新增真实AppKit长文件四次resize回归，移除修复可复现24处断言失败。最终16项坐标、首次导航、撤销、核心对齐测试通过；四语言983键检查与git diff --check通过。
+- 本地release构建及安装至`/Applications/RayGit.app`完成，严格签名与可执行文件cmp通过。日志：`/tmp/raygit-compact-final-tests.log`、`/tmp/raygit-compact-final-build.log`。
+- 最终安装版GUI：LongCompare首次显示第160行，双栏/三栏滚动值均0.8121565934065934；三栏窗口1400→1050pt仍保持第160行及后续上下文同高。ConflictLater首次显示第140行，三侧滚动值均0.8421696574225123；栏间我方箭头采用后冲突清零，Cmd-Z恢复1块且保存禁用；窄窗口仍保持三栏共同上下文对齐及顶部控件完整。未保存/暂存，两个fixture文件SHA256均与验证前一致。换行/行号/同步滚动保持开启。
+- 同尺寸冲突截图比较，正文顶部从约284pt缩至158pt，新增约126pt代码显示高度。有效截图：`/tmp/raygit-compact-before.png`、`/tmp/raygit-compact-after.png`、`/tmp/raygit-compact-ordinary.png`、`/tmp/raygit-compact-three-narrow.png`、`/tmp/raygit-compact-conflict-narrow.png`。未穷尽大字号、六位行号、所有语言和媒体/分页比较的GUI验证。

@@ -16,3 +16,6 @@
 "Read-only" = "只读";
 "Line %d, column %d" = "行 %d，列 %d";
 "%d selected" = "选择 %d 个字符";
+
+"Undo" = "撤销";
+"Redo" = "重做";

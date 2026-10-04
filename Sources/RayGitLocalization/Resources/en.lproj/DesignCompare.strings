@@ -16,3 +16,6 @@
 "Read-only" = "Read-only";
 "Line %d, column %d" = "Line %d, column %d";
 "%d selected" = "%d selected";
+
+"Undo" = "Undo";
+"Redo" = "Redo";

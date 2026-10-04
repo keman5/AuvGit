@@ -16,3 +16,6 @@
 "Read-only" = "唯讀";
 "Line %d, column %d" = "行 %d，欄 %d";
 "%d selected" = "選取 %d 個字元";
+
+"Undo" = "復原";
+"Redo" = "重做";
