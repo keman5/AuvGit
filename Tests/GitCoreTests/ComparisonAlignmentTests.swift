@@ -91,5 +91,82 @@ extension ComparisonAlignmentTests {
             XCTAssertEqual(views.map(\.string), strings)
         }
     }
+    func testSameTextViewsKeepWrappedAlignmentThroughRailsResizeAndSizeToFit() {
+        let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        let boundary = "abcdefghijklmnopqrstuvwx"
+        let unicode = String(repeating: "Unicode 中文 😀 café e\u{0301} — ", count: 8)
+        let strings = ["head\n" + boundary + "\n" + unicode + "\ntail\n",
+                       "head\n" + boundary + boundary + "\n" + unicode + " extended result\ntail\n",
+                       "head\n" + boundary + "\n" + unicode + "\ntail\n"]
+        let views = strings.map { string -> NSTextView in
+            let view = NSTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
+            view.font = font; view.string = string
+            view.textContainerInset = NSSize(width: 8, height: 8)
+            view.isVerticallyResizable = true
+            view.textContainer!.widthTracksTextView = false
+            return view
+        }
+        let scrolls = views.map { view -> NSScrollView in
+            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
+            scroll.borderType = .noBorder; scroll.scrollerStyle = .overlay
+            scroll.hasVerticalScroller = true; scroll.documentView = view
+            return scroll
+        }
+        let starts = strings.map { [0] + $0.utf16.enumerated().compactMap { $0.element == 10 ? $0.offset + 1 : nil } }
+        func y(_ pane: Int, _ line: Int) -> Double {
+            let view = views[pane], layout = view.layoutManager!
+            layout.ensureLayout(for: view.textContainer!)
+            let character = starts[pane][line]
+            let rect = character == view.string.utf16.count ? layout.extraLineFragmentRect : layout.lineFragmentRect(forGlyphAt: layout.glyphIndexForCharacter(at: character), effectiveRange: nil)
+            return rect.minY + view.textContainerInset.height
+        }
+        // At this width a viewport-wide container fits the ASCII line, while the
+        // real container (viewport minus 16pt inset) requires another fragment.
+        let tight = (boundary as NSString).size(withAttributes: [.font: font]).width + 22
+        let steps: [(Bool, [CGFloat])] = [(true, [tight, tight, tight]),
+                                         (true, [430, 430, 394]),
+                                         (true, [340, 170, 280]),
+                                         (false, [340, 170, 280]),
+                                         (true, [280, 394, 430])]
+        for (wrapped, widths) in steps {
+            for pane in views.indices {
+                let view = views[pane], scroll = scrolls[pane]
+                scroll.setFrameSize(NSSize(width: widths[pane], height: 300)); scroll.tile()
+                let viewport = scroll.contentView.bounds.size
+                view.isHorizontallyResizable = !wrapped
+                view.textContainer!.widthTracksTextView = false
+                view.textContainerInset.height = 8
+                view.textStorage!.addAttribute(.paragraphStyle, value: NSParagraphStyle.default, range: NSRange(location: 0, length: view.string.utf16.count))
+                view.setFrameSize(NSSize(width: viewport.width, height: 300))
+                view.textContainer!.containerSize.width = wrapped ? max(1, viewport.width - 16) : .greatestFiniteMagnitude
+                view.layoutManager!.ensureLayout(for: view.textContainer!)
+            }
+            let heights = views.indices.map { pane in starts[pane].indices.map { line in
+                line + 1 < starts[pane].count ? y(pane, line + 1) - y(pane, line) : 15
+            } }
+            let padding = ComparisonAlignment(texts: strings).padding(lineHeights: heights)
+            let expectedWidths = views.map { $0.textContainer!.containerSize.width }
+            for pane in views.indices {
+                let view = views[pane]
+                for line in starts[pane].indices where padding.after[pane][line] > 0 {
+                    let start = starts[pane][line]
+                    let end = line + 1 < starts[pane].count ? starts[pane][line + 1] : view.string.utf16.count
+                    guard end > start else { continue }
+                    let paragraph = NSMutableParagraphStyle(); paragraph.paragraphSpacing = padding.after[pane][line]
+                    view.textStorage!.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: start, length: end - start))
+                }
+                view.textContainerInset.height = 8 + padding.before[pane]
+                view.layoutManager!.ensureLayout(for: view.textContainer!)
+                view.sizeToFit()
+                if wrapped { view.setFrameSize(NSSize(width: scrolls[pane].contentView.bounds.width, height: max(300, view.frame.height))) }
+                view.layoutManager!.ensureLayout(for: view.textContainer!)
+                XCTAssertEqual(view.textContainer!.containerSize.width, expectedWidths[pane])
+            }
+            XCTAssertEqual(y(0, 3), y(1, 3), accuracy: 0.1)
+            XCTAssertEqual(y(0, 3), y(2, 3), accuracy: 0.1)
+            XCTAssertEqual(views.map(\.string), strings)
+        }
+    }
+
 }
 #endif

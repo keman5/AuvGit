@@ -161,7 +161,7 @@ private struct DiffTextSurface: NSViewRepresentable {
         let stack = AlignedDiffStackView(); stack.onResize = { [weak coordinator = context.coordinator] in coordinator?.alignWrappedRows() }; stack.orientation = .horizontal; stack.spacing = 1; stack.distribution = .fillEqually
         for _ in 0..<2 {
             let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true; scroll.autohidesScrollers = true
-            let view = NSTextView(); view.isEditable = false; view.isSelectable = true; view.isRichText = false; view.allowsUndo = false
+            let view = ReadOnlyDiffTextView(); view.isEditable = false; view.isSelectable = true; view.isRichText = false; view.allowsUndo = false
             view.isHorizontallyResizable = true; view.isVerticallyResizable = true
             view.minSize = .zero; view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
             view.textContainer?.widthTracksTextView = false
@@ -239,6 +239,10 @@ private struct DiffTextSurface: NSViewRepresentable {
                 while !query.isEmpty && start < string.length {
                     let range = string.range(of: query, options: [.caseInsensitive], range: NSRange(location: start, length: string.length - start))
                     if range.location == NSNotFound { break }
+                    if view.textStorage?.attribute(.rayGitDiffDecoration, at: range.location, effectiveRange: nil) as? Bool == true {
+                        start = NSMaxRange(range)
+                        continue
+                    }
                     coordinator.matches.append((column, range))
                     view.layoutManager?.addTemporaryAttribute(.backgroundColor, value: NSColor.systemYellow.withAlphaComponent(0.35), forCharacterRange: range)
                     start = NSMaxRange(range)
@@ -271,17 +275,29 @@ private struct DiffTextSurface: NSViewRepresentable {
         let paragraph = NSMutableParagraphStyle()
         paragraph.tabStops = []
         paragraph.defaultTabInterval = (" " as NSString).size(withAttributes: [.font: font]).width * CGFloat(min(16, max(1, tabWidth)))
-        func append(_ line: DiffLine?, to output: NSMutableAttributedString, number: Int?, prefix: String = "", modified: Bool = false) {
+        func append(_ line: DiffLine?, to output: NSMutableAttributedString, number: Int?, prefix: String = "") {
             let kind = line?.kind ?? .context
-            let background: NSColor = modified ? DiffVisualStyle.lineBackground(EditorPreferences.color(modificationColor, fallback: .systemOrange), dark: dark) : kind == .addition ? DiffVisualStyle.lineBackground(EditorPreferences.color(additionColor, fallback: .systemGreen), dark: dark) : kind == .deletion ? DiffVisualStyle.lineBackground(EditorPreferences.color(deletionColor, fallback: .systemRed), dark: dark) : kind == .hunk ? NSColor.systemBlue.withAlphaComponent(0.12) : .textBackgroundColor
+            let background: NSColor = kind == .addition ? DiffVisualStyle.lineBackground(EditorPreferences.color(additionColor, fallback: .systemGreen), dark: dark) : kind == .deletion ? DiffVisualStyle.lineBackground(EditorPreferences.color(deletionColor, fallback: .systemRed), dark: dark) : kind == .hunk ? NSColor.systemBlue.withAlphaComponent(0.12) : .textBackgroundColor
             let gutter = lineNumbers ? ((number.map { String(format: "%6d", $0) } ?? "      ") + "  ") : ""
+            let marker = sideBySide ? (kind == .addition ? "+ " : kind == .deletion ? "− " : "  ") : ""
             let rowOffset = output.length
-            let contentOffset = rowOffset + gutter.utf16.count + prefix.utf16.count
-            output.append(NSAttributedString(string: gutter + prefix + (line?.text ?? "") + "\n", attributes: [.font: font, .paragraphStyle: paragraph, .foregroundColor: kind == .metadata || kind == .hunk ? NSColor.secondaryLabelColor : NSColor.textColor, .backgroundColor: background]))
+            let contentOffset = rowOffset + gutter.utf16.count + marker.utf16.count + prefix.utf16.count
+            output.append(NSAttributedString(string: gutter + marker + prefix + (line?.text ?? "") + "\n", attributes: [.font: font, .paragraphStyle: paragraph, .foregroundColor: kind == .metadata || kind == .hunk ? NSColor.secondaryLabelColor : NSColor.textColor, .backgroundColor: background]))
             if lineNumbers {
                 // Style only the number columns; preserve the original text and offsets.
                 let numberColumnsLength = gutter.utf16.count + (sideBySide ? 0 : 7)
                 output.addAttributes([.font: DiffVisualStyle.lineNumberFont(codeSize: fontSize), .foregroundColor: DiffVisualStyle.lineNumberColor], range: NSRange(location: rowOffset, length: numberColumnsLength))
+            }
+            // Gutter and marker are display decoration, excluded from plain-text copy.
+            if sideBySide, contentOffset > rowOffset {
+                output.addAttribute(.rayGitDiffDecoration, value: true, range: NSRange(location: rowOffset, length: contentOffset - rowOffset))
+            }
+            if sideBySide, line == nil {
+                output.addAttribute(.rayGitDiffDecoration, value: true, range: NSRange(location: rowOffset, length: output.length - rowOffset))
+            }
+            if sideBySide, kind == .addition || kind == .deletion {
+                let color = kind == .addition ? EditorPreferences.color(additionColor, fallback: .systemGreen) : EditorPreferences.color(deletionColor, fallback: .systemRed)
+                output.addAttribute(.foregroundColor, value: color, range: NSRange(location: rowOffset + gutter.utf16.count, length: 1))
             }
             if syntaxHighlight, let line, [.context, .addition, .deletion].contains(line.kind) {
                 for token in SyntaxHighlighter.tokens(in: line.text, path: languagePath) {
@@ -321,8 +337,8 @@ private struct DiffTextSurface: NSViewRepresentable {
                     }
                 }
                 for (a, b) in pairs {
-                    let leftOffset = left.length + (lineNumbers ? 8 : 0), rightOffset = right.length + (lineNumbers ? 8 : 0)
-                    append(a, to: left, number: a?.oldNumber, modified: a != nil && b != nil); append(b, to: right, number: b?.newNumber, modified: a != nil && b != nil)
+                    let leftOffset = left.length + (lineNumbers ? 8 : 0) + 2, rightOffset = right.length + (lineNumbers ? 8 : 0) + 2
+                    append(a, to: left, number: a?.oldNumber); append(b, to: right, number: b?.newNumber)
                     if characterDiff, let a, let b {
                         let character = CharacterDiff(source: a.text, target: b.text)
                         for range in character.source { left.addAttribute(.backgroundColor, value: DiffVisualStyle.characterBackground(EditorPreferences.color(deletionColor, fallback: .systemRed), dark: dark), range: NSRange(location: leftOffset + range.location, length: range.length)) }
@@ -411,5 +427,25 @@ private final class AlignedDiffStackView: NSStackView {
         guard lastSize != bounds.size else { return }
         lastSize = bounds.size
         onResize?()
+    }
+}
+
+private extension NSAttributedString.Key {
+    static let rayGitDiffDecoration = NSAttributedString.Key("RayGitDiffDecoration")
+}
+
+/// The attributed preview contains visual gutters, but copying returns selected code.
+private final class ReadOnlyDiffTextView: NSTextView {
+    override func copy(_ sender: Any?) {
+        guard let storage = textStorage else { super.copy(sender); return }
+        let selection = selectedRange()
+        guard selection.length > 0, NSMaxRange(selection) <= storage.length else { return }
+        let source = storage.string as NSString
+        var value = ""
+        storage.enumerateAttribute(.rayGitDiffDecoration, in: selection) { decoration, range, _ in
+            if decoration as? Bool != true { value += source.substring(with: range) }
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
     }
 }

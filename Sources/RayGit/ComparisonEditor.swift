@@ -118,7 +118,6 @@ struct ComparisonEditor: NSViewRepresentable {
                         guard let self, let pane else { return [] }
                         return self.acceptActions(for: pane, line: line)
                     }
-                    pane.gutter.acceptConflict = { [weak self] side, index in self?.acceptConflict(side, index: index) }
                     pane.scroll.contentView.postsBoundsChangedNotifications = true
                     NotificationCenter.default.addObserver(self, selector: #selector(didScroll(_:)), name: NSView.boundsDidChangeNotification, object: pane.scroll.contentView)
                     split.addArrangedSubview(pane)
@@ -149,9 +148,8 @@ struct ComparisonEditor: NSViewRepresentable {
                     pane.text.setSelectedRange(NSRange(location: min(selected.location, length), length: 0))
                     changed = true
                 }
-                pane.gutter.isHidden = !value.showLineNumbers
-                pane.gutterWidth.constant = value.resolver != nil && pane.id == "worktree" ? (value.showLineNumbers ? 88 : 40) : (value.showLineNumbers ? 58 : 0)
-                pane.gutter.isHidden = !value.showLineNumbers && !(value.resolver != nil && pane.id == "worktree")
+                pane.gutter.isHidden = false
+                pane.gutterWidth.constant = value.showLineNumbers ? 72 : 22
                 pane.wrap(value.wrapLines)
                 let font = EditorPreferences.font(name: value.fontName, size: value.fontSize)
                 if pane.text.font != font { pane.text.font = font }
@@ -164,6 +162,8 @@ struct ComparisonEditor: NSViewRepresentable {
                 pane.text.layoutManager?.showsInvisibleCharacters = value.showWhitespace
                 pane.text.highlightCurrentLine = value.highlightCurrentLine
                 pane.text.needsDisplay = true
+                pane.gutter.additionColor = EditorPreferences.color(value.additionColor, fallback: .systemGreen)
+                pane.gutter.deletionColor = EditorPreferences.color(value.deletionColor, fallback: .systemRed)
                 pane.gutter.showsLineNumbers = value.showLineNumbers
                 pane.gutter.firstLine = column.firstLine
                 pane.gutter.setContent(column.text)
@@ -198,6 +198,8 @@ struct ComparisonEditor: NSViewRepresentable {
         func acceptConflict(_ side: ConflictDraft.Side, index: Int) {
             guard let pane = panes.first(where: { $0.id == "worktree" }), pane.text.isEditable,
                   let replacement = ConflictDraft.replacement(accepting: side, block: index, in: pane.text.string) else { return }
+            pane.text.window?.makeFirstResponder(pane.text)
+            active = pane.text
             pane.text.breakUndoCoalescing()
             pane.text.insertText(replacement.text, replacementRange: replacement.range)
             pane.text.breakUndoCoalescing()
@@ -227,12 +229,60 @@ struct ComparisonEditor: NSViewRepresentable {
         func updateConflictGutters() {
             for pane in panes {
                 pane.gutter.conflictBlocks = model.resolver != nil && pane.id == "worktree" ? ConflictDraft.blocks(in: pane.text.string) : []
-                pane.gutter.canAcceptConflict = pane.text.isEditable
                 pane.gutter.selectedConflict = model.resolver?.selectedBlock ?? 0
                 pane.text.conflictBlocks = pane.gutter.conflictBlocks
                 pane.text.selectedConflict = pane.gutter.selectedConflict
                 pane.text.needsDisplay = true
                 pane.gutter.needsDisplay = true
+            }
+            updateActionRails()
+        }
+        func updateActionRails() {
+            for (position, pane) in panes.enumerated() {
+                for (rail, neighbor, pointsRight) in [(pane.leftRail, position - 1, true), (pane.rightRail, position + 1, false)] {
+                    rail.pointsRight = pointsRight
+                    rail.color = pointsRight ? .systemBlue : .systemGreen
+                    var entries: [ComparisonActionRail.Entry] = []
+                    if pane.text.isEditable, panes.indices.contains(neighbor), !panes[neighbor].scroll.isHidden {
+                        let source = panes[neighbor]
+                        if model.resolver != nil, pane.id == "worktree" {
+                            let side: ConflictDraft.Side? = source.id == "ours" ? .ours : source.id == "theirs" ? .theirs : nil
+                            if let side {
+                                entries = ConflictDraft.blocks(in: pane.text.string).enumerated().map { index, block in
+                                    ComparisonActionRail.Entry(text: pane.text, range: block.range,
+                                        title: resolverText(side == .ours ? "Use Ours" : "Use Theirs") + " — " + resolverText("Apply to the current conflict only"),
+                                        action: { [weak self] in self?.acceptConflict(side, index: index) })
+                                }
+                            }
+                        } else if model.resolver == nil {
+                            let diff = TextLineDiff(source: source.text.string, target: pane.text.string)
+                            entries = diff.blocks().map { block in
+                                let geometry = block.targetLines.isEmpty ? source : pane
+                                let lines = block.targetLines.isEmpty ? block.sourceLines : block.targetLines
+                                let start = geometry.gutter.starts[min(lines.lowerBound, geometry.gutter.starts.count - 1)]
+                                let end = lines.upperBound < geometry.gutter.starts.count ? geometry.gutter.starts[lines.upperBound] : geometry.text.string.utf16.count
+                                return ComparisonActionRail.Entry(text: geometry.text, range: NSRange(location: start, length: max(0, end - start)),
+                                    title: L10n.text("acceptBlock", table: "AdvancedDiff", arguments: [source.title.stringValue]),
+                                    action: { [weak self, weak pane, weak source] in
+                                        guard let self, let pane, let source, pane.text.isEditable else { return }
+                                        let current = TextLineDiff(source: source.text.string, target: pane.text.string)
+                                        guard current.blocks().contains(block) else { return }
+                                        let value = TextLineDiff.accepting(block, source: source.text.string, target: pane.text.string)
+                                        pane.text.window?.makeFirstResponder(pane.text)
+                                        self.active = pane.text
+                                        pane.text.breakUndoCoalescing()
+                                        pane.text.insertText(value, replacementRange: NSRange(location: 0, length: pane.text.string.utf16.count))
+                                        pane.text.breakUndoCoalescing()
+                                        self.updateActionRails()
+                                    })
+                            }
+                        }
+                    }
+                    rail.setEntries(entries)
+                    let width = entries.isEmpty ? CGFloat(0) : CGFloat(36)
+                    let constraint = pointsRight ? pane.leftRailWidth! : pane.rightRailWidth!
+                    if constraint.constant != width { constraint.constant = width; pane.needsLayout = true }
+                }
             }
         }
         func undoManager(for view: NSTextView) -> UndoManager? { (view as? ComparisonTextView)?.editingUndoManager }
@@ -256,20 +306,29 @@ struct ComparisonEditor: NSViewRepresentable {
                 self.alignDisplay()
             }
         }
+        func geometrySignature() -> String {
+            panes.map { pane in
+                "\(pane.id)|\(pane.scroll.contentView.bounds.width)|\(pane.scroll.contentView.bounds.height)|\(pane.text.textContainer?.containerSize.width ?? 0)|\(pane.leftRailWidth.constant)|\(pane.rightRailWidth.constant)"
+            }.joined(separator: ";") + "|\(model.fontName)|\(model.fontSize)|\(model.tabWidth)|\(model.wrapLines)|\(model.resolver != nil)"
+        }
         func alignDisplay() {
             guard !aligning, !panes.isEmpty else { return }
-            let texts = panes.map { $0.text.string }
-            let geometry = panes.map { pane in
-                "\(pane.id)|\(pane.scroll.contentSize.width)|\(pane.scroll.contentSize.height)|\(pane.text.textContainer?.containerSize.width ?? 0)"
-            }.joined(separator: ";") + "|\(model.fontName)|\(model.fontSize)|\(model.tabWidth)|\(model.wrapLines)|\(model.resolver != nil)"
-            guard texts != alignedTexts || geometry != alignmentGeometry else { return }
-            alignedTexts = texts
-            alignmentGeometry = geometry
             let origins = panes.map { $0.scroll.contentView.bounds.origin }
             let sourceIndex = panes.firstIndex(where: { $0.id == scrollSourceID }) ?? panes.firstIndex(where: { $0.text === active }) ?? 0
             let sharedY = origins[sourceIndex].y
             aligning = true
-            defer { aligning = false }
+            defer {
+                aligning = false
+                if geometrySignature() != alignmentGeometry { scheduleAlignment() }
+            }
+            // Apply rail/gutter constraints before measuring wrapped line fragments.
+            split?.layoutSubtreeIfNeeded()
+            panes.forEach { $0.prepareTextGeometry() }
+            let texts = panes.map { $0.text.string }
+            let geometry = geometrySignature()
+            guard texts != alignedTexts || geometry != alignmentGeometry else { return }
+            alignedTexts = texts
+            alignmentGeometry = geometry
             let baseline = model.resolver != nil ? (panes.firstIndex(where: { $0.id == "worktree" }) ?? 0) : 0
             let alignment = ComparisonAlignment(texts: texts, baseline: baseline, conflictBlocks: model.resolver != nil ? ConflictDraft.blocks(in: texts[baseline]) : [])
             for pane in panes {
@@ -313,10 +372,11 @@ struct ComparisonEditor: NSViewRepresentable {
                 pane.text.textContainerInset.height = 8 + padding.before[index]
                 if let container = pane.text.textContainer { pane.text.layoutManager?.ensureLayout(for: container) }
                 pane.alignedHeight = sharedHeight
-                pane.text.sizeToFit()
-                pane.text.setFrameSize(NSSize(width: max(pane.text.frame.width, pane.scroll.contentSize.width), height: max(pane.scroll.contentSize.height, pane.alignedHeight)))
+                pane.fitDocument()
                 pane.gutter.needsDisplay = true
                 pane.text.needsDisplay = true
+                pane.leftRail.refresh()
+                pane.rightRail.refresh()
             }
             // TextKit may shrink the document while measuring its unpadded layout. Restore
             // the viewport only after every pane has its final aligned document geometry.
@@ -328,7 +388,7 @@ struct ComparisonEditor: NSViewRepresentable {
             }
         }
         @objc func didScroll(_ notification: Notification) {
-            panes.forEach { $0.gutter.needsDisplay = true }
+            panes.forEach { $0.gutter.needsDisplay = true; $0.leftRail.refresh(); $0.rightRail.refresh() }
             guard !aligning, !updating, !scrolling, let clip = notification.object as? NSClipView else { return }
             guard let source = panes.first(where: { $0.scroll.contentView === clip }) else { return }
             scrollSourceID = source.id
@@ -381,7 +441,41 @@ struct ComparisonEditor: NSViewRepresentable {
                     for line in block.targetLines { lineColors[pane.id, default: [:]][line] = targetColor }
                 }
             }
+            var signs: [String: [Int: Bool]] = [:]
             for pane in panes {
+                for line in lineChanges[pane.id] ?? [] {
+                    signs[pane.id, default: [:]][line] = pane !== baseline
+                }
+            }
+            for (source, target) in zip(panes, panes.dropFirst()) {
+                let diff = TextLineDiff(source: source.text.string, target: target.text.string)
+                for line in diff.sourceChangedLines { signs[source.id, default: [:]][line] = false }
+                for line in diff.targetChangedLines { signs[target.id, default: [:]][line] = true }
+            }
+            if model.resolver != nil, let resultIndex = panes.firstIndex(where: { $0.id == "worktree" }) {
+                let result = panes[resultIndex]
+                let blocks = ConflictDraft.blocks(in: result.text.string)
+                let alignment = ComparisonAlignment(texts: panes.map { $0.text.string }, baseline: resultIndex, conflictBlocks: blocks)
+                for band in alignment.bands where blocks.contains(where: { (($0.startLine - 1)..<$0.endLine).overlaps(band[resultIndex]) }) {
+                    for (index, pane) in panes.enumerated() {
+                        if pane.id == "ours" || pane.id == "theirs" {
+                            for line in band[index] { signs[pane.id, default: [:]][line] = pane.id == "theirs" }
+                        }
+                    }
+                }
+                for block in blocks {
+                    for line in (block.startLine - 1)..<block.endLine { signs[result.id]?[line] = nil }
+                    for (section, value) in ConflictVisualStyle.sections(block, in: result.text.string).enumerated() {
+                        let range = value.0
+                        let addition = section == 1
+                        for (line, start) in result.gutter.starts.enumerated() where NSLocationInRange(start, range) {
+                            signs[result.id, default: [:]][line] = addition
+                        }
+                    }
+                }
+            }
+            for pane in panes {
+                pane.gutter.lineSigns = signs[pane.id] ?? [:]
                 guard let layout = pane.text.layoutManager else { continue }
                 let content = pane.text.string as NSString
                 let dark = model.colorScheme == .dark
@@ -396,7 +490,7 @@ struct ComparisonEditor: NSViewRepresentable {
                 let conflictBlocks = pane.id == "worktree" ? ConflictDraft.blocks(in: pane.text.string) : []
                 let conflictLines = Set(conflictBlocks.flatMap { ($0.startLine - 1)..<$0.endLine })
                 let conflictColor = EditorPreferences.color(model.deletionColor, fallback: .systemRed)
-                let changedLines = (lineChanges[pane.id] ?? []).union(conflictLines)
+                let changedLines = (lineChanges[pane.id] ?? []).union(conflictLines).union(pane.gutter.lineSigns.keys)
                 pane.gutter.changedLines = changedLines
                 pane.gutter.needsDisplay = true
                 var offset = 0
@@ -410,7 +504,11 @@ struct ComparisonEditor: NSViewRepresentable {
                             changes[changes.count - 1].length += displayedLength
                         } else { changes.append(NSRange(location: offset, length: displayedLength)) }
                         if displayedLength > 0 && !(model.resolver != nil && pane.id == "worktree" && conflictLines.contains(index)) {
-                            layout.addTemporaryAttribute(.backgroundColor, value: DiffVisualStyle.lineBackground(conflictLines.contains(index) ? conflictColor : (lineColors[pane.id]?[index] ?? EditorPreferences.color(model.modificationColor, fallback: .systemOrange)), dark: dark), forCharacterRange: NSRange(location: offset, length: displayedLength))
+                            var color = conflictLines.contains(index) ? conflictColor : (lineColors[pane.id]?[index] ?? EditorPreferences.color(model.modificationColor, fallback: .systemOrange))
+                            if (model.resolver == nil || pane.id != "worktree"), let addition = pane.gutter.lineSigns[index] {
+                                color = EditorPreferences.color(addition ? model.additionColor : model.deletionColor, fallback: addition ? .systemGreen : .systemRed)
+                            }
+                            layout.addTemporaryAttribute(.backgroundColor, value: DiffVisualStyle.lineBackground(color, dark: dark), forCharacterRange: NSRange(location: offset, length: displayedLength))
                         }
                     }
                     offset += length + 1
@@ -432,6 +530,9 @@ struct ComparisonEditor: NSViewRepresentable {
                             for range in chars.target where range.length > 0 {
                                 let characterRange = NSRange(location: pane.gutter.starts[b] + range.location, length: range.length)
                                 var color = EditorPreferences.color(model.modificationColor, fallback: .systemOrange)
+                                if (model.resolver == nil || pane.id != "worktree"), let addition = pane.gutter.lineSigns[b] {
+                                    color = EditorPreferences.color(addition ? model.additionColor : model.deletionColor, fallback: addition ? .systemGreen : .systemRed)
+                                }
                                 if model.resolver != nil, pane.id == "worktree", conflictLines.contains(b) {
                                     color = conflictBlocks.flatMap { ConflictVisualStyle.sections($0, in: pane.text.string) }
                                         .first(where: { NSLocationInRange(characterRange.location, $0.0) })?.1 ?? .systemOrange
@@ -440,7 +541,11 @@ struct ComparisonEditor: NSViewRepresentable {
                             }
                             if let sourceLayout = baseline.text.layoutManager {
                                 for range in chars.source where range.length > 0 {
-                                    sourceLayout.addTemporaryAttribute(.backgroundColor, value: DiffVisualStyle.characterBackground(EditorPreferences.color(model.modificationColor, fallback: .systemOrange), dark: dark), forCharacterRange: NSRange(location: baseline.gutter.starts[a] + range.location, length: range.length))
+                                    let sourceColor: NSColor
+                                    if (model.resolver == nil || baseline.id != "worktree"), let addition = baseline.gutter.lineSigns[a] {
+                                        sourceColor = EditorPreferences.color(addition ? model.additionColor : model.deletionColor, fallback: addition ? .systemGreen : .systemRed)
+                                    } else { sourceColor = EditorPreferences.color(model.modificationColor, fallback: .systemOrange) }
+                                    sourceLayout.addTemporaryAttribute(.backgroundColor, value: DiffVisualStyle.characterBackground(sourceColor, dark: dark), forCharacterRange: NSRange(location: baseline.gutter.starts[a] + range.location, length: range.length))
                                 }
                             }
                         }
@@ -642,6 +747,10 @@ private final class Pane: NSView {
     let scroll = NSScrollView()
     let text = ComparisonTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
     let gutter = LineGutter()
+    let leftRail = ComparisonActionRail()
+    let rightRail = ComparisonActionRail()
+    var leftRailWidth: NSLayoutConstraint!
+    var rightRailWidth: NSLayoutConstraint!
     var gutterWidth: NSLayoutConstraint!
     var alignedHeight: CGFloat = 0
     var geometryChanged: (() -> Void)?
@@ -677,6 +786,10 @@ private final class Pane: NSView {
         scroll.documentView = text
         gutter.text = text
         gutter.scroll = scroll
+        leftRail.scroll = scroll
+        rightRail.scroll = scroll
+        leftRail.clipsToBounds = true
+        rightRail.clipsToBounds = true
         title.font = .systemFont(ofSize: 13, weight: .semibold)
         detail.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         detail.textColor = .secondaryLabelColor
@@ -684,16 +797,20 @@ private final class Pane: NSView {
         title.lineBreakMode = .byTruncatingTail
         detail.lineBreakMode = .byTruncatingMiddle
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        for view in [title, detail, scroll, gutter, message] {
+        for view in [title, detail, scroll, leftRail, rightRail, gutter, message] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
-        gutterWidth = gutter.widthAnchor.constraint(equalToConstant: 58)
+        gutterWidth = gutter.widthAnchor.constraint(equalToConstant: 72)
+        leftRailWidth = leftRail.widthAnchor.constraint(equalToConstant: 0)
+        rightRailWidth = rightRail.widthAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([
             title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10), title.trailingAnchor.constraint(lessThanOrEqualTo: detail.leadingAnchor, constant: -8), title.topAnchor.constraint(equalTo: topAnchor, constant: 12), title.heightAnchor.constraint(equalToConstant: 20),
             detail.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12), detail.centerYAnchor.constraint(equalTo: title.centerYAnchor), detail.widthAnchor.constraint(lessThanOrEqualToConstant: 150),
-            gutter.leadingAnchor.constraint(equalTo: leadingAnchor), gutter.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 12), gutter.bottomAnchor.constraint(equalTo: bottomAnchor), gutterWidth,
-            scroll.leadingAnchor.constraint(equalTo: gutter.trailingAnchor), scroll.trailingAnchor.constraint(equalTo: trailingAnchor), scroll.topAnchor.constraint(equalTo: gutter.topAnchor), scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
+            leftRail.leadingAnchor.constraint(equalTo: leadingAnchor), leftRail.topAnchor.constraint(equalTo: gutter.topAnchor), leftRail.bottomAnchor.constraint(equalTo: bottomAnchor), leftRailWidth,
+            rightRail.trailingAnchor.constraint(equalTo: trailingAnchor), rightRail.topAnchor.constraint(equalTo: gutter.topAnchor), rightRail.bottomAnchor.constraint(equalTo: bottomAnchor), rightRailWidth,
+            gutter.leadingAnchor.constraint(equalTo: leftRail.trailingAnchor), gutter.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 12), gutter.bottomAnchor.constraint(equalTo: bottomAnchor), gutterWidth,
+            scroll.leadingAnchor.constraint(equalTo: gutter.trailingAnchor), scroll.trailingAnchor.constraint(equalTo: rightRail.leadingAnchor), scroll.topAnchor.constraint(equalTo: gutter.topAnchor), scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
             message.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16), message.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16), message.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 20)
         ])
     }
@@ -724,28 +841,44 @@ private final class Pane: NSView {
         let glyph = layout.glyphIndexForCharacter(at: character)
         return layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil).minY + text.textContainerInset.height
     }
-    override func layout() {
-        super.layout()
-        let viewport = scroll.contentSize
+    /// Own the container width explicitly. TextKit's width tracking and sizeToFit
+    /// otherwise compete: one uses the viewport, the other adds the horizontal inset.
+    func prepareTextGeometry() {
+        let viewport = scroll.contentView.bounds.size
         guard viewport.width > 0 else { return }
-        if viewport != lastViewport { lastViewport = viewport; geometryChanged?() }
+        text.textContainer?.widthTracksTextView = false
         if wrapped == true {
-            text.textContainer?.containerSize.width = viewport.width
             text.setFrameSize(NSSize(width: viewport.width, height: max(text.frame.height, viewport.height)))
+            let width = max(1, viewport.width - 2 * text.textContainerInset.width)
+            if text.textContainer?.containerSize.width != width { text.textContainer?.containerSize.width = width }
         } else {
+            text.textContainer?.containerSize.width = CGFloat.greatestFiniteMagnitude
             text.setFrameSize(NSSize(width: max(text.frame.width, viewport.width), height: max(text.frame.height, viewport.height)))
         }
+    }
+    func fitDocument() {
+        let viewport = scroll.contentView.bounds.size
         text.sizeToFit()
-        text.setFrameSize(NSSize(width: max(text.frame.width, viewport.width), height: max(text.frame.height, viewport.height, alignedHeight)))
+        // Keep wrapped document width fixed after sizeToFit, including after adding
+        // paragraph padding or changing an arrow rail from 0 to 36 points.
+        let width = wrapped == true ? viewport.width : max(text.frame.width, viewport.width)
+        text.setFrameSize(NSSize(width: width, height: max(text.frame.height, viewport.height, alignedHeight)))
+    }
+    override func layout() {
+        super.layout()
+        let viewport = scroll.contentView.bounds.size
+        guard viewport.width > 0 else { return }
+        if viewport != lastViewport { lastViewport = viewport; geometryChanged?() }
+        prepareTextGeometry()
+        fitDocument()
     }
     func wrap(_ enabled: Bool) {
         guard wrapped != enabled else { return }
         wrapped = enabled
         text.isHorizontallyResizable = !enabled
-        text.textContainer?.widthTracksTextView = enabled
-        text.textContainer?.containerSize = NSSize(width: enabled ? max(scroll.contentSize.width, 1) : CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        text.textContainer?.widthTracksTextView = false
         text.autoresizingMask = enabled ? [.width] : []
-        if enabled { text.setFrameSize(NSSize(width: scroll.contentSize.width, height: text.frame.height)) }
+        prepareTextGeometry()
     }
 }
 
@@ -759,18 +892,9 @@ private final class LineGutter: NSView {
     var showsLineNumbers = true
     var conflictBlocks: [ConflictDraft.Block] = []
     var selectedConflict = 0
-    var canAcceptConflict = true
-    var acceptConflict: ((ConflictDraft.Side, Int) -> Void)?
-    private var conflictButtons: [(NSRect, Int, ConflictDraft.Side)] = []
-    @objc func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String {
-        guard let button = conflictButtons.first(where: { $0.0.contains(point) }) else { return "" }
-        return resolverText(button.2 == .ours ? "Use Ours" : "Use Theirs") + " — " + resolverText("Apply to the current conflict only")
-    }
-    override func mouseDown(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        if let button = conflictButtons.first(where: { $0.0.contains(point) }) { acceptConflict?(button.2, button.1) }
-        else { super.mouseDown(with: event) }
-    }
+    var lineSigns: [Int: Bool] = [:]
+    var additionColor: NSColor = .systemGreen
+    var deletionColor: NSColor = .systemRed
     func setContent(_ value: String) {
         guard content != value else { return }
         content = value
@@ -785,14 +909,9 @@ private final class LineGutter: NSView {
         NSColor.controlBackgroundColor.blended(withFraction: 0.45, of: .windowBackgroundColor)?.setFill()
         bounds.intersection(dirtyRect).fill()
         guard let text, let scroll, let layout = text.layoutManager, let container = text.textContainer else { return }
-        conflictButtons = []
-        removeAllToolTips()
         let visible = scroll.contentView.bounds
         for (index, block) in conflictBlocks.enumerated() {
             guard block.range.location < text.string.utf16.count else { continue }
-            let glyph = layout.glyphIndexForCharacter(at: block.range.location)
-            let row = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
-            let y = row.minY + text.textContainerInset.height - visible.minY
             if let blockRect = ConflictVisualStyle.rect(block.range, in: text, layout: layout) {
                 let gutterRect = NSRect(x: 0, y: blockRect.minY - visible.minY, width: bounds.width, height: blockRect.height)
                 ConflictVisualStyle.fill(.systemOrange, emphasis: index == selectedConflict ? 0.20 : 0.11).setFill()
@@ -800,18 +919,9 @@ private final class LineGutter: NSView {
                 NSColor.systemOrange.withAlphaComponent(index == selectedConflict ? 0.95 : 0.5).setFill()
                 NSRect(x: bounds.width - 3, y: gutterRect.minY, width: 3, height: gutterRect.height).intersection(bounds).fill()
             }
-            guard canAcceptConflict, y > -20, y < bounds.height else { continue }
-            for (x, label, side) in [(CGFloat(1), "→", ConflictDraft.Side.ours), (CGFloat(20), "←", ConflictDraft.Side.theirs)] {
-                let rect = NSRect(x: x, y: y, width: 18, height: max(16, row.height))
-                (side == .ours ? NSColor.systemBlue : NSColor.systemPurple).withAlphaComponent(index == selectedConflict ? 0.32 : 0.18).setFill()
-                NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3).fill()
-                (label as NSString).draw(at: NSPoint(x: x + 3, y: y), withAttributes: [.font: NSFont.systemFont(ofSize: 12, weight: .bold), .foregroundColor: NSColor.labelColor])
-                conflictButtons.append((rect, index, side))
-                addToolTip(rect, owner: self, userData: nil)
-            }
+
         }
 
-        guard showsLineNumbers else { return }
         let inset = text.textContainerInset
         let glyphs = layout.glyphRange(forBoundingRect: NSRect(x: 0, y: visible.minY - inset.height, width: visible.width, height: visible.height), in: container)
         let content = text.string as NSString
@@ -820,8 +930,9 @@ private final class LineGutter: NSView {
         let baselineOffset = codeFont.ascender - numberFont.ascender
         let attrs: [NSAttributedString.Key: Any] = [.font: numberFont, .foregroundColor: DiffVisualStyle.lineNumberColor]
         guard layout.numberOfGlyphs > 0 else {
+            guard showsLineNumbers else { return }
             let label = "\(firstLine)" as NSString
-            label.draw(at: NSPoint(x: bounds.width - label.size(withAttributes: attrs).width - 10, y: inset.height - visible.minY + baselineOffset), withAttributes: attrs)
+            label.draw(at: NSPoint(x: bounds.width - label.size(withAttributes: attrs).width - 28, y: inset.height - visible.minY + baselineOffset), withAttributes: attrs)
             return
         }
         layout.enumerateLineFragments(forGlyphRange: glyphs) { rect, _, _, glyphRange, _ in
@@ -833,16 +944,24 @@ private final class LineGutter: NSView {
                     let middle = (lower + upper) / 2
                     if self.starts[middle] <= character { lower = middle + 1 } else { upper = middle }
                 }
-                let label = "\(self.firstLine + max(lower, 1) - 1)" as NSString
-                label.draw(at: NSPoint(x: self.bounds.width - label.size(withAttributes: attrs).width - 10, y: rect.minY + inset.height - visible.minY + baselineOffset), withAttributes: attrs)
+                let line = max(lower, 1) - 1
+                let y = rect.minY + inset.height - visible.minY
+                if self.showsLineNumbers {
+                    let label = "\(self.firstLine + line)" as NSString
+                    label.draw(at: NSPoint(x: self.bounds.width - label.size(withAttributes: attrs).width - 28, y: y + baselineOffset), withAttributes: attrs)
+                }
+                if let addition = self.lineSigns[line] {
+                    let label = (addition ? "+" : "−") as NSString
+                    label.draw(at: NSPoint(x: self.bounds.width - 18, y: y), withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: codeFont.pointSize, weight: .semibold), .foregroundColor: addition ? self.additionColor : self.deletionColor])
+                }
             }
         }
-        if content.length > 0, content.character(at: content.length - 1) == 10 {
+        if showsLineNumbers, content.length > 0, content.character(at: content.length - 1) == 10 {
             let rect = layout.extraLineFragmentRect
             let y = rect.minY + inset.height - visible.minY
             if y >= -20 && y <= bounds.height {
                 let label = "\(firstLine + starts.count - 1)" as NSString
-                label.draw(at: NSPoint(x: bounds.width - label.size(withAttributes: attrs).width - 10, y: y + baselineOffset), withAttributes: attrs)
+                label.draw(at: NSPoint(x: bounds.width - label.size(withAttributes: attrs).width - 28, y: y + baselineOffset), withAttributes: attrs)
             }
         }
     }

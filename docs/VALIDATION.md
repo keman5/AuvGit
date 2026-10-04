@@ -269,3 +269,17 @@
 - 干净副本Rebase读取HEAD~3显示3个真实提交、作者和时间，修改pick为reword后预览同步；未执行历史重写。Cmd-K文件搜索有效。
 - 最终本地打包、严格签名、安装二进制cmp通过，重新启动确认工具栏独立无障碍名称。测试开启的换行已恢复关闭。
 - 最终主窗口视觉比较73.39%，可比覆盖99.31%，未达95%。报告`/tmp/raygit-design-review/after-3/report.md`；内容/视口和原生控件仍有差异，不将该值宣称为七张设计图的整体还原度。
+
+### 2026-10-04 差异符号和栏间采用按钮
+
+- 工作区并排差异增加红色 `−` / 绿色 `+` 固定标记列，替换行分别显示删除/新增底色；上下文、hunk和虚拟占位没有符号。标准复制排除并排显示装饰；统一视图保留原有复制/搜索语义（源码复核，未单独执行剪贴板验收）。
+- 原生编辑器显示独立符号列，符号与行底色跟随用户差异颜色配置；关闭行号仍保留符号。冲突结果保留其分段颜色。
+- 原生32pt栏间按钮：结果左边蓝色右箭头采用Ours，右边绿色左箭头采用Theirs；普通比较支持相邻来源版本采用到可编辑工作区。按钮带无障碍名称，按块几何定位并随滚动刷新。
+- 本机 `swift test --build-system native --filter 'ComparisonAlignmentTests|AdvancedDiffTests|FileComparisonTests|ComparisonPresentationTests|DiffParserTests'` 28项通过；本地打包、`git diff --check`、安装签名严格校验和二进制cmp通过。
+- 安装版GUI验证：工作区实际出现红删绿增符号；普通Index→Worktree按钮替换对应块，Cmd-Z恢复干净草稿；冲突Theirs左箭头使3块变2块，Cmd-Z恢复3块；关闭行号时Ours右箭头也可用，并可撤销。行号恢复开启，4个fixture文件SHA256均保持原样，未保存/暂存测试草稿。
+- 最终截图目录 `/tmp/raygit-markers-review/`：`workspace.png`、`ordinary.png`、`ordinary-no-numbers.png`、`conflict-final.png`。后者来自最终颜色修正安装版；早期ordinary截图尚有后续修复的HEAD跨栏颜色差异。不声称像素级还原或已穷尽深色/自定义颜色/超长文件滚动验收。
+
+- 最终长行检查发现一次真实回归：新增箭头栏后，自动换行的测量容器宽度与 TextKit 最终宽度相差水平内边距16pt，导致 Worktree 的 `anchor C` 提前一行。修复统一以实际 clip 宽度减去内边距设置容器，在测量前落实栏间按钮约束，`sizeToFit` 后保持栏宽；几何再变更时重新对齐。
+- 新增同一组 AppKit 视图重复调整栏宽、36pt箭头占宽、换行开关和 Unicode 内容的回归测试，检查尾部锚点同高、容器宽度稳定和原文不变。修复后的28项相关测试全部通过。
+- 最终安装版 GUI 再验：三栏打开、两次分隔调整、关闭/恢复行号后，HEAD第9行、Index第10行、Worktree第12行的 `anchor C` 均同高；蓝色箭头采用后撤销恢复干净草稿。冲突绿色箭头采用使3块变2块，撤销恢复3块且保存禁用，冲突后的共同上下文仍同高。换行和行号均保留开启，4个fixture文件最终SHA256均不变。
+- 最终有效截图：`/tmp/raygit-markers-review/ordinary-aligned-final.png`、`/tmp/raygit-markers-review/conflict-aligned-final.png`。`ordinary-final.png` 保留作为修复前的一行偏移证据。
