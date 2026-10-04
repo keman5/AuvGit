@@ -218,3 +218,24 @@
 | 状态恢复与草稿边界 | 验收后恢复原浅色主题；阶段 2 未对 fixture 执行保存或暂存。 |
 
 本次为 UI 调整，没有重复阶段 1 的原生108项与插件29项全量测试。窄窗口与所有语言未重新逐页验收；上述局部原生证据不代表全部页面和状态已验证。
+
+## 2026-10-04 阶段 3：严格差异对齐与共享冲突预览验收
+
+双栏与三栏原生编辑器使用仅用于显示的段后留白与开头留白，保留原文和各版本真实行号；普通三栏保留各对版本的共同锚点，冲突段来源首行对齐结果的开始标记，较短侧补足段后高度。换行与拖动分隔重新计算高度。工作区冲突预览共享三栏彩色阶段视图，所有栏只读且不提供接受操作，编辑与接受仍在独立窗口中完成。
+
+最新定向原生测试 `ComparisonAlignmentTests|TextLineDiffTests|ConflictDraftTests` 共23项全部通过，日志 `/tmp/raygit-alignment-final-tests.log`，包括原生 TextKit 几何验证。本轮较早全量112项通过，日志 `/tmp/raygit-alignment-tests.log`；最终变更后执行的是上述定向测试。本机最终 Release 构建通过，日志 `/tmp/raygit-alignment-final-build.log`。四语言22表879键检查通过。安装副本 `/Applications/RayGit.app` 通过严格签名检查，其可执行文件与构建产物经 `cmp` 确认一致。
+
+| 原生 GUI 范围 | 实际结果 |
+|---|---|
+| 工作区冲突预览 | `/tmp/raygit-visual-polish-20261004` 确认只读三栏、彩色阶段内容及对齐。 |
+| 独立冲突对齐 | 同 fixture 的右栏第14行与结果冲突开始标记第20行同高；空 Ours 保留虚拟留白，块后的上下文对齐。 |
+| 采用与撤销 | 第二块采用对方后冲突从3块变为2块；Cmd-Z 恢复3块，保存按钮恢复禁用。插入换行后 Undo 恢复草稿。 |
+| 工作区双栏自动换行 | 新 fixture `/var/folders/p9/706zy1rn35l9bjl5jq98b3m40000gn/T/raygit-alignment-_tmmynsf` 的 `TwoPane.txt` 中 `anchor C` 来源第9行与结果第12行同高。 |
+| 普通三栏对应锚点 | 同 fixture 的 `ThreePane.txt` 中 HEAD/结果/索引开始行1/3/2、`anchor B` 6/9/6、Unicode 行8/11/9、`anchor C` 9/12/10 均同高。 |
+| 分隔调整与滚动到底 | 两次拖动分隔后，结果栏窄至259.5pt；三栏滚动条值均为1，`anchor C` 仍同高。 |
+
+本轮没有保存或提交这些 GUI 测试草稿。最终字节校验确认新 fixture 的 `ThreePane.txt`、`TwoPane.txt`、`Conflict.txt` 三个文件 SHA256 均与原始 manifest 完全相同；原 fixture 的 `resolver-demo.txt` SHA1 保持 `c923f59cbe92dfad1567c93214cf5d0cbd925766`，磁盘内容未改变。验收后已恢复自动换行关闭，分栏接近等宽。以上证据不代表所有语言、主题、大文件性能或用户真实仓库完整工作流已全面验收。
+
+随后工作区普通替换块的行配对改为复用 `ComparisonAlignment`，修复长 Unicode 内容被直接按序配对到错误行的问题；同时修复关闭自动换行时，空白 gutter 小字号造成的行高漂移，高度均衡不再仅在开启自动换行时执行。追加变更重新通过本机 Release 构建，安装副本通过 `codesign` 与可执行文件 `cmp` 检查。
+
+最新版安装包的原生 GUI 确认 `ThreePane.txt` 工作区双栏在关闭自动换行时，`first original` 第2/3行、`anchor B` 第6/9行、Unicode 第9/11行、`anchor C` 第10/12行均像素同高；新增绿、删除红、修改橙及字符级颜色正确。开启自动换行并滚到底后，两栏滚动条值均为1，`anchor C` 第10/12行仍同高。验收后已关闭自动换行。

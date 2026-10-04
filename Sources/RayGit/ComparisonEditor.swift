@@ -68,6 +68,11 @@ struct ComparisonEditor: NSViewRepresentable {
         var model: ComparisonEditor
         weak var split: NSSplitView?
         fileprivate var panes: [Pane] = []
+        var alignedTexts: [String] = []
+        var alignmentGeometry = ""
+        var scrollSourceID: String?
+        var alignmentScheduled = false
+        var aligning = false
         var scrolling = false
         var updating = false
         var lastNavigation: Int
@@ -87,6 +92,7 @@ struct ComparisonEditor: NSViewRepresentable {
             let previousLanguage = model.languagePath
             let settings = "\(value.fontName)|\(value.fontSize)|\(value.tabWidth)|\(value.syntaxHighlight)|\(value.characterDiff)|\(value.showWhitespace)|\(value.highlightCurrentLine)|\(value.additionColor)|\(value.deletionColor)|\(value.modificationColor)|\(value.colorScheme)"
             let preferencesChanged = preferenceSignature != settings
+            if preferencesChanged || rebuild { alignmentGeometry = "" }
             preferenceSignature = settings
             model = value
             value.resolver?.select = { [weak self] index in self?.selectConflict(index) }
@@ -99,6 +105,7 @@ struct ComparisonEditor: NSViewRepresentable {
                 panes = value.columns.map { column in
                     let pane = oldPanes[column.id] ?? Pane(column: column)
                     pane.text.delegate = self
+                    pane.geometryChanged = { [weak self] in self?.scheduleAlignment() }
                     pane.text.blockMenu = { [weak self, weak pane] line in
                         guard let self, let pane else { return [] }
                         return self.acceptActions(for: pane, line: line)
@@ -155,6 +162,8 @@ struct ComparisonEditor: NSViewRepresentable {
             }
             if changed { decorate() }
             updateConflictGutters()
+            scheduleAlignment()
+            if lastChangeNavigation != value.changeNavigation || lastNavigation != value.navigation { alignDisplay() }
             if lastChangeNavigation != value.changeNavigation {
                 navigateChange(forward: value.changeNavigation > lastChangeNavigation)
                 lastChangeNavigation = value.changeNavigation
@@ -166,11 +175,12 @@ struct ComparisonEditor: NSViewRepresentable {
         }
         func selectConflict(_ index: Int) {
             guard let pane = panes.first(where: { $0.id == "worktree" }) else { return }
+            alignDisplay()
             let blocks = ConflictDraft.blocks(in: pane.text.string)
             guard blocks.indices.contains(index) else { return }
             model.resolver?.selectedBlock = index
             pane.text.setSelectedRange(NSRange(location: blocks[index].range.location, length: 0))
-            pane.text.scrollRangeToVisible(blocks[index].range)
+            pane.text.scrollRangeToVisible(NSRange(location: blocks[index].range.location, length: 0))
             pane.text.window?.makeFirstResponder(pane.text)
             active = pane.text
             updateConflictGutters()
@@ -187,6 +197,9 @@ struct ComparisonEditor: NSViewRepresentable {
             else { model.resolver?.selectedBlock = 0; updateConflictGutters() }
         }
         func textViewDidChangeSelection(_ notification: Notification) {
+            if let text = notification.object as? NSTextView, let paragraph = text.defaultParagraphStyle {
+                text.typingAttributes[.paragraphStyle] = paragraph
+            }
             guard !updating, model.resolver != nil, let text = notification.object as? NSTextView,
                   let pane = panes.first(where: { $0.text === text }) else { return }
             active = text
@@ -198,6 +211,7 @@ struct ComparisonEditor: NSViewRepresentable {
         func updateConflictGutters() {
             for pane in panes {
                 pane.gutter.conflictBlocks = model.resolver != nil && pane.id == "worktree" ? ConflictDraft.blocks(in: pane.text.string) : []
+                pane.gutter.canAcceptConflict = pane.text.isEditable
                 pane.gutter.selectedConflict = model.resolver?.selectedBlock ?? 0
                 pane.text.conflictBlocks = pane.gutter.conflictBlocks
                 pane.text.selectedConflict = pane.gutter.selectedConflict
@@ -215,19 +229,99 @@ struct ComparisonEditor: NSViewRepresentable {
             model.onEdit(pane.id, text.string)
             decorate()
             updateConflictGutters()
+            scheduleAlignment()
+        }
+        func scheduleAlignment() {
+            guard !alignmentScheduled, !aligning else { return }
+            alignmentScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.alignmentScheduled = false
+                self.alignDisplay()
+            }
+        }
+        func alignDisplay() {
+            guard !aligning, !panes.isEmpty else { return }
+            let texts = panes.map { $0.text.string }
+            let geometry = panes.map { pane in
+                "\(pane.id)|\(pane.scroll.contentSize.width)|\(pane.scroll.contentSize.height)|\(pane.text.textContainer?.containerSize.width ?? 0)"
+            }.joined(separator: ";") + "|\(model.fontName)|\(model.fontSize)|\(model.tabWidth)|\(model.wrapLines)|\(model.resolver != nil)"
+            guard texts != alignedTexts || geometry != alignmentGeometry else { return }
+            alignedTexts = texts
+            alignmentGeometry = geometry
+            let origins = panes.map { $0.scroll.contentView.bounds.origin }
+            let sourceIndex = panes.firstIndex(where: { $0.id == scrollSourceID }) ?? panes.firstIndex(where: { $0.text === active }) ?? 0
+            let sharedY = origins[sourceIndex].y
+            aligning = true
+            defer { aligning = false }
+            let baseline = model.resolver != nil ? (panes.firstIndex(where: { $0.id == "worktree" }) ?? 0) : 0
+            let alignment = ComparisonAlignment(texts: texts, baseline: baseline, conflictBlocks: model.resolver != nil ? ConflictDraft.blocks(in: texts[baseline]) : [])
+            for pane in panes {
+                guard let storage = pane.text.textStorage else { continue }
+                let paragraph = (pane.text.defaultParagraphStyle?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+                paragraph.paragraphSpacing = 0
+                paragraph.paragraphSpacingBefore = 0
+                storage.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: storage.length))
+                pane.text.textContainerInset.height = 8
+                if let container = pane.text.textContainer { pane.text.layoutManager?.ensureLayout(for: container) }
+            }
+            let heights = panes.map { pane -> [Double] in
+                guard let layout = pane.text.layoutManager else { return [] }
+                let fallback = Double(layout.defaultLineHeight(for: pane.text.font ?? .monospacedSystemFont(ofSize: 12, weight: .regular)))
+                return pane.gutter.starts.indices.map { line in
+                    let top = pane.y(forLine: line)
+                    let bottom = line + 1 < pane.gutter.starts.count ? pane.y(forLine: line + 1) : layout.usedRect(for: pane.text.textContainer!).maxY + 8
+                    return max(fallback, Double(bottom - top))
+                }
+            }
+            let padding = alignment.padding(lineHeights: heights)
+            var sharedHeight: CGFloat = 16
+            for index in panes.indices {
+                let naturalHeight = heights[index].reduce(0.0, +)
+                let trailingPadding = padding.after[index].reduce(0.0, +)
+                let documentHeight = CGFloat(naturalHeight + trailingPadding + 2.0 * padding.before[index]) + 16
+                sharedHeight = max(sharedHeight, documentHeight)
+            }
+            for (index, pane) in panes.enumerated() {
+                guard let storage = pane.text.textStorage else { continue }
+                storage.beginEditing()
+                for line in pane.gutter.starts.indices where padding.after[index][line] > 0 {
+                    let start = pane.gutter.starts[line]
+                    let end = line + 1 < pane.gutter.starts.count ? pane.gutter.starts[line + 1] : storage.length
+                    guard end > start else { continue }
+                    let paragraph = (pane.text.defaultParagraphStyle?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+                    paragraph.paragraphSpacing = padding.after[index][line]
+                    storage.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: start, length: end - start))
+                }
+                storage.endEditing()
+                pane.text.textContainerInset.height = 8 + padding.before[index]
+                if let container = pane.text.textContainer { pane.text.layoutManager?.ensureLayout(for: container) }
+                pane.alignedHeight = sharedHeight
+                pane.text.sizeToFit()
+                pane.text.setFrameSize(NSSize(width: max(pane.text.frame.width, pane.scroll.contentSize.width), height: max(pane.scroll.contentSize.height, pane.alignedHeight)))
+                pane.gutter.needsDisplay = true
+                pane.text.needsDisplay = true
+            }
+            // TextKit may shrink the document while measuring its unpadded layout. Restore
+            // the viewport only after every pane has its final aligned document geometry.
+            for (index, pane) in panes.enumerated() {
+                let clip = pane.scroll.contentView
+                let y = model.synchronizeScroll ? sharedY : origins[index].y
+                clip.scroll(to: NSPoint(x: origins[index].x, y: min(max(0, y), max(0, pane.text.bounds.height - clip.bounds.height))))
+                pane.scroll.reflectScrolledClipView(clip)
+            }
         }
         @objc func didScroll(_ notification: Notification) {
             panes.forEach { $0.gutter.needsDisplay = true }
-            guard model.synchronizeScroll, !scrolling, let clip = notification.object as? NSClipView else { return }
+            guard !aligning, !updating, !scrolling, let clip = notification.object as? NSClipView else { return }
+            guard let source = panes.first(where: { $0.scroll.contentView === clip }) else { return }
+            scrollSourceID = source.id
+            guard model.synchronizeScroll else { return }
             scrolling = true
             defer { scrolling = false }
-            guard let source = panes.first(where: { $0.scroll.contentView === clip }) else { return }
-            let sourceLine = source.line(atY: clip.bounds.minY)
-            let baseLine = lineDiffs[source.id].map { $0.targetToSource[min(sourceLine, $0.targetToSource.count - 1)] } ?? sourceLine
             for pane in panes where pane !== source {
-                let targetLine = lineDiffs[pane.id].map { $0.sourceToTarget[min(baseLine, $0.sourceToTarget.count - 1)] } ?? baseLine
                 let target = pane.scroll.contentView
-                let y = pane.y(forLine: targetLine)
+                let y = clip.bounds.minY
                 target.scroll(to: NSPoint(x: target.bounds.origin.x, y: min(y, max(0, pane.text.bounds.height - target.bounds.height))))
                 pane.scroll.reflectScrolledClipView(target)
             }
@@ -532,6 +626,9 @@ private final class Pane: NSView {
     let text = ComparisonTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
     let gutter = LineGutter()
     var gutterWidth: NSLayoutConstraint!
+    var alignedHeight: CGFloat = 0
+    var geometryChanged: (() -> Void)?
+    private var lastViewport = NSSize.zero
     private var wrapped: Bool?
     init(column: ComparisonEditorColumn) {
         id = column.id
@@ -600,6 +697,7 @@ private final class Pane: NSView {
         super.layout()
         let viewport = scroll.contentSize
         guard viewport.width > 0 else { return }
+        if viewport != lastViewport { lastViewport = viewport; geometryChanged?() }
         if wrapped == true {
             text.textContainer?.containerSize.width = viewport.width
             text.setFrameSize(NSSize(width: viewport.width, height: max(text.frame.height, viewport.height)))
@@ -607,7 +705,7 @@ private final class Pane: NSView {
             text.setFrameSize(NSSize(width: max(text.frame.width, viewport.width), height: max(text.frame.height, viewport.height)))
         }
         text.sizeToFit()
-        text.setFrameSize(NSSize(width: max(text.frame.width, viewport.width), height: max(text.frame.height, viewport.height)))
+        text.setFrameSize(NSSize(width: max(text.frame.width, viewport.width), height: max(text.frame.height, viewport.height, alignedHeight)))
     }
     func wrap(_ enabled: Bool) {
         guard wrapped != enabled else { return }
@@ -630,6 +728,7 @@ private final class LineGutter: NSView {
     var showsLineNumbers = true
     var conflictBlocks: [ConflictDraft.Block] = []
     var selectedConflict = 0
+    var canAcceptConflict = true
     var acceptConflict: ((ConflictDraft.Side, Int) -> Void)?
     private var conflictButtons: [(NSRect, Int, ConflictDraft.Side)] = []
     @objc func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String {
@@ -670,7 +769,7 @@ private final class LineGutter: NSView {
                 NSColor.systemOrange.withAlphaComponent(index == selectedConflict ? 0.95 : 0.5).setFill()
                 NSRect(x: bounds.width - 3, y: gutterRect.minY, width: 3, height: gutterRect.height).intersection(bounds).fill()
             }
-            guard y > -20, y < bounds.height else { continue }
+            guard canAcceptConflict, y > -20, y < bounds.height else { continue }
             for (x, label, side) in [(CGFloat(1), "→", ConflictDraft.Side.ours), (CGFloat(20), "←", ConflictDraft.Side.theirs)] {
                 let rect = NSRect(x: x, y: y, width: 18, height: max(16, row.height))
                 (side == .ours ? NSColor.systemBlue : NSColor.systemPurple).withAlphaComponent(index == selectedConflict ? 0.32 : 0.18).setFill()

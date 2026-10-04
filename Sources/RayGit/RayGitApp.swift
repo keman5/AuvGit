@@ -123,6 +123,7 @@ final class RepositoryStore: ObservableObject {
     @Published var stagedDiff = false
     @Published var ignoreWhitespace = false
     @Published var diffText = ""
+    @Published var conflictPreview: FileComparisonSnapshot?
     @Published private var diffTitleKey = "Select a file to view changes"
     @Published private var diffTitleArguments: [String] = []
     var diffTitle: String { L10n.text(diffTitleKey, arguments: diffTitleArguments.map { $0 as CVarArg }) }
@@ -233,7 +234,7 @@ final class RepositoryStore: ObservableObject {
                 Task { @MainActor [weak self] in self?.scheduleFilesystemRefresh(root: root) }
             }
             files = []; branches = []; commits = []; commitFiles = []; stashes = []
-            selectedPaths = []; selectedCommit = nil; selectedCommitPath = nil; diffText = ""
+            selectedPaths = []; selectedCommit = nil; selectedCommitPath = nil; diffText = ""; conflictPreview = nil
             let restoredView = session.repositories[root.path] ?? session.repositories[url.path] ?? defaultViewState()
             applyViewState(restoredView)
             if !recentPaths.contains(root.path) {
@@ -343,7 +344,7 @@ final class RepositoryStore: ObservableObject {
         } catch { if detailVersion == version { report(error) } }
     }
     func loadDiff() async {
-        let version = UUID(); diffVersion = version; diffText = ""
+        let version = UUID(); diffVersion = version; diffText = ""; conflictPreview = nil
         guard let repository else { loadingDiff = false; return }
         let target: DiffTarget
         if mode == "history" {
@@ -356,6 +357,14 @@ final class RepositoryStore: ObservableObject {
         }
         loadingDiff = true
         do {
+            if mode == "workspace", let file = selectedFile, file.isConflict {
+                let snapshot = try await repository.fileComparison(path: file.path)
+                guard diffVersion == version else { return }
+                conflictPreview = snapshot
+                setDiffTitle("%@  ·  Conflict", arguments: [file.path])
+                loadingDiff = false
+                return
+            }
             let text = try await repository.diff(target: target, ignoreWhitespace: ignoreWhitespace)
             guard diffVersion == version else { return }; diffText = text
         } catch { if diffVersion == version { report(error) } }

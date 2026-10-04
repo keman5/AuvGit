@@ -158,7 +158,7 @@ private struct DiffTextSurface: NSViewRepresentable {
     @Binding var matchCount: Int
     func makeCoordinator() -> Coordinator { Coordinator() }
     func makeNSView(context: Context) -> NSStackView {
-        let stack = NSStackView(); stack.orientation = .horizontal; stack.spacing = 1; stack.distribution = .fillEqually
+        let stack = AlignedDiffStackView(); stack.onResize = { [weak coordinator = context.coordinator] in coordinator?.alignWrappedRows() }; stack.orientation = .horizontal; stack.spacing = 1; stack.distribution = .fillEqually
         for _ in 0..<2 {
             let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true; scroll.autohidesScrollers = true
             let view = NSTextView(); view.isEditable = false; view.isSelectable = true; view.isRichText = false; view.allowsUndo = false
@@ -227,6 +227,7 @@ private struct DiffTextSurface: NSViewRepresentable {
         }
         coordinator.syncing = false
         coordinator.wraps = wraps
+        coordinator.alignWrappedRows()
         if coordinator.query != query {
             coordinator.query = query
             coordinator.matches = []
@@ -306,8 +307,20 @@ private struct DiffTextSurface: NSViewRepresentable {
                 while index < diff.lines.count && (diff.lines[index].kind == .deletion || diff.lines[index].kind == .addition) {
                     let item = diff.lines[index]; if item.kind == .deletion { removed.append(item) } else { added.append(item) }; index += 1
                 }
-                for row in 0..<max(removed.count, added.count) {
-                    let a = row < removed.count ? removed[row] : nil, b = row < added.count ? added[row] : nil
+                let pairs: [(DiffLine?, DiffLine?)]
+                if removed.isEmpty {
+                    pairs = added.map { (nil, $0) }
+                } else if added.isEmpty {
+                    pairs = removed.map { ($0, nil) }
+                } else {
+                    let alignment = ComparisonAlignment(texts: [removed.map(\.text).joined(separator: "\n"), added.map(\.text).joined(separator: "\n")])
+                    pairs = alignment.bands.compactMap { band in
+                        let a = band[0].first.flatMap { removed.indices.contains($0) ? removed[$0] : nil }
+                        let b = band[1].first.flatMap { added.indices.contains($0) ? added[$0] : nil }
+                        return a == nil && b == nil ? nil : (a, b)
+                    }
+                }
+                for (a, b) in pairs {
                     let leftOffset = left.length + (lineNumbers ? 8 : 0), rightOffset = right.length + (lineNumbers ? 8 : 0)
                     append(a, to: left, number: a?.oldNumber, modified: a != nil && b != nil); append(b, to: right, number: b?.newNumber, modified: a != nil && b != nil)
                     if characterDiff, let a, let b {
@@ -339,6 +352,64 @@ private struct DiffTextSurface: NSViewRepresentable {
         var matches: [(Int, NSRange)] = []
         var signature = "", lastHunk = -1
         var hunkRanges: [[NSRange]] = []
+        private var aligning = false
+        func alignWrappedRows() {
+            guard !aligning, split, scrolls.count == 2 else { return }
+            aligning = true
+            defer { aligning = false }
+            let views = scrolls.compactMap { $0.documentView as? NSTextView }
+            guard views.count == 2 else { return }
+            var rows: [[NSRange]] = []
+            for (index, view) in views.enumerated() {
+                if wraps == true {
+                    view.setFrameSize(NSSize(width: scrolls[index].contentSize.width, height: view.frame.height))
+                    view.textContainer?.containerSize.width = max(1, scrolls[index].contentSize.width - 2 * view.textContainerInset.width)
+                }
+                let source = view.string as NSString
+                var ranges: [NSRange] = [], offset = 0
+                while offset < source.length {
+                    let range = source.lineRange(for: NSRange(location: offset, length: 0))
+                    ranges.append(range); offset = NSMaxRange(range)
+                    if let existing = view.textStorage?.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle,
+                       let paragraph = existing.mutableCopy() as? NSMutableParagraphStyle {
+                        paragraph.paragraphSpacing = 0
+                        view.textStorage?.addAttribute(.paragraphStyle, value: paragraph, range: range)
+                    }
+                }
+                view.layoutManager?.ensureLayout(for: view.textContainer!)
+                rows.append(ranges)
+            }
+            guard rows[0].count == rows[1].count else { return }
+            let heights = views.enumerated().map { column, view in
+                rows[column].map { range -> CGFloat in
+                    guard let layout = view.layoutManager, let container = view.textContainer else { return 0 }
+                    let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+                    return layout.boundingRect(forGlyphRange: glyphs, in: container).height
+                }
+            }
+            for row in rows[0].indices {
+                let height = max(heights[0][row], heights[1][row])
+                for column in 0..<2 {
+                    let range = rows[column][row], view = views[column]
+                    guard let style = view.textStorage?.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle,
+                          let paragraph = style.mutableCopy() as? NSMutableParagraphStyle else { continue }
+                    paragraph.paragraphSpacing = max(0, height - heights[column][row])
+                    view.textStorage?.addAttribute(.paragraphStyle, value: paragraph, range: range)
+                }
+            }
+            for view in views { view.layoutManager?.ensureLayout(for: view.textContainer!); view.sizeToFit() }
+        }
         deinit { observers.forEach(NotificationCenter.default.removeObserver) }
+    }
+}
+
+private final class AlignedDiffStackView: NSStackView {
+    var onResize: (() -> Void)?
+    private var lastSize: NSSize = .zero
+    override func layout() {
+        super.layout()
+        guard lastSize != bounds.size else { return }
+        lastSize = bounds.size
+        onResize?()
     }
 }

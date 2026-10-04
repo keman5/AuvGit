@@ -8,6 +8,10 @@ For an unmerged file, the comparison editor offers Ours + Result, All three, and
 
 Ours and Theirs describe Git's stages. In a rebase, those stage roles can differ from the everyday meaning of “my branch” and “their branch”; use the displayed version contents to decide.
 
+Two- and three-pane editors align corresponding logical bands by adding display-only vertical space. Real text, newline bytes, and source line numbers remain unchanged; virtual gaps have no invented line numbers. A conflict's source segment begins at the same vertical position as the result's opening marker, rather than at its matching text inside the markers. Shorter segments receive space after their contents so the unchanged context following the conflict starts at the same height in every pane. Wrapped line heights and pane resizing trigger recalculation.
+
+The workspace preview uses the same colored Ours / Result / Theirs stage-aware text surface for conflicts. All three preview panes are read-only and provide no acceptance controls. Open the independent comparison window to edit or accept conflict contents.
+
 ## Resolve one block
 
 The conflict toolbar displays the current block number and result line range. Previous/next buttons cycle through unresolved blocks; selecting inside a result block selects that block for the toolbar. The result gutter provides arrows to accept Ours or Theirs at that block.
@@ -25,6 +29,16 @@ Block choices update the in-memory draft. Save writes the draft; Save & Mark Res
 The existing Use Version menu replaces the entire draft with a selected version; its scope differs from the toolbar's current-block choices. Auto Merge remains available for a new automatic merge attempt.
 
 ## Acceptance evidence
+
+On 2026-10-04, the installed native application verified the shared read-only workspace conflict preview and independent resolver alignment using `/tmp/raygit-visual-polish-20261004`: Theirs line 14 aligned with the result's opening conflict marker at line 20, empty Ours content left a virtual gap, and following context aligned. Accepting Theirs for the second block reduced three conflicts to two; Cmd-Z restored three and disabled Save again. Inserting a newline and undoing it restored the draft.
+
+The alignment fixture `/var/folders/p9/706zy1rn35l9bjl5jq98b3m40000gn/T/raygit-alignment-_tmmynsf` verified wrapped workspace two-pane `anchor C` at source line 9/result line 12. In the ordinary three-pane editor, HEAD/result/index lines 1/3/2, `anchor B` 6/9/6, the Unicode line 8/11/9, and `anchor C` 9/12/10 aligned. After two divider adjustments narrowed the result pane to 259.5pt, all three panes reached the bottom with scrollbar value 1 and `anchor C` remained aligned.
+
+Final disk checks confirmed SHA256 hashes for all three alignment-fixture files matched the original manifest. The original resolver fixture's `resolver-demo.txt` retained SHA1 `c923f59cbe92dfad1567c93214cf5d0cbd925766`. Automatic wrapping was restored to off and the panes returned to approximately equal widths.
+
+The final workspace preview also reuses the core pairing and equalizes row heights with wrapping either on or off. After rebuilding and verifying the installed executable, native GUI checks of `ThreePane.txt` confirmed source/result lines 2/3, `anchor B` 6/9, Unicode 9/11, and `anchor C` 10/12 matched pixel heights without wrapping. Addition, deletion, modification, and character colors were correct. With wrapping enabled, both panes reached scrollbar value 1 and `anchor C` remained aligned; wrapping was then switched off.
+
+Latest targeted native tests passed all 23 `ComparisonAlignmentTests`, `TextLineDiffTests`, and `ConflictDraftTests` (`/tmp/raygit-alignment-final-tests.log`); the earlier full-suite run passed 112 tests (`/tmp/raygit-alignment-tests.log`). The final local Release build passed (`/tmp/raygit-alignment-final-build.log`), four-language localization checks passed for 22 tables and 879 keys, and the installed `/Applications/RayGit.app` passed signature verification and executable comparison with the built artifact. This verifies the exercised fixtures and geometry; all languages, themes, and large-file performance have not received comprehensive GUI acceptance. The following evidence records the earlier resolver acceptance run.
 
 On 2026-10-03, the complete native test suite passed: 108 tests, zero failures (`/tmp/raygit-resolver-tests.log`). The local Release build passed (`/tmp/raygit-resolver-release.log`), as did deep strict application signature verification, four-language localization checks (22 tables, 878 keys), and `git diff --check`.
 

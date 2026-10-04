@@ -302,13 +302,19 @@ struct MainWindow: View {
     var diffPane: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                if store.mode == "workspace" { Picker(mainText("diffScope"), selection: $store.stagedDiff) { Text(mainText("workspace")).tag(false); Text(mainText("staged")).tag(true) }.pickerStyle(.segmented).labelsHidden().accessibilityLabel(mainText("diffScope")).fixedSize(horizontal: true, vertical: false) }
+                if store.mode == "workspace", store.conflictPreview == nil { Picker(mainText("diffScope"), selection: $store.stagedDiff) { Text(mainText("workspace")).tag(false); Text(mainText("staged")).tag(true) }.pickerStyle(.segmented).labelsHidden().accessibilityLabel(mainText("diffScope")).fixedSize(horizontal: true, vertical: false) }
                 Spacer()
                 if store.mode == "workspace", store.selectedPaths.count == 1 { Button(compareText("Edit / Three-way Compare")) { fileAction(.compare, store.selectedPaths) }.disabled(store.isBusy) }
-                Toggle(mainText("ignoreWhitespace"), isOn: $store.ignoreWhitespace).toggleStyle(.checkbox).font(.caption)
+                if store.conflictPreview == nil {
+                    Toggle(mainText("ignoreWhitespace"), isOn: $store.ignoreWhitespace).toggleStyle(.checkbox).font(.caption)
+                }
             }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 7).rayGitChrome()
             Divider()
-            DiffPane(text: store.diffText, title: store.diffTitle, isLoading: store.loadingDiff)
+            if let snapshot = store.conflictPreview {
+                WorkspaceConflictPreview(snapshot: snapshot)
+            } else {
+                DiffPane(text: store.diffText, title: store.diffTitle, isLoading: store.loadingDiff)
+            }
         }
     }
     var commitPane: some View {
