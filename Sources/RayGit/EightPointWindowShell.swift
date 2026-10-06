@@ -65,7 +65,7 @@ private final class BorderlessShellWindow: NSWindow {
     override var canBecomeMain: Bool { true }
 }
 
-private final class EightPointFrameView: NSView {
+final class EightPointFrameView: NSView {
     private let hosted: NSView
     private let chrome: ShellTitlebar
     private let edges: ShellResizeEdges

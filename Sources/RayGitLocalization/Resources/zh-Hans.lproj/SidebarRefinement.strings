@@ -5,3 +5,6 @@
 "operationLog" = "打开操作日志";
 "viewLog" = "查看日志";
 "commitDetails" = "提交详情";
+
+"Expanded" = "已展开";
+"Collapsed" = "已折叠";

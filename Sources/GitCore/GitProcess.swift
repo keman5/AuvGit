@@ -54,7 +54,7 @@ private final class GitCancellation: @unchecked Sendable {
 }
 
 enum GitProcess {
-    static func run(at directory: URL, arguments: [String], allowedCodes: Set<Int32> = [0], timeout: TimeInterval? = nil, executable: String? = nil, progress: (@Sendable (String) -> Void)? = nil, outputFile: URL? = nil, outputPrefixBytes: Int? = nil) async throws -> GitOutput {
+    static func run(at directory: URL, arguments: [String], allowedCodes: Set<Int32> = [0], timeout: TimeInterval? = nil, executable: String? = nil, progress: (@Sendable (String) -> Void)? = nil, outputFile: URL? = nil, outputPrefixBytes: Int? = nil, inputFile: URL? = nil) async throws -> GitOutput {
         let cancellation = GitCancellation()
         let started = Date()
         let commandExecutable = executable ?? GitRuntimePreferences.shared.executablePath
@@ -66,7 +66,7 @@ enum GitProcess {
             do {
                 try Task.checkCancellation()
                 let result = try await Task.detached(priority: .userInitiated) {
-                    try runBlocking(at: directory, arguments: actualArguments, allowedCodes: allowedCodes, timeout: timeout ?? GitRuntimePreferences.shared.timeout, executable: commandExecutable, progress: progress, outputFile: outputFile, outputPrefixBytes: outputPrefixBytes, cancellation: cancellation)
+                    try runBlocking(at: directory, arguments: actualArguments, allowedCodes: allowedCodes, timeout: timeout ?? GitRuntimePreferences.shared.timeout, executable: commandExecutable, progress: progress, outputFile: outputFile, outputPrefixBytes: outputPrefixBytes, inputFile: inputFile, cancellation: cancellation)
                 }.value
                 if logCommand { GitCommandLog.record(directory: directory, executable: commandExecutable, arguments: actualArguments, output: result.text + "\n" + result.error, error: nil, exitCode: result.code, started: started) }
                 return result
@@ -81,7 +81,7 @@ enum GitProcess {
         do { _ = try await run(at: directory, arguments: arguments, outputFile: outputFile) }
         catch { try? FileManager.default.removeItem(at: outputFile); throw error }
     }
-    private static func runBlocking(at directory: URL, arguments: [String], allowedCodes: Set<Int32>, timeout: TimeInterval, executable: String, progress: (@Sendable (String) -> Void)?, outputFile: URL?, outputPrefixBytes: Int?, cancellation: GitCancellation) throws -> GitOutput {
+    private static func runBlocking(at directory: URL, arguments: [String], allowedCodes: Set<Int32>, timeout: TimeInterval, executable: String, progress: (@Sendable (String) -> Void)?, outputFile: URL?, outputPrefixBytes: Int?, inputFile: URL?, cancellation: GitCancellation) throws -> GitOutput {
         let prefixLimit = outputPrefixBytes.map { min(32 * 1024 * 1024, max(1, $0)) }
         if cancellation.isCancelled { throw CancellationError() }
         var environment = GitRuntimePreferences.shared.environment(ProcessInfo.processInfo.environment)
@@ -108,7 +108,7 @@ enum GitProcess {
         posix_spawn_file_actions_init(&actions); posix_spawnattr_init(&attributes)
         defer { posix_spawn_file_actions_destroy(&actions); posix_spawnattr_destroy(&attributes) }
         posix_spawn_file_actions_addchdir_np(&actions, directory.path)
-        posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0)
+        posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, inputFile?.path ?? "/dev/null", O_RDONLY, 0)
         posix_spawn_file_actions_adddup2(&actions, destinationFD >= 0 ? destinationFD : stdoutFD[1], STDOUT_FILENO)
         posix_spawn_file_actions_adddup2(&actions, stderrFD[1], STDERR_FILENO)
         for fd in stdoutFD + stderrFD { posix_spawn_file_actions_addclose(&actions, fd) }

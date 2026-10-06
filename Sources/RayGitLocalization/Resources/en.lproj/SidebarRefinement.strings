@@ -5,3 +5,6 @@
 "operationLog" = "Open operation log";
 "viewLog" = "View Log";
 "commitDetails" = "Commit Details";
+
+"Expanded" = "Expanded";
+"Collapsed" = "Collapsed";

@@ -1,9 +1,21 @@
 import XCTest
 import AppKit
+import SwiftUI
 @testable import RayGit
 
 @MainActor
 final class ComparisonChromeGeometryTests: XCTestCase {
+    func testChangeArrowPairIgnoresInheritedToolbarMinimumWidth() {
+        let pair = HStack(spacing: 2) {
+            Button {} label: { ComparisonToolbarIcon(name: "chevron.up") }
+                .buttonStyle(ComparisonToolbarButtonStyle())
+            Button {} label: { ComparisonToolbarIcon(name: "chevron.down") }
+                .buttonStyle(ComparisonToolbarButtonStyle())
+        }.buttonStyle(ToolbarRowButtonStyle(minimumWidth: 80)).controlSize(.small)
+        let host = NSHostingView(rootView: pair)
+        XCTAssertEqual(host.fittingSize.width, 46, accuracy: 0.5)
+        XCTAssertEqual(host.fittingSize.height, 24, accuracy: 0.5)
+    }
     private func model(_ result: String, editable: Bool = true, three: Bool = false) -> ComparisonEditor {
         let source = "head\noriginal\ntail\n"
         var columns = [ComparisonEditorColumn(id: "head", title: "HEAD", text: source, isEditable: false, message: nil)]

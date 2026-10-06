@@ -377,3 +377,158 @@
 - 主窗口 shell 的全屏进入/退出、标题、自定义“图标和文字”及间距、关闭/重开已进行 GUI 验证。CUA 坐标拖动因 `noWindowsAvailable` 未能验证；仅补有窗口几何回归覆盖，不将其视为实际鼠标拖动通过。
 - 最终合并分页、静态文档识别、默认8pt外壳、正常窗口位置持久化及八边缩放几何后，重新执行 `swift test --build-system native`：189项全部通过（`/tmp/raygit-final-all-tests.log`）。四语言37表1128键检查及 `git diff --check` 通过。首次三栏测试布局仍记录一次约束告警，具体约束被系统隐藏；最终几何断言与现有三栏GUI证据通过，未将此告警视作已彻底消除。
 - 最终本地 Release 构建成功（`/tmp/raygit-complete-release.log`），产物 `.artifacts/RayGit.app` 严格签名检查通过。打包签名会改变可执行文件，不能与 linker-signed 构建直接逐字比较；另行解析 Mach-O，全部40个实际落盘代码和数据 section 的长度及 SHA256 均与本次 native Release 构建一致。打包脚本使用 `--show-bin-path` 的真实 native 输出目录，避免 `.build/release` 指向旧构建。锁屏仍阻止最终 GUI 复测与正式应用替换，本轮没有安装至 `/Applications` 或创建 Git 提交。
+
+### 2026-10-04 分支切换、主日志范围与搜索框基线
+
+- 只读检查真实 `team-mind` 与本机 SmartGit 26.1：SmartGit 主窗口 Kevin 日志可见顺序为 `7af1d0e7 / dd9ca0a5 / 1b8c4cdc / 6f0c2b1c / 51794302`，与 `git log --first-parent Kevin` 一致；旧 RayGit 主窗口使用所有引用，首两项为无关分支 `3fb142de / 4b01ea2d`。快照计数：所有引用224，Kevin完整可达205/主线138，dev完整可达76/主线5。
+- 主日志默认跟随HEAD并仅显示第一父链，切换分支或HEAD改变后清除过期选择、自动选择首条并滚到顶部，不注入旧分支提交。日志更多菜单的“显示合并进来的提交”可切换当前HEAD完整图并保存偏好；独立日志窗口仍保留所有引用及完整图。图形仅绘制实际可见父链，原始父提交元数据保留。
+- 分支切换在操作锁内读取最新状态；干净直接切换，有暂存、未暂存或未跟踪变化时才确认，确认后再次读取状态。取消无失败提示；不使用强制切换，保留Git覆盖保护。搜索输入使用原生单行NSTextField，绑定和250ms搜索节流保持原状。
+- 全量196项测试0失败（`/tmp/raygit-history-final-tests.log`），四语言37表1129键及 `git diff --check` 通过。覆盖陈旧状态缓存、确认期间新变更、取消、覆盖保护、外部切换后的主日志更新、空HEAD及完整/主线范围。首次测试编译发现断言访问private属性，改为断言已有公开错误状态后完成全量通过。
+- 独立QA使用真实仓库的本地副本 `/tmp/raygit-history-qa-path`，Kevin→dev→Kevin均不弹确认；dev显示上述5条主线并选中 `2aaa743a`，开启合并选项后显示76条完整历史。新增测试文件后切换弹确认，取消保留Kevin及文件，随后清理该自建文件。真实team-mind始终处于Kevin且干净，未切换或写入其内容。
+- 搜索 `main` 在dev主线只显示 `78acaab4`，清除恢复5条。激活前后截图 `/tmp/raygit-history-placeholder-unfocused.png` 与 `/tmp/raygit-history-placeholder-focused.png` 中，占位文字内区 `(700,1230)..<(960,1273)` 共11180像素逐点一致；排除插入光标区域，验证没有向上位移。
+- 本地Release成功（`/tmp/raygit-history-release.log`），正常退出正式应用后安装 `/Applications/RayGit.app`，严格签名及包内二进制cmp通过。重新启动的正式版在真实team-mind显示与SmartGit一致的Kevin前5条，并自动选中首条。本轮未创建Git提交。上一轮PDF识别修复也在新QA主窗口观察到PDF第1页图像及页数信息；独立PDF窗口、分页下一页和物理八边缩放仍未在本轮重测。
+
+### 2026-10-04 贮藏取消、变更概览、解码预览与读取优化
+
+- 使用独立 `dev.raygit.qa` 和合成仓库 `/tmp/raygit-density-qa-path`，包含6000行导航文件（第80/3000/5800行变化）、Vue、Gradle、Dockerfile、自定义扩展及UTF-16文件。全量209项0失败（`/tmp/raygit-density-final-tests.log`）发生在最后UTF-16调用集成及EOF修正之前；随后相关15项定向测试0失败（`/tmp/raygit-density-decoded-tests.log`），不表述为这些后续修改再次全量通过。
+- 贮藏确认的取消按钮已在外部AX中启用，点击取消及Escape均实际关闭弹窗；未执行贮藏。Apply主操作与下拉为无内部分隔线的整体样式，列表可选实际记录，长记录名称截断。提交详情已实测QACommitter / QAOriginalAuthor身份显示，已移除文件历史入口。
+- 主预览两处概览标记点击后两侧滚动值同为1；独立原生三栏第三标记定位第5800行，关闭手动同步后仍主动移动全部栏，三栏滚动值同为 `0.9740812509`。紧凑投影显示三处变化；自定义 `.raycode` 与UTF-16独立比较实际渲染。概览重复tile/resize及滚动条隐藏切换、标记端点映射、保留的真实原生AX按钮及点击动作有回归覆盖。
+- 3.4MB分页文件点击第二标记从第20000行开始，下一页从20500开始。43MB流式文件点击第二标记已加载19997附近上下文；精确选中实际变更行及过期状态文案仍由后续修正处理，尚不声称该最终行为通过GUI。
+- 读取优化以实际命令数验证：相同HEAD/索引blob仅一次 `cat-file blob` 和一次 `cat-file -s`；复用快照的部分暂存预览只新增一次diff读取，文件随后改变仍拒绝应用过期快照。头像并发请求共用一次加载及同一解码对象，另测有界LRU、失败重试到期与过大响应拒绝。稀疏导航测试覆盖第9002行的精确UTF-8字节位置、多字节长行、起止钳制及文件变动后的缓存失效。
+- 首次打开的CUA观察为旧版4664ms、新版4281ms，各仅一次且包含AX获取和自动等待；这是操作观察，不是性能基准或稳定加速结论。最终构建、安装与验收结果见下列补充。
+- 最终合并全部修复后重新全量测试：213项、0失败（`/tmp/raygit-density-release-tests.log`）。四语言37表1131键及 `git diff --check` 通过。新增页面安装后再消费定位请求的回归，防止把新页面行号应用到旧内容；真实变更行定位不再使用Git上下文起点。
+- 最终QA复测43MB文本第二色块：内容从 `020000 alpha item-20000` 开始，字节位置2,459,877，底部明确“从第20,000行开始”且光标“行20,000，列1”。主窗口UTF-16显示 `- variable = "before"` / `+ variable = "after"` 和1个变更；独立历史窗口 `cd3d14bd / Custom.raycode` 显示完整真实代码，不再误入静态预览空态。
+- 本地Release成功（`/tmp/raygit-density-release-build.log`），正常退出正式应用后更新 `/Applications/RayGit.app`，严格签名与包内可执行文件逐字比较通过。安装版启动保持原测试仓库，贮藏取消按钮可用且Escape关闭；Notes.txt主预览显示可点击“变更1”总览，随后恢复更新前选中的Preview.png。正式版未执行贮藏或其他仓库写操作。本轮没有创建Git提交。
+
+### 2026-10-04 日志勾选范围、相对日期与连续对比导航
+
+- 只读观察本机 SmartGit 26.1：提交图使用灰色连线和空心节点，日期显示 Yesterday / weekday / yyyy-MM-dd 加 HH:mm；分支区域有 HEAD 与独立分支复选框。RayGit 保留自己的布局，借鉴这些显示与筛选行为。
+- 独立 `dev.raygit.qa` 使用 `/tmp/raygit-navigation-qa-path` 指向的合成仓库，含合并图、未合并分支、同名本地/远程引用、不同日期和 600 行长文本；没有写入业务仓库。
+- GUI 右键 unmerged → 日志后，unmerged 行自动选中且只有该分支勾选，首条为 Unmerged branch only；额外勾选 main 后 5 条增至 6 条并去重，取消 unmerged 恢复 5 条，全部取消显示 0 条。关闭日志后从主窗口重新打开，所有复选框仍为 0，空列表被记住。详情实测显示“前天 12:34”和“今天 13:25”。完整引用区分本地与远程同名分支。
+- 普通双栏对比关闭纵向同步和换行，初始定位第 30 行；点击总览 25% 附近定位无变更的第 150 行，连续拖动到第 399 行，两栏纵向滚动值同为 0.6772540983606558，未吸附到变更起点。移动一栏横向滚动条后两栏代码内容对齐；不同文本宽度的滚动条比例可以不同。下一个变更将两栏定位第 550 行，滚动值同为 0.9902362584378014，行号及变更范围带明显高亮与细边框。
+- 验收发现并修复普通日志复用旧标签筛选、窄日志隐藏日期、程序定位后 footer 保留旧行号；紧凑模式保持固定等宽栏框架并独立同步代码横向位置。分页/流式总览使用正常鼠标事件与最新位置节流，避免嵌套事件循环阻塞异步读取。
+- 最终全量 223 项测试 0 失败（`/tmp/raygit-navigation-verified-tests.log`），四语言 37 表 1131 键和 `git diff --check` 通过。测试包含日界线、仓库独立勾选持久化、空范围、引用并集/分页、标签上下文清除、游离提交、比例连续定位、对齐空白映射、原生及紧凑横向同步、footer 更新。
+- 最终 QA 中双击同名远程 origin/topic，准确选中 `refs/remotes/origin/topic` 且本地 `refs/heads/origin/topic` 未勾选；窄日志列表可见“星期四 13:25”和“2026-09-24 13:25”。下一变更实测两栏滚动值 0.5382111861137898，footer 为“行 300，列 1，选择 253 个字符”。紧凑两侧横向滚动值约 0.5，栏标题/框架位置固定。
+- 3.4MB 分页总览点击无变更区域到第 14,207 行，拖动到第 18,942 行；43MB 流式总览点击到第 175,525 行（字节 21,589,454），拖动到第 110,031 行（字节 13,533,692），footer 与页面起点一致。未将一次拖动操作描述为持续性能基准；大量全变更文本的紧凑视图仍需完整布局以保证总览几何准确。
+- 本地 Release 成功（`/tmp/raygit-navigation-release.log`），正常退出后更新 `/Applications/RayGit.app`，严格签名和可执行文件逐字比较通过。安装版正常启动，保留 giftdock / codex/ios-customer-chat 及 GiftDockChatApp.swift 的原选择和 14 个变更状态；未对该业务仓库执行写操作。本轮未创建 Git 提交。
+
+
+### 2026-10-05 远端分叉时确认强制推送
+
+- 主工具栏 Push 和网络推送面板使用只读预检；普通非快进拒绝及配置中的强制 refspec 进入显式确认。仅明确的 `notRequired` 结果允许普通推送，鉴权、目标歧义或准备失败均停止。弹窗列出远端、完整分支和可获得的远端独有提交数，Return 默认取消。
+- 确认固定仓库、分支、本地 SHA、单一 push endpoint 及远端 OID；执行使用精确 `--force-with-lease=<ref>:<OID>`、显式 SHA:ref，并关闭附带 tag 和子模块推送。执行前重验 HEAD/配置；成功后使用 compare-and-swap 更新跟踪引用。
+- 最终全量 230 项测试、0 失败（`/tmp/raygit-force-push-final-tests.log`）；包含 7 项本地 bare remote 测试，覆盖远端再次更新、fetch 后 lease 仍拒绝、HEAD/配置变化、pushRemote 优先级、多目标/多 endpoint、显式 refspec 和拒绝分类。四语言 38 表 1140 键及 diff 检查通过。
+- 独立 QA 使用 `/tmp/raygit-force-push-qa-root` 指向的本地临时 bare remote。界面初始显示远端独有 1 个提交，Return 取消后远端未变；最终构建打开弹窗后由 peer 增加提交并 fetch，再点击强推显示“远端已更新，请重新预览并确认强制推送”，远端仍为 `84c93b7d6a5a1f37e14970ce6b07af8915d7c07f`。
+- 重新预览显示远端独有 2 个提交，确认后 remote/main、origin/main 与本地 HEAD 同为 `bf828d493de3e23a9a1870f8dec3bb0df458e469`；操作日志默认折叠，展开后可见精确 lease 和 SHA:ref 命令、退出状态 0 与 forced update。随后新增测试提交，普通 Push 显示原确认并成功快进至 `478f68dfe7430e70c4412e56a6d04c4b8507f2ac`。所有推送仅针对本机临时仓库。
+- 本地 Release 构建成功（`/tmp/raygit-force-push-release.log`）；正常退出后更新 `/Applications/RayGit.app`，严格签名及可执行文件逐字比较通过。安装版正常启动并保持当前 rayfinder / main 选择及干净工作区；没有操作业务仓库远端。本轮未创建 RayGit 源码提交。
+
+### 2026-10-05 Clone 自动目录与父目录记忆
+
+- 只读参考 SmartGit 克隆向导的 Parent Directory、Directory Name 和 Clone Into；未执行参考应用克隆。RayGit 预填可编辑完整目录，按 HTTPS/SSH/scp/file URL 或本地源名称去除 `.git`，默认使用上次成功克隆的父目录；首次优先已有 `~/Git-projects`。手动改过的路径在源地址变化后保留。
+- CloneDestinationTests 与 RepositoryWorkflowTests 共 12 项通过（`/tmp/raygit-clone-tests.log`），覆盖名称解析、路径验证、手动覆盖、父目录记忆和实际克隆时创建缺失多级目录。四语言 38 表 1141 键与 `git diff --check` 通过。
+- 独立 QA 输入 HTTPS 示例时预填 `/Users/kevin/Git-projects/clone-demo`；随后真实克隆 `/tmp/raygit-clone-qa-path` 指向合成仓库的 file URL，到原本不存在的 `new parent/nested/custom-name`，成功打开并显示 Clone fixture 提交。再次打开创建窗口，输入 scp SSH 示例，自动填 `new parent/nested/next-project`；取消后未创建 next-project。首次 AX 改值未提交到源输入框，实际误用旧 HTTPS 示例并返回仓库不存在；正常输入并离焦后克隆成功，不将该自动化问题当作远程连接成功证据。
+- 本地 Release 构建成功（`/tmp/raygit-clone-release.log`），正常退出后更新 `/Applications/RayGit.app`，严格签名和可执行文件 cmp 通过。正式版启动保留 rayfinder；创建窗口输入 HTTPS 示例实际预填 `/Users/kevin/Git-projects/sample`，随后取消，无业务仓库写操作。没有创建 Git 提交。
+
+### 2026-10-05 浮窗提醒、紧凑表格与日志引用范围
+
+- 限制/失败提示迁移至工具栏浮窗，包含可选择的方案文字及适用的只读命令复制按钮。独立 QA 使用约360KB暂存补丁触发“暂存差异过大”，自动弹出说明，明确仍可手动提交；复制结果确认为 `git diff --cached --stat`，未调用外部 AI。
+- 文件表格缓存筛选/排序结果、状态计数及路径组成；原生自动行高曾覆盖设定值，最终关闭自动行高并设置22pt行/23pt表头。相同高度区域可见行由7增至10，选中行仍保留语义颜色标签。仓库添加按钮18pt；应用贮藏菜单230pt并显示省略号，Escape关闭正常。
+- 日志分支行点击仅改变选中行，复选框才改变显示范围。QA勾选“可回收提交”和贮藏后可见 Recyclable QA commit 与 stash记录；重开窗口勾选保持。贮藏范围以提交hash保存，避免stash序号移动改变原选择。提交图/说明/作者/日期/hash分割线可拖动；实际拖动说明分割线使作者和日期列同步移动。主面板作者固定宽度，提交说明预留220pt，窄面板可横向滚动。
+- 单行文本输入改用共享原生文本控件。作者/hash聚焦前后截图未观察到placeholder位移；原生绘制矩形及Return/binding测试通过。API密钥SecureField保留安全遮罩，未完成其聚焦基线实测。
+- 全量237项测试0失败（`/tmp/raygit-density2-final-tests.log`）；最后补充修改后10项输入/历史日期范围测试通过（`/tmp/raygit-density2-last-check.log`）。四语言39表1152键检查及diff检查通过。
+- 性能验证限制：6501项合成文件列表加载成功，但自动化设置滚动条至底部反复超时。采样 `/tmp/raygit-density2-hang.sample.txt` 主要显示辅助功能读取离屏NSTableView行并创建hosting cell；不足以证明实际鼠标滚动流畅度。结束无编辑内容的QA进程恢复工具，保留合成测试数据；不将极端滚动性能列为验收通过。
+- 本地Release成功（`/tmp/raygit-density2-release-final.log`），正常退出正式应用后更新 `/Applications/RayGit.app`，严格签名与可执行文件cmp通过。安装版正常启动并保留 giftdock / codex/ios-customer-chat / project.pbxproj 与13个已暂存变更；未修改业务仓库。未创建Git提交。
+
+### 2026-10-05 AI 输入限制与日志列布局
+
+- AI 提交设置增加 30–4000KB 暂存补丁限制，默认120KB；超限浮窗可打开设置或明确选择根据暂存摘要生成。完整补丁超限时不发送截断内容；摘要只包含暂存文件名、状态及变更统计，并明确不推断代码行为。
+- 独立 QA 使用 `/tmp/raygit-limits-qa-path` 指向的合成仓库，包含约340KB已暂存 Large.txt 和未暂存 Small.txt。120KB下自动显示超限浮窗；摘要按钮通过本地模拟 CLI 填充提交草稿，捕获请求704字节，包含 Large.txt、不含代码补丁或 Small.txt。界面将限制改为500KB并保存后重新生成，捕获请求340523字节，完整包含 git diff --cached 补丁、不含 Small.txt。仓库仍为13个提交；无外部AI调用。退出QA后恢复原AI配置键。
+- 主日志头像限制18×18pt，作者名称按内容计算且上限72pt，隐藏字段不占位。各比较/搜索/冲突视图变更箭头统一22×24pt、成对间距2pt。
+- 日志列增加最小宽度和内容裁切：提交图28、说明220、作者55、日期105、哈希65pt。拖动时仅更新表头指示线，松手后提交列宽。QA实际拖窄说明和作者列，长文本省略且不覆盖相邻列；截图 `/tmp/raygit-limits-history-narrow.png`。未进行拖动帧率基准测量。
+- 全量243项测试0失败（`/tmp/raygit-limits-columns-tests.log`）；最终作者宽度/裁切调整后7项AI及列宽测试通过（`/tmp/raygit-limits-columns-focused.log`）。四语言39表1157键检查与diff检查通过。
+- 本地Release成功（`/tmp/raygit-limits-columns-release.log`）；正常退出正式应用后更新 `/Applications/RayGit.app`，严格签名与可执行文件cmp通过。安装版启动显示 giftdock / codex/ios-customer-chat / Info.plist，13个已暂存变更；没有修改业务仓库或正式AI配置。未创建Git提交。
+
+
+### 2026-10-05 紧凑作者列、原生列宽拖动与文件菜单
+
+- 主面板头像与作者合并为单个裁切区域，总宽不超过100pt；作者名称测量按作者序列缓存。变更及搜索上下箭头使用独立固定尺寸样式，每个22×24pt、间距2pt，不再被外层工具栏最小宽度撑大。
+- 日志列宽使用原生 mouseDown/mouseDragged/mouseUp；拖动只移动指示线，释放时才更新列宽，不进入嵌套事件循环。Escape取消并恢复焦点。保持提交图28、说明220、作者55、日期105、哈希65pt的最小宽度与单元格裁切。
+- 工作区、文件树和日志变更文件菜单移除复制路径等复制入口，打开文件/在Finder中显示位于末尾。历史文件已不存在于工作区时禁用这两项。
+- 独立QA在合成仓库使用长作者及长提交说明，实际拖窄说明和作者列后文字省略且未覆盖邻列；主面板作者名称被限制在紧凑区域，箭头紧邻排列。截图：`/tmp/raygit-menu-history-minimum.png`、`/tmp/raygit-menu-main-identity.png`。工作区右键菜单末尾确认为打开文件、在Finder中显示，无复制路径。拖动交互已验证，未测量连续拖动帧率。
+- 最终全量247项测试0失败（`/tmp/raygit-menu-columns-final-tests.log`），包括真实SwiftUI承载下46×24pt箭头组尺寸、拖动期间不写入/释放只写入一次、最小宽度反向拖动和取消恢复焦点。四语言39表1157键与diff检查通过。
+- 最终本地Release成功（`/tmp/raygit-menu-final-release.log`）；正常退出后更新`/Applications/RayGit.app`，严格签名及可执行文件cmp通过。安装版启动保留giftdock / codex/ios-customer-chat / MerchantWorkbench.swift、11个变更及0个已暂存；未修改业务仓库。本轮未创建Git提交。
+
+- 最终本地化检查发现动态拼接列名导致静态查键失败，已改为复用表头现有本地化标题。修复后四语言检查通过，9项列宽/原生拖动/按钮几何测试再次通过（`/tmp/raygit-menu-final-focused.log`）。
+
+### 2026-10-05 紧凑日期、复制路径与实时列宽
+
+- 主面板日志日期按显示文字测量并缓存，宽度限制48–110pt且左对齐，收紧与作者之间的空白；缓存包含日期、语言、时区及日界线。
+- 工作区普通/忽略文件、文件树和日志变更文件菜单恢复“复制路径”，复制完整绝对路径，多选以换行分隔。工作区直接使用所选路径，避免忽略文件未进入状态数组而复制为空；日志中已不存在于工作区的文件仍可复制路径。
+- 日志表头分割线改为1pt、保留9pt拖动热区，移除最右侧哈希列的多余分割线。原生mouseDragged实时提交列宽，松手不重复更新，Escape恢复原宽度；替代上轮的松手更新行为。
+- 10项列宽、原生拖动和比较按钮几何测试通过（`/tmp/raygit-live-columns-tests.log`），覆盖拖动期间连续更新、取消恢复及日期宽度边界。四语言39表1157键与diff检查通过。最终忽略文件复制回调补充修复已通过Debug和Release编译。
+- 独立QA合成仓库中右键Small.txt复制路径后粘贴到筛选框，确认为该文件完整绝对路径，随后清空筛选。主面板日期紧邻作者；日志仅有提交图/说明/作者/日期四个拖动热区，无哈希末尾热区。实际拖窄说明列后作者/日期同步移动，长文字仍正确裁切；连续更新由原生事件测试验证，未测量拖动帧率。截图：`/tmp/raygit-live-columns-main.png`、`/tmp/raygit-live-columns-log-before.png`、`/tmp/raygit-live-columns-log-after.png`。
+- 本地Release成功（`/tmp/raygit-live-columns-release.log`），正常退出后更新`/Applications/RayGit.app`，严格签名和可执行文件逐字比较通过。安装版启动保留giftdock / codex/ios-customer-chat / MerchantWorkbench.swift，显示13个变更、0个已暂存。没有执行业务仓库写操作，本轮未创建Git提交。
+
+
+### 2026-10-05 文件状态、焦点操作范围、全部贮藏及滚动边界
+
+- 文件状态按 Git 索引/工作区组合显示：已暂存、已暂存 · 已修改、已移除、已暂存 · 已移除等；文件行图标16pt，筛选图标约17–18pt并保留24pt热区。创建图标缩至20×19pt。
+- 顶部暂存/取消暂存/丢弃在文件列表有焦点时使用选择，离开列表后作用于所有符合条件的文件。普通表格、树形列表共享选择；目录选择仅覆盖其变更后代。原生鼠标按下立即记录范围，在默认RunLoop延后通知界面，避免在表格跟踪鼠标时重建视图；不依赖可能被NSTableView消费的mouseUp。背景探针不接受点击。
+- 主面板与独立日志默认包含全部贮藏条目，不显示贮藏的索引/未跟踪辅助提交；旧范围迁移补入全部贮藏，新版显式取消选择保留。日志表头固定28pt单行，提交图最小列宽55pt。
+- 主面板对比关闭弹性滚动，同步前分别约束源和目标边界，跳过无变化的同步，防止端点反复回传。回归覆盖不等高面板和20次重复边界通知。
+- 隔离QA仓库 raygit-status-focus-qa-xakmxaxm 实测：普通列表单击Modified.txt后暂存仅1项；点击提交框后暂存全部6项，取消暂存全部6项；全局丢弃确认列出5个受跟踪文件，取消执行。树形列表单击OnlyStaged.txt后暂存仅1项。Git status核对操作结果。业务仓库未执行Git写入。
+- 主面板和独立日志显示3条贮藏及基础提交；表头单行正常。长文件开启同步滚动后两侧滚动条在顶部均为0、底部均为1，继续向边界滚动位置稳定；未测量连续帧率。截图：/tmp/raygit-status-final-main.png、/tmp/raygit-status-log.png、/tmp/raygit-status-scroll-bottom.png。
+- 最终265项测试0失败（/tmp/raygit-status-final-all-tests.log），含真实托管Table/窗口外壳鼠标选择及操作目标测试。四语言39表1158键检查和git diff --check通过。
+- 本地Release成功（/tmp/raygit-status-final-release.log），正常退出后更新/Applications/RayGit.app；严格签名校验与可执行文件cmp通过。启动保留giftdock / codex/ios-customer-chat / ChatAPI.swift，18个变更、3个已暂存，状态正确显示“已暂存 · 已修改”。本轮未创建Git提交。
+
+### 2026-10-05 筛选框高度与工具栏显示稳定性
+
+- 筛选文件输入框外层高度由28缩至24pt，原生输入控件固定20pt。独立QA对比聚焦/离焦截图，排除插入光标后的占位文字区域像素差为0；截图为 `/tmp/raygit-filter-blurred-final.png` 与 `/tmp/raygit-filter-focused-final.png`。
+- 创建右侧更多按钮改为11pt省略号，居中于20×23pt区域；原生及自定义窗口工具栏菜单均移除最近项目列表。QA实测菜单仅包含仓库工具、网络、标签管理、搜索、打开及AI提交设置。
+- 自定义工具栏在仅图标和图标加文字模式下均固定36pt高。QA切换显示文字后，抽查Pull图标的垂直像素范围和工具栏底边位置均保持一致，随后恢复仅图标模式。
+- Debug与本地Release构建通过（`/tmp/raygit-filter-toolbar-build.log`、`/tmp/raygit-filter-toolbar-release.log`）；StableInputNoticeTests共2项通过（`/tmp/raygit-filter-toolbar-tests.log`），四语言39表1158键及diff检查通过。
+- 正常退出后更新 `/Applications/RayGit.app`，严格签名校验及可执行文件cmp通过。安装版正常启动，保留giftdock / codex/ios-customer-chat，显示4个变更、0个已暂存；本轮没有业务仓库Git写入，也未创建源码Git提交。
+
+### 2026-10-05 Finder入口、紧凑分支与只读光标
+
+- 创建右侧更多菜单的“打开”改成“在 Finder 中打开”，原生与自定义工具栏入口一致，四语言补齐；QA实际打开当前合成仓库目录，并核对Finder文件列表。仓库变更数量仅在大于0时显示。
+- 本地分支、远程分支和贮藏改成可折叠分组并持久化展开状态。采用plain列表、清除垂直内容边距、原生紧凑行高及隐藏分隔线，实测消除原sidebar风格的多余间距。QA折叠贮藏后重启仍保持折叠，再恢复展开。截图：`/tmp/raygit-sidebar-final.png`。
+- 主面板和独立比较的只读NSTextView保持不可编辑，点击时用AppKit真实插入点几何绘制稳定光标。仅覆盖shouldDrawInsertionPoint在实机上不足以绘制，最终改为draw阶段绘制。实测主面板与独立窗口行首插入线可见，点击独立左窗格更新为行32列36；输入ReadonlyProbe未改变只读内容或产生保存状态。截图：`/tmp/raygit-main-final-caret.png`、`/tmp/raygit-standalone-final-caret.png`。
+- 全量267项测试0失败（`/tmp/raygit-sidebar-final-tests.log`）；最终只读绘制补丁后2项定向测试通过（`/tmp/raygit-caret-draw-tests.log`），覆盖真实文本系统几何、字符位移和输入/粘贴保护。四语言39表1159键及git diff --check通过。
+- 本地最终Release成功（`/tmp/raygit-caret-sidebar-final-release.log`）。正常退出正式应用后更新`/Applications/RayGit.app`，严格签名及可执行文件cmp通过。重启保留giftdock、codex/ios-customer-chat及ManagementModelChecks.swift选择；只读检查新分组正常显示。本轮未对业务仓库执行Git写入，未创建Git提交。
+
+
+### 2026-10-05 用户操作日志保留与底部常驻结果
+
+- 用户操作摘要与实际命令通过操作 UUID 关联；成功、失败、取消均记录。摘要与用户命令各保留最近1000条，常规读取命令最多300条；本轮为应用会话内保留，未增加跨重启磁盘日志。
+- 最近用户操作状态独立于刷新状态，主窗口与日志窗口底部显示操作及失败原因，点击打开操作日志。记录默认折叠，展开用户摘要可查看对应完整命令与输出，支持完整查看、复制、导出和已有脱敏/缓存过期保护。
+- 专项12项与全量270项测试均0失败（`/tmp/raygit-operation-focused.log`、`/tmp/raygit-operation-alltests.log`），覆盖310次常规读取后的保留、刷新状态稳定、命令关联隔离、失败/取消及脱敏。四语言39表1162键与diff检查通过。
+- 独立QA使用本地bare remote和Operations QA合成仓库：实际Pull快进及Push成功后分别显示“拉取完成”“推送完成”，手动刷新和文件变化不覆盖结果；点击底部日志按最新用户操作优先显示Push/Pull，默认折叠；展开Pull含git pull --ff-only --progress与Fast-forward输出。
+- 将测试remote临时改为不存在路径，Pull失败后底部保留操作名称和原始错误，刷新后不消失；日志同时保留失败Pull、成功Push、成功Pull。此未匹配错误仍显示Git英文原因，未声称全部错误已翻译。验证后恢复测试remote。
+- 本地Release构建通过（`/tmp/raygit-operation-release.log`）。正常退出后更新`/Applications/RayGit.app`，严格签名和可执行文件cmp通过；重启保留giftdock / codex/ios-customer-chat，12个变更、8个已暂存。未对业务仓库执行Git写入，本轮未创建源码提交。
+
+## 2026-10-05 — Compact repository items and common context actions
+
+- Inspected SmartGit 26.1 Repository, Local and Remote menus; selected remote properties, ignore-file editing, rename, ignore and deletion-to-Trash instead of attempting the full menu set.
+- Repository items reduced from 34pt to 26pt, retaining folder/status overlays. Clicked-repository menus add log, refresh, remote URL and `.gitignore` editing. Targeted operations preserve the active repository and retain operation summaries/command details.
+- Table and tree share file context actions: rename, ignore eligible untracked files, confirmed Trash, copy name/relative/absolute path, plus existing comparison, history, staging and Finder actions. Clean tree files retain history access; invalid/mixed mutation selections are disabled.
+- Automated: 276 tests passed (`/tmp/raygit-menu-tests-final.log`); four languages / 41 tables / 1192 localization keys passed; `git diff --check` passed. New tests cover remote URL/refspec preservation and stale configuration, ignore-file stale/symlink protection, clicked-repository isolation and context eligibility.
+- GUI fixture: `/var/folders/p9/706zy1rn35l9bjl5jq98b3m40000gn/T/raygit-menu-qa-o82q8t8g`, independent `Active Repo` and `Context Repo`. Edited the inactive repository's fetch URL and ignore file without switching active repository; CLI verified explicit push URL/upstream preservation and correct file target. Escape after editing remote URL caused no write.
+- GUI: right-clicked unselected `rename me.txt` while `tracked.txt` remained selected; renamed only the clicked file. Ignored `scratch[1].tmp`; verified literal escaping does not ignore `scratch1.tmp`. Moved `trash me.txt` to Trash with confirmation, then restored it through the tree toolbar. Verified file contents and unchanged index. Operation log showed collapsed summaries and expandable remote configuration commands. Visually checked compact repository rows.
+- Release build passed (`/tmp/raygit-menu-release.log`), installed to `/Applications/RayGit.app`, strict signature and executable equality verified. Relaunch preserved the user's rayfinder repository, selected Resources/Info.plist, 32/37 staged count and existing commit draft; installed repository menu verified without running mutations in the user's repository.
+- No Git commit or push performed. Backend regression tests cover additional edge cases; not every menu permutation was exercised manually.
+
+## 2026-10-05 — Clone form text clipping and retained drafts
+
+- Rounded native fields reserve 24pt while plain toolbar fields remain 20pt. Fixed the focused field editor receiving an already-inset drawing rectangle, which caused AppKit to apply the bezel inset twice and crop Chinese glyphs and descenders. Increasing height alone was tested and found insufficient before the editor geometry fix.
+- Creation form persists clone mode, source, destination, chosen parent and automatic/custom destination ownership. Cancel/reopen and app restart retain the draft; changing source preserves an explicitly edited destination.
+- Nine focused tests passed (`/tmp/raygit-clone-input-final-tests.log`), including actual focused AppKit editor geometry for Chinese and gyp text, draft reload, corrupt-data fallback and automatic/custom destination behavior. Localization parity (4 languages, 41 tables, 1192 keys) and `git diff --check` passed.
+- Independent QA verified focused text rendering (`/tmp/raygit-clone-qa-fixed.png`), cancel/reopen, source editing without custom destination replacement, and restoration after normal quit/relaunch. No QA network clone was executed.
+- Release passed (`/tmp/raygit-clone-input-final-release.log`); updated `/Applications/RayGit.app` after normal quit, strict signature and executable equality passed. Restored the user's existing clone URL and destination, verified cancel/reopen retains them, and left that form open. Did not start the user's clone, commit, or push.
+
+## 2026-10-05 — Preserve the actual remote push rejection
+
+- Shared failure classification prioritizes remote rejection over the generic hook category. Status-bar and collapsed operation-log summaries include sanitized remote diagnostics, prioritize error lines, and omit transfer progress; local hook failures retain their existing category. Four localizations cover the remote-rejection title.
+- 23 focused GitCommandLog, GitProcess, GuardedForcePush and OperationFailure tests passed (`/tmp/raygit-remote-reject-tests.log`); localization parity passed (4 languages, 41 tables, 1193 keys), as did `git diff --check`.
+- QA used the disposable local `raygit-remote-reject-qa-1nxys59c/client` and divergent bare `remote.git`, whose pre-receive hook rejects with `ERROR: Protected branch main does not allow force pushes.` Invoked the actual force-push confirmation in the app. The footer and collapsed log showed that precise cause; expanded details retained `--force-with-lease`, `[remote rejected]`, and `(pre-receive hook declined)`. The remote ref remained unchanged. Evidence: `/tmp/raygit-remote-reject-ui.txt` and `/tmp/raygit-remote-reject-ui.png`.
+- Release build passed (`/tmp/raygit-remote-reject-release.log`). Normally quit and updated `/Applications/RayGit.app`; strict signature and executable equality passed. Relaunch retained rayfinder/main with three untracked files and no staged files. No push to an actual server and no source commit were performed.

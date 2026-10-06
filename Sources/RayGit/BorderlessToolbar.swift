@@ -80,9 +80,9 @@ struct BorderlessToolbarView<CommandContent: View>: View {
             }.frame(minWidth: geometry.size.width, minHeight: geometry.size.height)
             }
             }
-            Button { customizing = true } label: { Image(systemName: "slider.horizontal.3").frame(width: 26, height: 26) }.buttonStyle(.plain).help(shellToolbarText("customize"))
-        }.padding(.horizontal, 10).frame(minHeight: model.showsText ? 44 : 36).background(.bar)
-            .frame(height: model.showsText ? 44 : 36)
+            Button { customizing = true } label: { Image(systemName: "slider.horizontal.3").frame(width: 32, height: 28).contentShape(Rectangle()) }.buttonStyle(ToolbarRowButtonStyle(height: 28, minimumWidth: 32)).help(shellToolbarText("customize"))
+        }.padding(.horizontal, 10).frame(minHeight: 36).background(.bar)
+            .frame(height: 36)
             .contextMenu { Button(shellToolbarText("customize")) { customizing = true }; Toggle(shellToolbarText("iconAndText"), isOn: $model.showsText) }
             .sheet(isPresented: $customizing) { palette }
             .onAppear { model.setCommands(commands) }
@@ -100,6 +100,7 @@ struct BorderlessToolbarView<CommandContent: View>: View {
                         Button { model.move(index, by: 1) } label: { Image(systemName: "arrow.down") }.disabled(index == model.identifiers.count - 1)
                         Button { model.remove(at: index) } label: { Image(systemName: "minus.circle") }
                     }
+                    .buttonStyle(ToolbarRowButtonStyle())
                 }
             }.frame(height: 280)
             Menu(shellToolbarText("addItem")) {

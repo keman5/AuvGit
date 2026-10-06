@@ -73,24 +73,35 @@ final class RepositoryStore: ObservableObject {
     private var failureObserver: AnyCancellable?
     private var lastSavedSession: Data?
     var isRestoringViewState = false
-    init(persistsSession: Bool = true) {
+    let followsCurrentBranch: Bool
+    private let usesCheckedHistoryScope: Bool
+    private var lastMainHistoryHead: String?
+    init(persistsSession: Bool = true, followsCurrentBranch: Bool? = nil, usesCheckedHistoryScope: Bool = false) {
         self.persistsSession = persistsSession
+        self.followsCurrentBranch = followsCurrentBranch ?? persistsSession
+        self.usesCheckedHistoryScope = usesCheckedHistoryScope
+        if persistsSession { showMergedCommits = UserDefaults.standard.bool(forKey: "history.workspaceShowMergedCommits") }
         failureObserver = NotificationCenter.default.publisher(for: OperationFailure.notification)
             .receive(on: RunLoop.main).sink { [weak self] notification in
                 guard let self, let event = notification.object as? OperationFailure.Event,
                       event.repository.map({ $0 == self.repositoryURL }) ?? self.persistsSession else { return }
                 self.report(GitError(event.message))
-                if !self.operationLog.prefix(3).contains(where: { $0.error == event.message }) {
-                    self.operationLog.insert(GitCommandLog.applicationFailure(directory: event.repository ?? self.repositoryURL, message: event.message), at: 0)
-                    if self.operationLog.count > 300 { self.operationLog.removeLast() }
+                if !self.commandLog.prefix(3).contains(where: { $0.error == event.message }) {
+                    self.commandLog.insert(GitCommandLog.applicationFailure(directory: event.repository ?? self.repositoryURL, message: event.message), at: 0)
+                    if self.commandLog.count > 300 { self.commandLog.removeLast() }
                 }
             }
         commandObserver = NotificationCenter.default.publisher(for: GitCommandLog.notification)
             .receive(on: RunLoop.main).sink { [weak self] notification in
                 guard let self, let record = notification.object as? GitCommandRecord,
-                      self.repositoryURL == nil || self.repositoryURL?.path == record.directory || self.openingRepositoryPath == record.directory else { return }
-                self.operationLog.insert(record, at: 0)
-                if self.operationLog.count > 300 { self.operationLog.removeLast(self.operationLog.count - 300) }
+                      self.repositoryURL == nil || self.repositoryURL?.path == record.directory || self.openingRepositoryPath == record.directory || (record.userInitiated && record.operationID == self.currentUserOperationID) else { return }
+                if record.userInitiated {
+                    self.userCommandLog.insert(record, at: 0)
+                    if self.userCommandLog.count > 1000 { self.userCommandLog.removeLast(self.userCommandLog.count - 1000) }
+                    return
+                }
+                self.commandLog.insert(record, at: 0)
+                if self.commandLog.count > 300 { self.commandLog.removeLast(self.commandLog.count - 300) }
             }
         guard persistsSession else { return }
         let recovery = RepositorySession.recover(primary: UserDefaults.standard.data(forKey: sessionKey), backup: UserDefaults.standard.data(forKey: sessionKey + ".backup"))
@@ -124,7 +135,7 @@ final class RepositoryStore: ObservableObject {
     }
     private func applyViewState(_ value: RepositoryViewState) {
         commitMessage = value.commitMessage; amend = value.amend; historySearch = value.historySearch; historyAuthor = value.historyAuthor
-        historyPath = value.historyPath; historyRef = value.historyRef; selectedPaths = value.selectedPaths
+        historyPath = followsCurrentBranch ? nil : value.historyPath; historyRef = followsCurrentBranch ? nil : value.historyRef; selectedPaths = value.selectedPaths
         selectedCommit = value.selectedCommit; selectedCommitPath = value.selectedCommitPath; mode = persistsSession ? "workspace" : value.mode; fileFilter = value.fileFilter
         stagedDiff = value.stagedDiff; ignoreWhitespace = value.ignoreWhitespace
     }
@@ -149,7 +160,46 @@ final class RepositoryStore: ObservableObject {
     @Published var repositoryChangeCounts: [String: Int] = [:]
     struct RepositorySyncState: Equatable { let ahead: Int?; let behind: Int?; let conflicts: Int }
     @Published var repositorySyncStates: [String: RepositorySyncState] = [:]
-    @Published var operationLog: [GitCommandRecord] = []
+    @Published private var commandLog: [GitCommandRecord] = []
+    @Published private var userOperationLog: [GitCommandRecord] = []
+    @Published private var userCommandLog: [GitCommandRecord] = []
+    var operationLog: [GitCommandRecord] {
+        let actions = userOperationLog.sorted { $0.date > $1.date }
+        let details = (commandLog + userCommandLog).sorted { $0.date > $1.date }
+        return actions + details
+    }
+    @Published private var latestOperationKey: String?
+    @Published private var latestOperationName = ""
+    var hasLatestOperation: Bool { latestOperationKey != nil }
+    private var operationStarted = Date()
+    private(set) var currentUserOperationID = UUID()
+    var footerStatus: String {
+        if !hasLatestOperation, error == nil, statusKey == "Refreshed · %@ changes · %@ staged" {
+            return L10n.text("Refreshed", table: "OperationLog")
+        }
+        return displayStatus
+    }
+    var displayStatus: String {
+        if let error { return hasLatestOperation ? status + ": " + error : error }
+        return status
+    }
+    func commands(for operation: GitCommandRecord) -> [GitCommandRecord] {
+        guard operation.command.isEmpty, let id = operation.operationID else { return [] }
+        return userCommandLog.filter { $0.operationID == id }.sorted { $0.date < $1.date }
+    }
+    func beginUserOperation(_ name: String) {
+        currentUserOperationID = UUID(); operationStarted = Date(); latestOperationName = name; latestOperationKey = "%@…"; errorMessage = nil
+    }
+    func finishUserOperation(_ name: String, repository: GitRepository, failure: Error? = nil, reportInCurrentWindow: Bool = false) {
+        let cancelled = failure is CancellationError
+        let message = cancelled ? nil : failure.map { GitCommandLog.redact($0.localizedDescription) }
+        userOperationLog.insert(GitCommandLog.userOperation(directory: repository.url, name: name, started: operationStarted, error: message, cancelled: cancelled, operationID: currentUserOperationID), at: 0)
+        if userOperationLog.count > 1000 { userOperationLog.removeLast(userOperationLog.count - 1000) }
+        guard reportInCurrentWindow || self.repository === repository else { return }
+        latestOperationName = name
+        latestOperationKey = cancelled ? "%@ cancelled" : (failure == nil ? "%@ completed" : "%@ failed")
+        if let failure, !cancelled { report(failure) }
+    }
     @Published var files: [GitFile] = []
     @Published var filesGeneration = UUID()
     @Published var branches: [GitBranch] = []
@@ -161,6 +211,7 @@ final class RepositoryStore: ObservableObject {
     @Published var historyNavigationGeneration = UUID()
     @Published var historyStashRef: String?
     @Published var historyStashHash: String?
+    private var activeDetailStashHash: String?
     private var stashUntrackedPaths = Set<String>()
     @Published var staticPreview: FileComparisonSnapshot?
     @Published var selectedCommit: String?
@@ -192,8 +243,11 @@ final class RepositoryStore: ObservableObject {
     @Published var fileFilter = ""
     @Published var historySearch = ""
     @Published var historyAuthor = ""
+    @Published var showMergedCommits = false
     @Published var historyPath: String?
     @Published var historyRef: String?
+    @Published var checkedHistoryRefs: Set<String>?
+    @Published var historyPinnedCommit: String?
     @Published var commitMessage = ""
     @Published var amend = false
     @Published var isBusy = false
@@ -202,7 +256,7 @@ final class RepositoryStore: ObservableObject {
     @Published var hasMore = false
     @Published private var statusKey = "Open a Git repository to begin"
     @Published private var statusArguments: [String] = []
-    var status: String { L10n.text(statusKey, arguments: statusArguments.map { operationName($0) as CVarArg }) }
+    var status: String { latestOperationKey.map { L10n.text($0, arguments: [operationName(latestOperationName)]) } ?? L10n.text(statusKey, arguments: statusArguments.map { operationName($0) as CVarArg }) }
     @Published private var errorMessage: String?
     var error: String? {
         get { errorMessage.map(localizedError) }
@@ -221,7 +275,7 @@ final class RepositoryStore: ObservableObject {
     private func setDiffTitle(_ key: String, arguments: [String] = []) { if diffTitleKey != key { diffTitleKey = key }; if diffTitleArguments != arguments { diffTitleArguments = arguments } }
     private func operationName(_ name: String) -> String { L10n.text(name) }
     private func localizedError(_ message: String) -> String {
-        if let key = GitFailureSummary.key(for: message) { return L10n.text(key, table: "OperationLog") }
+        if let summary = GitFailureSummary.message(for: message, localize: { L10n.text($0, table: "OperationLog") }) { return summary }
         let owned = ["Git operation timed out after 120 seconds.", "Git exited but an external helper kept its output stream open.", "Git output exceeds the 32 MB display limit."]
         if owned.contains(message) { return L10n.text(message) }
         if message.hasPrefix("Git command failed ("), message.hasSuffix(").") {
@@ -303,7 +357,7 @@ final class RepositoryStore: ObservableObject {
             repository = repo; repositoryURL = root
             fileObserver = nil; filesystemRefresh?.cancel()
             let gitDirectory = try await repo.workflowRead(["rev-parse", "--absolute-git-dir"]).trimmingCharacters(in: .newlines)
-            lastObservedState = nil; lastHistoryState = nil
+            lastObservedState = nil; lastHistoryState = nil; lastMainHistoryHead = nil; checkedHistoryRefs = nil; historyPinnedCommit = nil
             let commonPath = try await repo.workflowRead(["rev-parse", "--git-common-dir"]).trimmingCharacters(in: .newlines)
             let commonURL = commonPath.hasPrefix("/") ? URL(fileURLWithPath: commonPath) : root.appendingPathComponent(commonPath).standardizedFileURL
             fileObserver = RepositoryFileObserver(paths: Array(Set([root.path, gitDirectory, commonURL.path]))) { [weak self] in
@@ -313,13 +367,14 @@ final class RepositoryStore: ObservableObject {
             selectedPaths = []; selectedCommit = nil; selectedCommitPath = nil; diffText = ""; conflictPreview = nil
             let restoredView = session.repositories[root.path] ?? session.repositories[url.path] ?? defaultViewState()
             applyViewState(restoredView)
+            if followsCurrentBranch { selectFirstHistoryCommit = true; selectedCommit = nil; selectedCommitPath = nil; historyNavigationGeneration = UUID() }
             if persistsSession, !recentPaths.contains(root.path) {
                 recentPaths.append(root.path)
                 UserDefaults.standard.set(recentPaths, forKey: "recentRepositories")
             }
             isBusy = false; await refresh()
             refreshRecentRepositoryStates()
-            if let hash = restoredView.selectedCommit, (try? await repo.workflowRevision(hash)) != nil {
+            if let hash = restoredView.selectedCommit, !followsCurrentBranch, (try? await repo.workflowRevision(hash)) != nil {
                 selectedCommit = hash; await loadCommitFiles()
                 if let path = restoredView.selectedCommitPath, commitFiles.contains(where: { $0.path == path }) { selectedCommitPath = path; await loadDiff() }
             }
@@ -390,6 +445,14 @@ final class RepositoryStore: ObservableObject {
             setStatus("Refreshed · %@ changes · %@ staged", arguments: [String(files.count), String(stagedCount)])
             let observedState = try await repository.changeState(files: files)
             guard version == repoVersion, refreshReadVersion == refreshVersion else { return }
+            if followsCurrentBranch {
+                let head = result.2 + "|" + ((try? await repository.workflowRevision("HEAD")) ?? "")
+                guard version == repoVersion, refreshReadVersion == refreshVersion else { return }
+                if lastMainHistoryHead != head {
+                    lastMainHistoryHead = head; resetMainHistorySelection()
+                }
+            }
+            if usesCheckedHistoryScope { configureCheckedHistoryRefs() }
             if lastHistoryState != observedState.history {
                 await loadHistory(reset: true)
                 if version == repoVersion, refreshReadVersion == refreshVersion { lastHistoryState = observedState.history }
@@ -448,12 +511,46 @@ final class RepositoryStore: ObservableObject {
             recentSyncTask = nil
         }
     }
+    private func resetMainHistorySelection() {
+        historyRef = nil; historyPath = nil; selectedCommit = nil; selectedCommitPath = nil; commitFiles = []
+        selectFirstHistoryCommit = true; historyNavigationGeneration = UUID()
+    }
+    func setShowMergedCommits(_ value: Bool) {
+        guard showMergedCommits != value else { return }
+        showMergedCommits = value
+        if persistsSession { UserDefaults.standard.set(value, forKey: "history.workspaceShowMergedCommits") }
+        resetMainHistorySelection()
+        Task { await loadHistory(reset: true) }
+    }
+    func configureCheckedHistoryRefs() {
+        guard !followsCurrentBranch, let repositoryURL, checkedHistoryRefs == nil else { return }
+        let available = Set(branches.map(HistoryBranchScope.branchRef)).union(stashes.map(HistoryBranchScope.stashRef)).union(["HEAD", HistoryBranchScope.recyclable, HistoryBranchScope.allStashes])
+        checkedHistoryRefs = HistoryBranchScope.load(repository: repositoryURL).map { HistoryBranchScope.migrate($0, stashes: stashes).intersection(available) }
+            ?? HistoryBranchScope.defaultRefs(branches: branches, branch: branch)
+        if let checkedHistoryRefs { HistoryBranchScope.save(checkedHistoryRefs, repository: repositoryURL) }
+    }
+    func setHistoryBranchChecked(_ ref: String, checked: Bool) {
+        configureCheckedHistoryRefs()
+        let refs = HistoryBranchScope.setting(ref, checked: checked, in: checkedHistoryRefs ?? [], stashes: stashes)
+        checkedHistoryRefs = refs
+        if let repositoryURL { HistoryBranchScope.save(refs, repository: repositoryURL) }
+        historyStashHash = nil; historyStashRef = nil; historyPath = nil; historyPinnedCommit = nil
+        if historyRef?.hasPrefix("refs/tags/") == true { historyRef = ref }
+        selectedCommit = nil; selectedCommitPath = nil; commitFiles = []
+        selectFirstHistoryCommit = true; historyNavigationGeneration = UUID()
+        Task { await loadHistory(reset: true) }
+    }
     func loadHistory(reset: Bool) async {
         guard let repository else { return }
         let version = UUID(); historyVersion = version; loadingHistory = true
         let skip = reset ? 0 : historyLoadedCount
         do {
-            let rows = try await repository.log(limit: RayGitPreferences.historyPageSize, skip: skip, search: historySearch, path: historyPath, ref: historyRef, author: historyAuthor)
+            let stashHashes: [String]
+            if followsCurrentBranch { stashHashes = stashes.map(\.hash) }
+            else if historyPinnedCommit == nil, historyStashHash == nil, historyRef?.hasPrefix("refs/tags/") != true {
+                stashHashes = HistoryBranchScope.selectedStashHashes(checkedHistoryRefs ?? [HistoryBranchScope.allStashes], stashes: stashes)
+            } else { stashHashes = [] }
+            let rows = try await repository.log(limit: RayGitPreferences.historyPageSize, skip: skip, search: historySearch, path: followsCurrentBranch ? nil : historyPath, ref: followsCurrentBranch ? "HEAD" : (historyPinnedCommit ?? historyRef), author: historyAuthor, firstParent: followsCurrentBranch && !showMergedCommits, refs: followsCurrentBranch || historyPinnedCommit != nil || historyStashHash != nil || historyRef?.hasPrefix("refs/tags/") == true ? nil : checkedHistoryRefs.map { HistoryBranchScope.revisionRefs($0, branches: branches, stashes: stashes) }, stashHashes: stashHashes, includeRecyclable: !followsCurrentBranch && historyPinnedCommit == nil && historyStashHash == nil && historyRef?.hasPrefix("refs/tags/") != true && checkedHistoryRefs?.contains(HistoryBranchScope.recyclable) == true)
             guard historyVersion == version else { return }
             let updatedCommits = reset ? rows : commits + rows.filter { row in !commits.contains(where: { $0.hash == row.hash }) }
             if commits != updatedCommits { commits = updatedCommits }; historyLoadedCount = skip + rows.count; hasMore = rows.count == RayGitPreferences.historyPageSize
@@ -462,7 +559,7 @@ final class RepositoryStore: ObservableObject {
                 await loadCommitFiles()
             }
             if let selectedCommit, !commits.contains(where: { $0.hash == selectedCommit }) {
-                if let selected = try? await repository.log(limit: 1, ref: selectedCommit).first, historyVersion == version { commits.append(selected) }
+                if !followsCurrentBranch, checkedHistoryRefs == nil || historyStashHash != nil, let selected = try? await repository.log(limit: 1, ref: selectedCommit).first, historyVersion == version { commits.append(selected) }
                 else if !isRestoringViewState { self.selectedCommit = nil; commitFiles = []; selectedCommitPath = nil }
             }
         } catch { if historyVersion == version { report(error) } }
@@ -479,6 +576,7 @@ final class RepositoryStore: ObservableObject {
         }
     }
     func showHistory(path: String?, ref: String?) {
+        historyPinnedCommit = nil
         historyStashHash = nil; historyStashRef = nil
         stashUntrackedPaths = []
         if persistsSession {
@@ -502,7 +600,8 @@ final class RepositoryStore: ObservableObject {
         guard let repository, let selectedCommit else { await loadDiff(); return }
         do {
             let result: [GitCommitFile]
-            if historyStashHash == selectedCommit {
+            activeDetailStashHash = historyStashHash == selectedCommit ? selectedCommit : stashes.first(where: { $0.hash == selectedCommit })?.hash
+            if activeDetailStashHash == selectedCommit {
                 let stash = try await StashHistory.files(repository: repository, hash: selectedCommit)
                 guard detailVersion == version else { return }
                 stashUntrackedPaths = stash.untracked
@@ -515,10 +614,11 @@ final class RepositoryStore: ObservableObject {
     }
     func comparisonRevision(for path: String) -> String? {
         guard let hash = selectedCommit else { return nil }
-        return hash == historyStashHash && stashUntrackedPaths.contains(path) ? hash + "^3" : hash
+        return hash == activeDetailStashHash && stashUntrackedPaths.contains(path) ? hash + "^3" : hash
     }
     func loadDiff() async {
         let version = UUID(); diffVersion = version
+        let requestedIgnoreWhitespace = ignoreWhitespace
         let identity = (repositoryURL?.path ?? "") + "|" + mode + "|" + (mode == "history" ? (selectedCommit ?? "") + "|" + (selectedCommitPath ?? "") : (selectedFile?.path ?? "") + "|\(stagedDiff)")
         if displayedDiffIdentity != identity {
             displayedDiffIdentity = identity
@@ -527,7 +627,7 @@ final class RepositoryStore: ObservableObject {
             diffRevisionFilename = nil; diffLeftRevision = nil; diffRightRevision = nil
         }
         guard let repository else { loadingDiff = false; return }
-        if mode == "history", let hash = selectedCommit, hash == historyStashHash, let path = selectedCommitPath {
+        if mode == "history", let hash = selectedCommit, hash == activeDetailStashHash, let path = selectedCommitPath {
             loadingDiff = true
             setDiffTitle("%@  /  %@", arguments: [String(hash.prefix(8)), path])
             do {
@@ -536,7 +636,9 @@ final class RepositoryStore: ObservableObject {
                 let preview = try await repository.comparisonPreview(target: target)
                 guard diffVersion == version else { return }
                 if preview.requiresStaticPreview { if conflictPreview != nil { conflictPreview = nil }; staticPreview = preview; loadingDiff = false; return }
-                let text = try await StashHistory.diff(repository: repository, hash: hash, path: path, untracked: stashUntrackedPaths.contains(path))
+                let raw = try await StashHistory.diff(repository: repository, hash: hash, path: path, untracked: stashUntrackedPaths.contains(path))
+                guard diffVersion == version else { return }
+                let text = try await preview.displayPatch(fallingBackFrom: raw, ignoreWhitespace: requestedIgnoreWhitespace)
                 guard diffVersion == version else { return }; publishDiffText(text)
             } catch { if diffVersion == version { report(error) } }
             if diffVersion == version { loadingDiff = false }
@@ -566,7 +668,9 @@ final class RepositoryStore: ObservableObject {
             let preview = try await repository.comparisonPreview(target: target)
             guard diffVersion == version else { return }
             if preview.requiresStaticPreview { if conflictPreview != nil { conflictPreview = nil }; staticPreview = preview; loadingDiff = false; return }
-            let text = try await repository.diff(target: target, ignoreWhitespace: ignoreWhitespace)
+            let raw = try await repository.diff(target: target, ignoreWhitespace: requestedIgnoreWhitespace)
+            guard diffVersion == version else { return }
+            let text = try await preview.displayPatch(fallingBackFrom: raw, ignoreWhitespace: requestedIgnoreWhitespace)
             guard diffVersion == version else { return }; publishDiffText(text)
         } catch { if diffVersion == version { report(error) } }
         if diffVersion == version { loadingDiff = false }
@@ -599,15 +703,48 @@ final class RepositoryStore: ObservableObject {
         if diffLeftRevision != left { diffLeftRevision = left }
         if diffRightRevision != right { diffRightRevision = right }
     }
-    func operation(_ name: String, body: @escaping (GitRepository) async throws -> Void) {
+    func operation(_ name: String, onFailure: ((Error) -> Void)? = nil, body: @escaping (GitRepository) async throws -> Void) {
         guard let repository, !isBusy else { return }
         refreshReadVersion = UUID(); refreshingRepository = nil; diffVersion = UUID(); historyVersion = UUID()
-        isBusy = true; errorMessage = nil; setStatus("%@…", arguments: [name])
+        isBusy = true; beginUserOperation(name)
+        let operationID = currentUserOperationID
         Task {
-            do { try await body(repository); if !persistsSession { NotificationCenter.default.post(name: .rayGitWorktreeChanged, object: repository.url) }; activityRecords.insert((Date(), name, nil), at: 0); setStatus("%@ completed", arguments: [name]) }
-            catch { report(error) }
+            var failure: Error?
+            do { try await GitCommandLog.$operationID.withValue(operationID) { try await GitCommandLog.$userInitiated.withValue(true) { try await body(repository) } }; if !persistsSession { NotificationCenter.default.post(name: .rayGitWorktreeChanged, object: repository.url) }; activityRecords.insert((Date(), name, nil), at: 0); setStatus("%@ completed", arguments: [name]) }
+            catch { failure = error }
+            finishUserOperation(name, repository: repository, failure: failure)
             isBusy = false; await refresh()
+            if let failure { onFailure?(failure) }
         }
+    }
+    /// Runs against the captured sidebar target, even when another repository is active.
+    func performRepositoryContextOperation(_ name: String, path: String, body: @escaping (GitRepository) async throws -> Void) async -> Bool {
+        guard !isBusy else { return false }
+        let target = GitRepository(url: URL(fileURLWithPath: path))
+        let label = name + " · " + target.url.lastPathComponent
+        isBusy = true; beginUserOperation(label)
+        let operationID = currentUserOperationID
+        var failure: Error?
+        do {
+            try await GitCommandLog.$operationID.withValue(operationID) {
+                try await GitCommandLog.$userInitiated.withValue(true) { try await body(target) }
+            }
+            activityRecords.insert((Date(), label, nil), at: 0)
+            NotificationCenter.default.post(name: .rayGitWorktreeChanged, object: target.url)
+        } catch { failure = error }
+        finishUserOperation(label, repository: target, failure: failure, reportInCurrentWindow: true)
+        isBusy = false
+        await refreshRepositoryContext(path: path)
+        return failure == nil
+    }
+    func refreshRepositoryContext(path: String) async {
+        if repositoryURL?.standardizedFileURL.path == URL(fileURLWithPath: path).standardizedFileURL.path { await refresh(); return }
+        let target = GitRepository(url: URL(fileURLWithPath: path))
+        guard let files = try? await target.status() else { return }
+        let text = try? await target.workflowRead(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
+        let counts = text?.split(whereSeparator: { $0.isWhitespace }).compactMap { Int($0) } ?? []
+        repositoryChangeCounts[path] = files.count
+        repositorySyncStates[path] = RepositorySyncState(ahead: counts.count == 2 ? counts[0] : nil, behind: counts.count == 2 ? counts[1] : nil, conflicts: files.filter(\.isConflict).count)
     }
     var canStageSelection: Bool { repository != nil && !isBusy && !WorkspaceFileActionTargets.paths(for: .stage, files: files, selection: selectedPaths).isEmpty }
     var canUnstageSelection: Bool { repository != nil && !isBusy && !WorkspaceFileActionTargets.paths(for: .unstage, files: files, selection: selectedPaths).isEmpty }
@@ -627,6 +764,14 @@ final class RepositoryStore: ObservableObject {
             try await repo.commit(message: message, amend: amend)
             await MainActor.run { self.commitMessage = ""; self.amend = false }
         }
+    }
+    func completeNetworkOperation(_ name: String, repository: GitRepository) {
+        guard self.repository === repository else { return }
+        errorMessage = nil
+        finishUserOperation(name, repository: repository)
+        activityRecords.insert((Date(), name, nil), at: 0)
+        setStatus("%@ completed", arguments: [name])
+        if !persistsSession { NotificationCenter.default.post(name: .rayGitWorktreeChanged, object: repository.url) }
     }
     func report(_ error: Error) {
         guard !(error is CancellationError) else { return }

@@ -1,0 +1,12 @@
+"Edit Remote URL" = "编辑远程地址";
+"Edit Ignore File" = "编辑忽略文件";
+"No remotes configured" = "尚未配置远程仓库";
+"Remote" = "远程仓库";
+"Fetch URL" = "拉取地址";
+"Edit explicit push URL" = "编辑独立推送地址";
+"Push URL" = "推送地址";
+"Empty removes the first explicit push URL" = "留空可移除第一个独立推送地址";
+"Only the first push URL is edited" = "仅编辑第一个推送地址";
+"Reload" = "重新加载";
+"Cancel" = "取消";
+"Save" = "保存";

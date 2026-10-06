@@ -1,0 +1,14 @@
+"compare" = "Compare";
+"history" = "File History";
+"stage" = "Stage";
+"unstage" = "Unstage";
+"discard" = "Discard Changes…";
+"rename" = "Rename…";
+"ignore" = "Ignore";
+"trash" = "Move to Trash…";
+"copyName" = "Copy Name";
+"copyRelativePath" = "Copy Relative Path";
+"copyPath" = "Copy Absolute Path";
+"open" = "Open with Default Application";
+"reveal" = "Reveal in Finder";
+"trashMessage" = "Move these items to Trash? You can restore them from Trash.";

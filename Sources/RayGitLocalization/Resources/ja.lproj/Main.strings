@@ -79,3 +79,5 @@
 
 "toolbarFlexibleSpace" = "伸縮スペース";
 "toolbarSeparator" = "縦区切り線";
+
+"stagedRatio" = "%ld/%ld ステージ済み";

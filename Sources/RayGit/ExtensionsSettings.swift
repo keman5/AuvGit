@@ -66,7 +66,7 @@ struct ExtensionsSettings: View {
             Section(compareText("Updates")) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(compareText("Trusted HTTPS Manifest URL"))
-                    TextField(compareText("Trusted HTTPS Manifest URL"), text: $manifestURL).labelsHidden().textFieldStyle(.roundedBorder)
+                    StableTextField(compareText("Trusted HTTPS Manifest URL"), text: $manifestURL).labelsHidden().textFieldStyle(.roundedBorder)
                 }
                 HStack(spacing: 8) {
                     if checking { ProgressView().controlSize(.small) }
@@ -91,14 +91,14 @@ struct ExtensionsSettings: View {
     }
     private func field(_ title: String, text: Binding<String>) -> some View {
         LabeledContent(compareText(title)) {
-            TextField(compareText(title), text: text).labelsHidden().textFieldStyle(.roundedBorder).frame(maxWidth: 280)
+            StableTextField(compareText(title), text: text).labelsHidden().textFieldStyle(.roundedBorder).frame(maxWidth: 280)
         }
     }
     private func shortcut(_ title: String, _ key: Binding<String>) -> some View {
         LabeledContent(compareText(title)) {
             HStack(spacing: 8) {
                 Text("⌘").foregroundStyle(.secondary)
-                TextField(compareText(title), text: Binding(get: { key.wrappedValue }, set: { new in
+                StableTextField(compareText(title), text: Binding(get: { key.wrappedValue }, set: { new in
                     let value = new.lowercased()
                     let index = ["Open Repository", "Refresh", "Stage", "Commit"].firstIndex(of: title) ?? 0
                     let other = keys.enumerated().filter { $0.offset != index }.map(\.element)

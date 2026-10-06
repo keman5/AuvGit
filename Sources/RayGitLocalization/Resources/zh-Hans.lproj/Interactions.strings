@@ -6,7 +6,7 @@
 "Open Repository" = "打开仓库";
 "Reveal in Finder" = "在 Finder 中显示";
 "Copy Path" = "复制路径";
-"Remove from Recent" = "从最近仓库移除";
+"Remove Repository" = "移除仓库";
 "Add Repository…" = "添加仓库…";
 "Local Branches" = "本地分支";
 "Remote Branches" = "远程分支";

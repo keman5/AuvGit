@@ -1,7 +1,7 @@
 "diff.title" = "代码对比";
-"diff.hunkCount" = "%ld 个变更块";
-"diff.previousHunk" = "上一个变更块";
-"diff.nextHunk" = "下一个变更块";
+"diff.hunkCount" = "%ld 个变更";
+"diff.previousHunk" = "上一个变更";
+"diff.nextHunk" = "下一个变更";
 "diff.view" = "视图";
 "diff.sideBySide" = "并排";
 "diff.unified" = "合并";

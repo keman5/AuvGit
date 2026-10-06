@@ -25,3 +25,8 @@
 "Save" = "Save";
 "Codex generation failed; check login, executable and model" = "Codex generation failed; check login, executable and model";
 "Uses your current Codex login and model provider; tools and project settings remain isolated." = "Uses your current Codex login and model provider; tools and project settings remain isolated.";
+"Staged patch limit (KB)" = "Staged patch limit (KB)";
+"Staged diff exceeds the configured limit" = "Staged diff exceeds the configured limit";
+"Generate from staged summary" = "Generate from staged summary";
+"Staged summary is too large; select fewer staged files" = "Staged summary is too large; select fewer staged files";
+"Increase the staged patch limit in AI settings, or generate from staged file names and change counts. Summary mode cannot describe code details." = "Increase the staged patch limit in AI settings, or generate from staged file names and change counts. Summary mode cannot describe code details.";

@@ -33,17 +33,17 @@ struct GitPreferencesView: View {
     var body: some View {
         Form {
             Section(gitPrefsText("Git executable")) {
-                TextField(gitPrefsText("Absolute path"), text: $path)
+                StableTextField(gitPrefsText("Absolute path"), text: $path)
                 Button(gitPrefsText("Choose…")) {
                     let panel = NSOpenPanel(); panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
                     if panel.runModal() == .OK, let url = panel.url { path = url.path }
                 }
             }
             Section(gitPrefsText("Global identity and signing")) {
-                TextField(gitPrefsText("Full name"), text: $identity.name)
-                TextField(gitPrefsText("Email"), text: $identity.email)
+                StableTextField(gitPrefsText("Full name"), text: $identity.name)
+                StableTextField(gitPrefsText("Email"), text: $identity.email)
                 Picker(gitPrefsText("Signing format (openpgp, x509, ssh)"), selection: $identity.signingFormat) { Text(gitPrefsText("Git default")).tag(""); Text("OpenPGP").tag("openpgp"); Text("SSH").tag("ssh"); Text("X.509").tag("x509"); if !["", "openpgp", "ssh", "x509"].contains(identity.signingFormat) { Text(identity.signingFormat).tag(identity.signingFormat) } }
-                TextField(gitPrefsText("Signing key identifier"), text: $identity.signingKey)
+                StableTextField(gitPrefsText("Signing key identifier"), text: $identity.signingKey)
                 Picker(gitPrefsText("Sign commits"), selection: $identity.signCommits) { Text(gitPrefsText("Git default")).tag(""); Text(gitPrefsText("Enabled")).tag("true"); Text(gitPrefsText("Disabled")).tag("false"); if !["", "true", "false"].contains(identity.signCommits) { Text(identity.signCommits).tag(identity.signCommits) } }
                 Text(gitPrefsText("These are global Git settings for all repositories. Repository settings may override them. Only changed fields are written; empty fields remove the global key.")).font(.caption).foregroundStyle(.secondary)
                 Button(gitPrefsText("Apply Global Configuration")) {
@@ -90,11 +90,11 @@ struct NetworkPreferencesView: View {
                     Text(gitPrefsText("Disable default proxy")).tag("off")
                     Text(gitPrefsText("Manual HTTP(S) proxy")).tag("manual")
                 }
-                if mode == "manual" { TextField("https://proxy.example:8080", text: $proxy) }
+                if mode == "manual" { StableTextField("https://proxy.example:8080", text: $proxy) }
                 Text(gitPrefsText("Only RayGit Git processes are affected. This does not use macOS automatic proxy settings. Proxy URLs cannot contain passwords. Repository URL-specific or remote proxy settings may override this default; SSH proxy uses SSH config.")).font(.caption).foregroundStyle(.secondary)
             }
             Section(gitPrefsText("SSH and Fetch")) {
-                TextField(gitPrefsText("SSH command (optional)"), text: $ssh)
+                StableTextField(gitPrefsText("SSH command (optional)"), text: $ssh)
                 Text(gitPrefsText("An existing GIT_SSH_COMMAND environment variable takes priority. Git interprets this command; do not enter secrets. Default SSH uses BatchMode.")).font(.caption).foregroundStyle(.secondary)
                 Toggle(gitPrefsText("Prune deleted remote branches when fetching"), isOn: $prune)
             }

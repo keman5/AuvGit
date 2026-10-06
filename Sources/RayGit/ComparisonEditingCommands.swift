@@ -90,3 +90,12 @@ class UndoableComparisonTextView: NSTextView {
         historyChanged?()
     }
 }
+
+/// Consumed by the native coordinator only after the expected page is installed.
+struct ComparisonRevealRequest {
+    let id = UUID()
+    let paneID: String
+    let firstLine: Int
+    var number: Int? = nil
+    var range: NSRange? = nil
+}

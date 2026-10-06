@@ -1,7 +1,7 @@
 "diff.title" = "程式碼比較";
-"diff.hunkCount" = "%ld 個變更區塊";
-"diff.previousHunk" = "上一個變更區塊";
-"diff.nextHunk" = "下一個變更區塊";
+"diff.hunkCount" = "%ld 個變更";
+"diff.previousHunk" = "上一個變更";
+"diff.nextHunk" = "下一個變更";
 "diff.view" = "檢視";
 "diff.sideBySide" = "並排";
 "diff.unified" = "合併";

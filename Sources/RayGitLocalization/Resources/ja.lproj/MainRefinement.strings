@@ -9,3 +9,4 @@
 "Discard selected tracked changes, or all eligible tracked changes when none are selected" = "選択した追跡済みの変更を破棄。未選択の場合は対象の追跡済み変更すべて";
 "Choose a commit message template" = "コミットメッセージのテンプレートを選択";
 "Load configured template" = "設定済みテンプレートを読み込む";
+"Open in Finder" = "Finder で開く";

@@ -1,0 +1,14 @@
+"compare" = "比较";
+"history" = "文件历史";
+"stage" = "暂存";
+"unstage" = "取消暂存";
+"discard" = "丢弃更改…";
+"rename" = "重命名…";
+"ignore" = "忽略";
+"trash" = "移到废纸篓…";
+"copyName" = "复制名称";
+"copyRelativePath" = "复制相对路径";
+"copyPath" = "复制绝对路径";
+"open" = "使用默认应用打开";
+"reveal" = "在访达中显示";
+"trashMessage" = "将以下项目移到废纸篓？你可以从废纸篓恢复。";

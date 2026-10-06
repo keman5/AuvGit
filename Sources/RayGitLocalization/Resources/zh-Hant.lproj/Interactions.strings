@@ -6,7 +6,7 @@
 "Open Repository" = "開啟儲存庫";
 "Reveal in Finder" = "在 Finder 中顯示";
 "Copy Path" = "複製路徑";
-"Remove from Recent" = "從最近儲存庫移除";
+"Remove Repository" = "移除儲存庫";
 "Add Repository…" = "加入儲存庫…";
 "Local Branches" = "本機分支";
 "Remote Branches" = "遠端分支";

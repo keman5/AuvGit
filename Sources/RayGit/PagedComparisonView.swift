@@ -13,7 +13,18 @@ struct PagedComparisonView: View {
     var compact = false
     var searchRequested = false
     var onSearchClosed: (() -> Void)? = nil
+    var changeNavigation = 0
+    var onCursorChange: ((ComparisonCursorStatus) -> Void)? = nil
     @State private var page = 0
+    @State private var pendingOverviewFraction: Double?
+    @State private var overviewDragTask: Task<Void, Never>?
+    @State private var overviewMap = ComparisonOverviewLineMap(bands: [])
+    @State private var overviewBands: [[Range<Int>]] = []
+    @State private var overviewCounts: [Int] = []
+    @State private var overviewTask: Task<Void, Never>?
+    @State private var overviewToken = UUID()
+    @State private var selectedChange = -1
+    @State private var revealRequest: ComparisonRevealRequest?
     @State private var pageAnchors: [String: PagedTextAnchor] = [:]
     @State private var anchorHistory: [[String: PagedTextAnchor]] = []
     @State private var columns: [ComparisonEditorColumn] = []
@@ -58,18 +69,22 @@ struct PagedComparisonView: View {
         VStack(spacing: 0) {
             toolbar
             Divider()
-            if let searchError, compactDisplay { Text(searchError).font(.caption).foregroundStyle(.orange).textSelection(.enabled).padding(8) }
             if compactDisplay {
                 DiffPane(text: patch, title: snapshot.path, isLoading: patchBusy, leftRevisionTitle: snapshot.path + " - " + (selectedSource?.1 ?? ""), rightRevisionTitle: snapshot.path + " - " + pagedText("worktree"), forceCompact: true, initialSearchOptions: searchOptions, initialReplacement: replacement)
             } else {
-                ComparisonEditor(columns: columns, wrapLines: false, showLineNumbers: true, synchronizeScroll: true, search: searchOptions.query, navigation: 0, changeNavigation: 0, onEdit: { _, _ in }, languagePath: snapshot.path, editingCommands: commands, searchOptions: searchOptions)
+                ComparisonEditor(columns: columns, wrapLines: false, showLineNumbers: true, synchronizeScroll: true, search: searchOptions.query, navigation: 0, changeNavigation: 0, onEdit: { _, _ in }, languagePath: snapshot.path, onCursorChange: onCursorChange, editingCommands: commands, revealRequest: revealRequest, overviewMarkers: globalOverview, onOverviewJump: jumpToChange, onOverviewNavigate: navigateOverview, searchOptions: searchOptions)
                 ForEach(columns.filter { (firstColumns[$0.id] ?? 1) > 1 }, id: \.id) { column in
                     Text(column.title + ": " + L10n.text("Page starts at column %@; this is a continuation of source line %@.", table: "LargeComparison", arguments: [String(firstColumns[column.id] ?? 1), String(column.firstLine)])).font(.caption).foregroundStyle(.secondary).padding(6)
                 }
             }
         }.onAppear {
             searchOptions = initialSearchOptions; replacement = initialReplacement; compactDisplay = compact; showSearch = searchRequested
-            compactSource = revisions.first?.0 ?? ""; loadPages(); search(); if compactDisplay { loadPatch() }
+            compactSource = revisions.first?.0 ?? ""; loadPages(); loadOverview(); search(); if compactDisplay { loadPatch() }
+        }
+        .onChange(of: changeNavigation) { old, new in
+            guard !overviewBands.isEmpty else { return }
+            let index = selectedChange < 0 ? (new > old ? 0 : overviewBands.count - 1) : (selectedChange + (new > old ? 1 : overviewBands.count - 1)) % overviewBands.count
+            jumpToChange(index)
         }
         .onChange(of: compact) { _, value in compactDisplay = value }
         .onChange(of: compactDisplay) { _, value in if value { loadPatch() } }
@@ -81,10 +96,11 @@ struct PagedComparisonView: View {
         .onChange(of: initialSearchOptions) { _, value in searchOptions = value }
         .onChange(of: initialReplacement) { _, value in replacement = value }
         .onChange(of: searchOptions) { _, _ in search() }
-        .onDisappear { pageTask?.cancel(); searchTask?.cancel(); patchTask?.cancel(); onSearchClosed?() }
+        .onDisappear { pageTask?.cancel(); searchTask?.cancel(); patchTask?.cancel(); overviewTask?.cancel(); overviewDragTask?.cancel(); onSearchClosed?() }
     }
     private var toolbar: some View {
         HStack {
+            if let searchError, compactDisplay { FloatingNotice(message: searchError, guidance: noticeText("Open Search to check the query. Disable Regex to search literal text, or correct the expression and narrow the query. Turn off Changes only to inspect the original file pages.")) }
             Text(pagedText("pagedReadOnly")).font(.caption).foregroundStyle(.secondary)
             Spacer()
             Toggle(largeText("Changes only"), isOn: $compactDisplay).toggleStyle(.checkbox)
@@ -93,7 +109,7 @@ struct PagedComparisonView: View {
                     ForEach(revisions.filter { $0.0 != "worktree" }, id: \.0) { Text($0.1).tag($0.0) }
                 }.frame(width: 120)
             }
-            Button { showSearch.toggle() } label: { Image(systemName: "magnifyingglass").frame(width: 24, height: 24) }
+            Button { showSearch.toggle() } label: { ComparisonToolbarIcon(name: "magnifyingglass") }.buttonStyle(ComparisonToolbarButtonStyle())
                 .popover(isPresented: $showSearch) {
                     VStack(alignment: .leading, spacing: 6) {
                         ComparisonSearchPopover(options: $searchOptions, replacement: $replacement, matchCount: hits.count, matchIndex: matchIndex + 1, isSearching: isSearching,
@@ -109,7 +125,57 @@ struct PagedComparisonView: View {
         }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8).background(.bar)
     }
     private func closeSearch() { showSearch = false; onSearchClosed?(); commands.focusEditor() }
-    private func reloadPresentation() { pageAnchors = [:]; anchorHistory = []; page = 0; loadPages(); search(); if compactDisplay { loadPatch() } }
+    private func reloadPresentation() { pageAnchors = [:]; anchorHistory = []; page = 0; loadPages(); loadOverview(); search(); if compactDisplay { loadPatch() } }
+    private var globalOverview: [ComparisonOverviewMarker] {
+        return overviewBands.enumerated().map { index, band in
+            let source = band[0], bounds = overviewMap.bounds(for: band)
+            return ComparisonOverviewMarker(lower: bounds.0, upper: bounds.1, kind: source.isEmpty ? .addition : band.dropFirst().contains(where: \.isEmpty) ? .deletion : .modification, index: index)
+        }
+    }
+    private func loadOverview() {
+        overviewTask?.cancel(); let token = UUID(); overviewToken = token
+        let values = texts; overviewBands = []; selectedChange = -1
+        overviewTask = Task {
+            let task = Task.detached { () throws -> ([[Range<Int>]], [Int], ComparisonOverviewLineMap) in
+                try Task.checkCancellation()
+                let source = values.map { $0.2 }
+                let alignment = ComparisonAlignment(texts: source)
+                let bands = ComparisonChangeNavigation(texts: source, cachedAlignment: alignment).bands
+                try Task.checkCancellation()
+                return (bands, source.map { $0.reduce(1) { $1 == "\n" ? $0 + 1 : $0 } }, ComparisonOverviewLineMap(bands: alignment.bands))
+            }
+            do {
+                let value = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+                guard overviewToken == token else { return }
+                overviewBands = value.0; overviewCounts = value.1; overviewMap = value.2
+            } catch { }
+        }
+    }
+    private func navigateOverview(_ fraction: Double) {
+        pendingOverviewFraction = fraction
+        guard overviewDragTask == nil else { return }
+        overviewDragTask = Task {
+            while !Task.isCancelled {
+                do { try await Task.sleep(nanoseconds: 60_000_000); try Task.checkCancellation() } catch { break }
+                guard let fraction = pendingOverviewFraction else { break }
+                pendingOverviewFraction = nil
+                let lines = overviewMap.lines(at: fraction)
+                guard lines.count == texts.count else { continue }
+                selectedChange = -1; compactDisplay = false
+                pageAnchors = Dictionary(uniqueKeysWithValues: texts.enumerated().map { ($0.element.0, PagedTextAnchor(line: lines[$0.offset] + 1, column: 1)) })
+                anchorHistory = []; page = max(0, lines[0] / 500); loadPages()
+            }
+            overviewDragTask = nil
+        }
+    }
+    private func jumpToChange(_ index: Int) {
+        guard overviewBands.indices.contains(index), overviewBands[index].count == texts.count else { return }
+        selectedChange = index; compactDisplay = false
+        pageAnchors = Dictionary(uniqueKeysWithValues: texts.enumerated().map { pane, value in
+            (value.0, PagedTextAnchor(line: overviewBands[index][pane].lowerBound + 1, column: 1))
+        })
+        anchorHistory = []; page = max(0, overviewBands[index][0].lowerBound / 500); loadPages()
+    }
     private func nextPage() {
         anchorHistory.append(pageAnchors)
         pageAnchors = Dictionary(uniqueKeysWithValues: columns.map { column in
@@ -150,7 +216,12 @@ struct PagedComparisonView: View {
                 firstColumns = Dictionary(uniqueKeysWithValues: pages.map { ($0.0, $0.3) })
                 hasNext = pages.contains { $0.2.hasNext }
                 pageAnchors = Dictionary(uniqueKeysWithValues: pages.map { ($0.0, PagedTextAnchor(line: $0.2.firstLine, column: $0.3)) })
-                if let hit { let location = hit.1.pageLocation(maximumUTF16: 100_000); DispatchQueue.main.async { commands.revealRange(paneID: hit.0, range: location.range) } }
+                if let hit, let selected = pages.first(where: { $0.0 == hit.0 }) {
+                    let location = hit.1.pageLocation(maximumUTF16: 100_000)
+                    revealRequest = ComparisonRevealRequest(paneID: hit.0, firstLine: selected.2.firstLine, range: location.range)
+                } else if let first = pages.first {
+                    revealRequest = ComparisonRevealRequest(paneID: first.0, firstLine: first.2.firstLine, number: first.2.firstLine)
+                }
             } catch is CancellationError {}
             catch { if pageToken == token { searchError = largeText(error.localizedDescription) } }
         }

@@ -19,10 +19,12 @@ public struct PartialStagingSnapshot: Sendable {
 }
 
 extension GitRepository {
-    public func partialStaging(path: String, unstage: Bool) async throws -> PartialStagingSnapshot {
-        let file = try await fileComparison(path: path)
+    public func partialStaging(path: String, unstage: Bool, snapshot: FileComparisonSnapshot? = nil) async throws -> PartialStagingSnapshot {
+        if let snapshot, snapshot.path != path { throw GitError("Comparison snapshot does not match the requested path.") }
+        let file: FileComparisonSnapshot
+        if let snapshot { file = snapshot } else { file = try await fileComparison(path: path) }
         let args = ["diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--no-color"] + (unstage ? ["--cached", "-R"] : []) + ["--", path]
-        let original = try await status().first { $0.path == path }?.originalPath
+        let original = file.status?.originalPath
         let patch: String
         if unstage, original != nil, file.index.exists, let before = file.index.data, let after = file.head.data {
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

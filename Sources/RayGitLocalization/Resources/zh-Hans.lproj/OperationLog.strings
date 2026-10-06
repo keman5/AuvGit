@@ -31,5 +31,13 @@
 "SSH host key verification failed" = "SSH 主机密钥验证失败";
 "Commit signing failed" = "提交签名失败";
 "Git hook rejected the operation" = "Git 钩子拒绝了操作";
+"Remote rejected the push" = "远端拒绝了推送";
 "Git LFS operation failed" = "Git LFS 操作失败";
 "Disk is full" = "磁盘空间不足";
+
+"Remote changed; preview and confirm force push again" = "远端已更新，请重新预览并确认强制推送";
+"Branch or push configuration changed; preview and confirm force push again" = "分支或推送配置已变化，请重新预览并确认强制推送";
+
+"Cancelled" = "已取消";
+
+"Refreshed" = "已刷新";

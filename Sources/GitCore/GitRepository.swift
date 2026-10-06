@@ -36,18 +36,50 @@ public actor GitRepository {
         if symbolic.code == 0 { return symbolic.text.trimmingCharacters(in: .newlines) }
         return "Detached " + (try await run(["rev-parse", "--short", "HEAD"])).text.trimmingCharacters(in: .newlines)
     }
-    public func log(limit: Int = 200, skip: Int = 0, search: String = "", path: String? = nil, ref: String? = nil, author: String = "") async throws -> [GitCommit] {
+    public func log(limit: Int = 200, skip: Int = 0, search: String = "", path: String? = nil, ref: String? = nil, author: String = "", firstParent: Bool = false, refs: [String]? = nil, stashHashes: [String] = [], includeRecyclable: Bool = false) async throws -> [GitCommit] {
+        if let refs, refs.isEmpty, stashHashes.isEmpty, !includeRecyclable { return [] }
         var args = ["log", "--topo-order", "-z", "--format=%H%x00%P%x00%an%x00%at%x00%s%x00%B%x00%D%x00%ae%x00%cn%x00%ce%x00%ct"]
+        if firstParent { args.append("--first-parent") }
         if path == nil { args += ["--max-count=\(max(0,limit))", "--skip=\(max(0,skip))"] }
         if path == nil && !author.isEmpty { args += ["--fixed-strings", "--regexp-ignore-case", "--author=" + author] }
         if path == nil && !search.isEmpty { args += ["--fixed-strings", "--regexp-ignore-case", "--grep=" + search] }
         let head = try await run(["rev-parse", "--verify", "HEAD"], allowedCodes: [0, 128])
-        if let ref { args.append(try await validatedCommit(ref)) }
+        if refs == ["HEAD"], head.code != 0, stashHashes.isEmpty { return [] }
+        if ref == "HEAD", refs == nil, head.code != 0, stashHashes.isEmpty { return [] }
+        var revisionInput: URL?
+        defer { if let revisionInput { try? FileManager.default.removeItem(at: revisionInput) } }
+        if includeRecyclable || !stashHashes.isEmpty {
+            // Enumerate normal history independently so stash index/untracked parents
+            // do not enter the log, and first-parent applies only to branch commits.
+            var selected = Set(includeRecyclable ? try await recyclableCommitHashes() : [])
+            for hash in Set(stashHashes) { selected.insert(try await validatedCommit(hash)) }
+            let normalRefs = refs ?? (ref.map { [$0] } ?? [])
+            var revisions: [String] = []
+            for value in Set(normalRefs).sorted() {
+                if value == "HEAD", head.code != 0 { continue }
+                revisions.append(try await validatedCommit(value))
+            }
+            if refs == nil, ref == nil, !stashHashes.isEmpty {
+                revisions += ["--exclude=refs/stash", "--all"]
+                if head.code == 0 { revisions.append("HEAD") }
+            }
+            if !revisions.isEmpty {
+                let traversal = ["rev-list"] + (firstParent ? ["--first-parent"] : []) + revisions + ["--"]
+                selected.formUnion(try await run(traversal).text.split(separator: "\n").map(String.init))
+            }
+            if selected.isEmpty { return [] }
+            let input = FileManager.default.temporaryDirectory.appendingPathComponent("raygit-history-" + UUID().uuidString)
+            try Data((selected.sorted().joined(separator: "\n") + "\n").utf8).write(to: input, options: .atomic)
+            revisionInput = input
+            args += ["--no-walk=sorted", "--stdin"]
+        } else if let refs {
+            for value in Set(refs).sorted() { args.append(try await validatedCommit(value)) }
+        } else if let ref { args.append(try await validatedCommit(ref)) }
         else if path != nil { if head.code == 0 { args.append("HEAD") } }
         else { args.append("--all"); if head.code == 0 { args.append("HEAD") } }
         if let path { try validatePath(path); args += ["--follow", "--", path] }
         else { args.append("--") }
-        let output = try await run(args, allowedCodes: [0, 128])
+        let output = try await GitProcess.run(at: url, arguments: args, allowedCodes: [0, 128], inputFile: revisionInput)
         if output.code != 0 { if (try await run(["show-ref"], allowedCodes: [0, 1])).code == 1 { return [] }; throw GitError(output.error) }
         let tokens = fields(output.data)
         var result: [GitCommit] = []
@@ -61,6 +93,19 @@ public actor GitRepository {
             return Array(matching.dropFirst(max(0, skip)).prefix(max(0, limit)))
         }
         return result
+    }
+    /// Reflog-retained commits that no ordinary ref or current HEAD can reach.
+    /// This is read-only and does not run fsck, prune, or expire reflogs.
+    public func recyclableCommitHashes() async throws -> [String] {
+        var args = ["rev-list", "--reflog", "--not", "--all"]
+        if (try await run(["rev-parse", "--verify", "HEAD"], allowedCodes: [0, 128])).code == 0 { args.append("HEAD") }
+        args.append("--")
+        return try await run(args).text.split(separator: "\n").map(String.init)
+    }
+    /// Full names retain local/remote identity even when their display names collide.
+    public func branchesContaining(commit: String) async throws -> [String] {
+        let hash = try await validatedCommit(commit)
+        return try await run(["for-each-ref", "--contains=" + hash, "--format=%(refname)", "refs/heads", "refs/remotes"]).text.split(separator: "\n").map(String.init)
     }
     public func commitFiles(hash: String) async throws -> [GitCommitFile] {
         let tokens = fields(try await run(["show", "--format=", "--root", "--first-parent", "--name-status", "-M", "-z", hash, "--"]).data)
@@ -194,8 +239,8 @@ public actor GitRepository {
     public func pull() async throws { _ = try await runNetwork(.pull, progress: { _ in }) }
     public func push() async throws { _ = try await runNetwork(.push, progress: { _ in }) }
     public func stashes() async throws -> [GitStash] {
-        let tokens = fields(try await run(["stash", "list", "-z", "--format=%gd%x00%gs"]).data)
-        return stride(from: 0, to: max(0,tokens.count - 1), by: 2).map { GitStash(ref: tokens[$0], subject: tokens[$0+1]) }
+        let tokens = fields(try await run(["stash", "list", "-z", "--format=%gd%x00%gs%x00%H"]).data)
+        return stride(from: 0, to: max(0,tokens.count - 2), by: 3).map { GitStash(ref: tokens[$0], subject: tokens[$0+1], hash: tokens[$0+2]) }
     }
     public func stash(message: String) async throws { _ = try await run(["stash", "push", "--include-untracked", "-m", message]) }
     public func applyStash(ref: String) async throws { _ = try await run(["stash", "apply", ref]) }

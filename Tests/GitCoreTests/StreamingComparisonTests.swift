@@ -7,6 +7,36 @@ final class StreamingComparisonTests: XCTestCase {
         try data.write(to: file)
         return file
     }
+    func testSparseLineNavigationUsesExactUTF8OffsetsAndClamps() async throws {
+        let prefix = "😀第一行\n" + String(repeating: "line\n", count: 9_000)
+        let text = prefix + String(repeating: "é", count: 80_000) + "\nlast\n"
+        let file = try fixture(Data(text.utf8)); defer { try? FileManager.default.removeItem(at: file) }
+        let reader = try StreamingTextFile(url: file)
+        let count = try await reader.lineCount()
+        XCTAssertEqual(count, 9_004)
+        let late = try await reader.cursor(atLine: 9_002)
+        XCTAssertEqual(late.offset, UInt64(prefix.utf8.count))
+        let page = try await reader.page(at: late, maximumBytes: 20)
+        XCTAssertTrue(page.text.hasPrefix("éé")); XCTAssertEqual(page.cursor.line, 9_002)
+        let start = try await reader.cursor(atLine: -1)
+        XCTAssertEqual(start, .start)
+        let end = try await reader.cursor(atLine: Int.max)
+        XCTAssertEqual(end.line, count); XCTAssertEqual(end.offset, UInt64(text.utf8.count))
+        try Data("modified".utf8).write(to: file)
+        do { _ = try await reader.lineCount(); XCTFail("Cached index must validate the snapshot") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("changed")) }
+    }
+    func testLineIndexCancellationAndEmptyFile() async throws {
+        let file = try fixture(Data()); defer { try? FileManager.default.removeItem(at: file) }
+        let reader = try StreamingTextFile(url: file)
+        let count = try await reader.lineCount(); XCTAssertEqual(count, 1)
+        let cursor = try await reader.cursor(atLine: 10); XCTAssertEqual(cursor, .start)
+        let canceled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await reader.cursor(atLine: 1)
+        }
+        do { _ = try await canceled.value; XCTFail("Expected cancellation") } catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+    }
     func testUTF8BoundaryAndLongLineReconstructExactText() async throws {
         let original = "😀你好abcdefghij" + String(repeating: "é😀", count: 500) + "\nlast\n"
         let file = try fixture(Data(original.utf8)); defer { try? FileManager.default.removeItem(at: file) }

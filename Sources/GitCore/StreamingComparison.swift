@@ -21,6 +21,8 @@ public actor StreamingTextFile {
     private let modified: Date
     private let inode: UInt64
     private let temporaryDirectory: URL?
+    private var lineIndex: StreamingLineIndex?
+    private var lineIndexTask: Task<StreamingLineIndex, Error>?
     public init(url: URL, temporaryDirectory: URL? = nil) throws {
         let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
         guard attrs[.type] as? FileAttributeType == .typeRegular,
@@ -42,6 +44,32 @@ public actor StreamingTextFile {
         let result = try await LargeTextSearch.file(url, options: options)
         try checkSnapshot()
         return result
+    }
+    /// Counts logical LF-delimited source lines without loading file contents.
+    public func lineCount() async throws -> Int { try await indexedLines().count }
+    /// Locates a 1-based line using a sparse index and bounded background reads.
+    public func cursor(atLine requested: Int) async throws -> StreamingCursor {
+        let index = try await indexedLines()
+        let line = min(max(1, requested), index.count)
+        let anchor = index.anchors[min((line - 1) / 4096, index.anchors.count - 1)]
+        let file = url
+        let task = Task.detached { try StreamingLineIndex.cursor(file: file, anchor: anchor, line: line) }
+        let result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        try Task.checkCancellation(); try checkSnapshot()
+        return result
+    }
+    private func indexedLines() async throws -> StreamingLineIndex {
+        try Task.checkCancellation(); try checkSnapshot()
+        if let lineIndex { return lineIndex }
+        let task: Task<StreamingLineIndex, Error>
+        if let existing = lineIndexTask { task = existing }
+        else { let file = url; task = Task.detached { try StreamingLineIndex.scan(file: file) }; lineIndexTask = task }
+        do {
+            let value = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+            try Task.checkCancellation(); try checkSnapshot()
+            lineIndex = value; lineIndexTask = nil
+            return value
+        } catch { lineIndexTask = nil; throw error }
     }
     public func comparisonURL() throws -> URL { try checkSnapshot(); return url }
     private func checkSnapshot() throws {
@@ -82,6 +110,46 @@ public actor StreamingTextFile {
         return StreamingTextPage(text: text, cursor: cursor, next: consumed < size ? StreamingCursor(offset: consumed, line: nextLine) : nil, totalBytes: size)
     }
 }
+/// One checkpoint per 4096 lines; buffers remain 64 KiB even for giant lines.
+private struct StreamingLineIndex: Sendable {
+    let count: Int
+    let anchors: [StreamingCursor]
+    static func scan(file: URL) throws -> Self {
+        let handle = try FileHandle(forReadingFrom: file)
+        defer { try? handle.close() }
+        var anchors = [StreamingCursor.start], line = 1, offset: UInt64 = 0
+        while true {
+            try Task.checkCancellation()
+            let bytes = try handle.read(upToCount: 64 * 1024) ?? Data()
+            if bytes.isEmpty { break }
+            guard !bytes.contains(0) else { throw GitError("Binary content cannot be displayed as streaming text.") }
+            for (index, byte) in bytes.enumerated() where byte == 10 {
+                line += 1
+                if (line - 1) % 4096 == 0 { anchors.append(StreamingCursor(offset: offset + UInt64(index + 1), line: line)) }
+            }
+            offset += UInt64(bytes.count)
+        }
+        return Self(count: line, anchors: anchors)
+    }
+    static func cursor(file: URL, anchor: StreamingCursor, line requested: Int) throws -> StreamingCursor {
+        let handle = try FileHandle(forReadingFrom: file)
+        defer { try? handle.close() }
+        try handle.seek(toOffset: anchor.offset)
+        var line = anchor.line, offset = anchor.offset
+        if line == requested { return anchor }
+        while true {
+            try Task.checkCancellation()
+            let bytes = try handle.read(upToCount: 64 * 1024) ?? Data()
+            if bytes.isEmpty { return StreamingCursor(offset: offset, line: line) }
+            for (index, byte) in bytes.enumerated() where byte == 10 {
+                line += 1
+                if line == requested { return StreamingCursor(offset: offset + UInt64(index + 1), line: line) }
+            }
+            offset += UInt64(bytes.count)
+        }
+    }
+}
+
 extension GitRepository {
     public func streamingDiff(path: String, revision: StreamingRevision) async throws -> String {
         switch revision {

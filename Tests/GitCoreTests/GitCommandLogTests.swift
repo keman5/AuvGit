@@ -8,6 +8,17 @@ private final class CommandRecordCapture: @unchecked Sendable {
     var values: [GitCommandRecord] { lock.lock(); defer { lock.unlock() }; return records }
 }
 final class GitCommandLogTests: XCTestCase {
+    func testRemoteRejectionPreservesSanitizedReasonBeforeGenericHookSummary() {
+        let diagnostic = "remote: Counting objects: 100% (10/10), done.\nremote: error: Force pushing to protected branch main is forbidden.\nremote: token=private\nTo https://user:private@host/repo\n! [remote rejected] main -> main (pre-receive hook declined)\nerror: failed to push some refs"
+        XCTAssertEqual(GitFailureSummary.key(for: diagnostic), "Remote rejected the push")
+        let summary = GitFailureSummary.message(for: diagnostic, localize: { "localized: " + $0 })
+        XCTAssertEqual(summary, "localized: Remote rejected the push: error: Force pushing to protected branch main is forbidden. · [redacted]")
+        XCTAssertFalse(summary?.contains("private") ?? true)
+        XCTAssertEqual(GitFailureSummary.message(for: "! [remote rejected] main -> main (protected branch)", localize: { $0 }), "Remote rejected the push: ! [remote rejected] main -> main (protected branch)")
+        XCTAssertEqual(GitFailureSummary.message(for: "remote: error: GH006: Protected branch update failed\nremote: Cannot force-push to this branch\n! [remote rejected] main -> main (pre-receive hook declined)", localize: { $0 }), "Remote rejected the push: error: GH006: Protected branch update failed · Cannot force-push to this branch")
+        XCTAssertEqual(GitFailureSummary.key(for: "remote: error: GH013: Repository rule violations found\npre-receive hook declined"), "Remote rejected the push")
+        XCTAssertEqual(GitFailureSummary.message(for: "pre-push hook failed", localize: { $0 }), "Git hook rejected the operation")
+    }
     func testLongSanitizedOutputKeepsTailAndPreviewPrefix() {
         let source = "token=private\n" + String(repeating: "line\n", count: 20_000) + "END_OF_COMPLETE_LOG_OUTPUT"
         let safe = GitCommandLog.redact(source)

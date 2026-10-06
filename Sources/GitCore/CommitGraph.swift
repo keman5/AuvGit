@@ -19,18 +19,19 @@ public struct CommitGraph: Sendable {
     public let laneCount: Int
     public let frontier: [String]
 
-    public init(commits: [GitCommit]) {
+    public init(commits: [GitCommit], firstParent: Bool = false) {
         var lanes: [String] = []
         var result: [Row] = []
         var maximum = 1
         for commit in commits {
+            let parents = firstParent ? Array(commit.parents.prefix(1)) : commit.parents
             let wasKnown = lanes.contains(commit.hash)
             if !wasKnown { lanes.append(commit.hash) }
             let before = lanes
             let node = before.firstIndex(of: commit.hash)!
             lanes.remove(at: node)
             var insertion = min(node, lanes.count)
-            for parent in commit.parents where !lanes.contains(parent) {
+            for parent in parents where !lanes.contains(parent) {
                 lanes.insert(parent, at: insertion)
                 insertion += 1
             }
@@ -43,7 +44,7 @@ public struct CommitGraph: Sendable {
                     segments.append(Segment(fromLane: index, toLane: target, fromY: 0.5, toY: 1, colorLane: index))
                 }
             }
-            for parent in commit.parents {
+            for parent in parents {
                 if let target = lanes.firstIndex(of: parent) {
                     segments.append(Segment(fromLane: node, toLane: target, fromY: 0.5, toY: 1, colorLane: target))
                 }

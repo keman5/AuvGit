@@ -1,0 +1,14 @@
+"compare" = "比較";
+"history" = "檔案歷史";
+"stage" = "暫存";
+"unstage" = "取消暫存";
+"discard" = "捨棄更改…";
+"rename" = "重新命名…";
+"ignore" = "忽略";
+"trash" = "移到垃圾桶…";
+"copyName" = "複製名稱";
+"copyRelativePath" = "複製相對路徑";
+"copyPath" = "複製絕對路徑";
+"open" = "使用預設應用程式打開";
+"reveal" = "在 Finder 中顯示";
+"trashMessage" = "將以下項目移到垃圾桶？你可以從垃圾桶復原。";

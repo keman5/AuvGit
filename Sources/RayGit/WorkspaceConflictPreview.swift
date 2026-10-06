@@ -42,27 +42,29 @@ struct WorkspaceConflictPreview: View {
                 Text(snapshot.path).font(.system(size: 12, weight: .semibold)).lineLimit(1).truncationMode(.middle)
                 Spacer()
                 Text(resolverText("Conflict %d of %d", blocks.isEmpty ? 0 : min(resolver.selectedBlock + 1, blocks.count), blocks.count)).font(.caption).foregroundStyle(.secondary)
-                Button { selectConflict(resolver.selectedBlock - 1) } label: { Image(systemName: "chevron.up") }
-                    .disabled(blocks.isEmpty || resolver.selectedBlock <= 0)
-                    .help(resolverText("Previous conflict")).accessibilityLabel(resolverText("Previous conflict"))
-                Button { selectConflict(resolver.selectedBlock + 1) } label: { Image(systemName: "chevron.down") }
-                    .disabled(blocks.isEmpty || resolver.selectedBlock >= blocks.count - 1)
-                    .help(resolverText("Next conflict")).accessibilityLabel(resolverText("Next conflict"))
-                Button { showSearch.toggle() } label: { Image(systemName: "magnifyingglass") }
+                HStack(spacing: 2) {
+                    Button { selectConflict(resolver.selectedBlock - 1) } label: { ComparisonToolbarIcon(name: "chevron.up") }.buttonStyle(ComparisonToolbarButtonStyle())
+                        .disabled(blocks.isEmpty || resolver.selectedBlock <= 0)
+                        .help(resolverText("Previous conflict")).accessibilityLabel(resolverText("Previous conflict"))
+                    Button { selectConflict(resolver.selectedBlock + 1) } label: { ComparisonToolbarIcon(name: "chevron.down") }.buttonStyle(ComparisonToolbarButtonStyle())
+                        .disabled(blocks.isEmpty || resolver.selectedBlock >= blocks.count - 1)
+                        .help(resolverText("Next conflict")).accessibilityLabel(resolverText("Next conflict"))
+                }
+                Button { showSearch.toggle() } label: { ComparisonToolbarIcon(name: "magnifyingglass") }.buttonStyle(ComparisonToolbarButtonStyle())
                     .help(comparisonSearchText("Search and replace")).accessibilityLabel(comparisonSearchText("Search and replace"))
                     .popover(isPresented: $showSearch) {
                         ComparisonSearchPopover(options: $searchOptions, replacement: $replacement, matchCount: matches.count, matchIndex: navigationCommands.searchCurrent,
                             onNavigate: { forward in compact = false; navigation += forward ? 1 : -1 },
                             onOpenEditor: onOpenEditorSearch.map { action in { action(searchOptions, replacement) } }, error: searchError, onClose: { showSearch = false; DispatchQueue.main.async { navigationCommands.focusEditor() } })
                     }
-                Button { compact.toggle() } label: { Image(systemName: "line.3.horizontal.decrease") }
+                Button { compact.toggle() } label: { ComparisonToolbarIcon(name: "line.3.horizontal.decrease") }.buttonStyle(ComparisonToolbarButtonStyle())
                     .help(comparisonSearchText("Compact differences")).accessibilityLabel(comparisonSearchText("Compact differences"))
                 Menu {
                     Toggle(L10n.text("wrap", table: "DiffControls"), isOn: $wraps)
                     Toggle(L10n.text("lineNumbers", table: "DiffControls"), isOn: $numbers)
                     Toggle(L10n.text("syncScroll", table: "DiffControls"), isOn: $synchronized)
-                } label: { Image(systemName: "slider.horizontal.3") }
-            }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 6).rayGitChrome()
+                } label: { ComparisonToolbarIcon(name: "slider.horizontal.3") }.buttonStyle(ComparisonToolbarButtonStyle())
+            }.buttonStyle(ToolbarRowButtonStyle(minimumWidth: 22)).controlSize(.small).padding(.horizontal, 12).padding(.vertical, 6).rayGitChrome()
             Divider()
             ZStack {
                 ComparisonEditor(columns: columns, wrapLines: wraps, showLineNumbers: numbers, synchronizeScroll: synchronized, search: searchOptions.query, navigation: navigation, changeNavigation: 0, onEdit: { _, _ in }, languagePath: snapshot.path, resolver: resolver, editingCommands: navigationCommands, scrollsToFirstChangeOnOpen: true, searchOptions: searchOptions)

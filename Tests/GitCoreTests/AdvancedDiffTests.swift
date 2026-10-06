@@ -44,7 +44,7 @@ final class AdvancedDiffTests: XCTestCase {
         let tokens = SyntaxHighlighter.tokens(in: text, path: "file.swift")
         XCTAssertEqual(tokens.map(\.kind), [.comment, .keyword, .string])
         XCTAssertEqual((text as NSString).substring(with: tokens[1].range), "let")
-        XCTAssertTrue(SyntaxHighlighter.tokens(in: text, path: "file.txt").isEmpty)
+        XCTAssertEqual(SyntaxHighlighter.tokens(in: text, path: "file.txt"), tokens)
     }
     func testBOMUTF16DoesNotBecomeBinary() {
         for (bom, encoding) in [([UInt8(0xff), 0xfe], String.Encoding.utf16LittleEndian), ([UInt8(0xfe), 0xff], .utf16BigEndian)] {

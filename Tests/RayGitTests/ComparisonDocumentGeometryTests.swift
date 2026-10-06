@@ -57,6 +57,7 @@ final class ComparisonDocumentGeometryTests: XCTestCase {
         window.contentView = split
         defer { window.close() }
         split.resetDistribution()
+        var initialAlignmentBuildCount: Int?
         for width in [800.0, 420, 1100, 640] {
             split.setFrameSize(NSSize(width: width, height: 300))
             for _ in 0..<5 {
@@ -64,6 +65,8 @@ final class ComparisonDocumentGeometryTests: XCTestCase {
                 coordinator.alignDisplay()
                 try? await Task.sleep(nanoseconds: 1_000_000)
             }
+            if let count = initialAlignmentBuildCount { XCTAssertEqual(coordinator.alignmentBuildCount, count, "Resizing must reuse logical alignment") }
+            else { initialAlignmentBuildCount = coordinator.alignmentBuildCount }
             let scrolls = split.subviews.flatMap { $0.subviews.compactMap { $0 as? NSScrollView } }
             XCTAssertEqual(scrolls.count, 2)
             for scroll in scrolls {

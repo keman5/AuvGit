@@ -12,3 +12,5 @@
 "Select a commit" = "コミットを選択";
 "Name" = "名前";
 "This operation changes the repository. Review the selected commit before continuing." = "この操作はリポジトリを変更します。実行前に選択したコミットを確認してください。";
+
+"Recyclable commits" = "復元可能なコミット";

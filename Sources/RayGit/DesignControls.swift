@@ -3,6 +3,34 @@ import RayGitLocalization
 
 func designText(_ key: String) -> String { L10n.text(key, table: "DesignWorkflows") }
 
+/// A row owns the control height; native button padding must not add another
+/// bezel-sized region around a label that already has its toolbar dimensions.
+struct ToolbarRowButtonStyle: ButtonStyle {
+    var height: CGFloat = 24
+    var minimumWidth: CGFloat = 24
+    @Environment(\.isEnabled) private var isEnabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.frame(minWidth: minimumWidth).frame(height: height)
+            .contentShape(Rectangle())
+            .background(configuration.isPressed ? Color.secondary.opacity(0.12) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 6))
+            .opacity(isEnabled ? 1 : 0.45)
+    }
+}
+
+/// Comparison icons own an exact hit region, including the button style.
+/// A minimum width can still accept an expanded toolbar layout proposal.
+struct ComparisonToolbarButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.frame(width: 22, height: 24).fixedSize()
+            .contentShape(Rectangle())
+            .background(configuration.isPressed ? Color.secondary.opacity(0.12) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 6))
+            .opacity(isEnabled ? 1 : 0.45)
+    }
+}
+
 struct DesignPageHeading: View {
     let title: String
     let subtitle: String

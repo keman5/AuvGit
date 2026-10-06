@@ -8,13 +8,12 @@ struct WorkspaceSearchSheet: View {
     @ObservedObject var store: RepositoryStore
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
-    @FocusState private var focused: Bool
     private func matches(_ value: String) -> Bool { query.isEmpty || value.localizedCaseInsensitiveContains(query) }
     var body: some View {
         VStack(spacing: 0) {
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField(designWorkspaceText("Search files, commits, branches…"), text: $query).textFieldStyle(.plain).focused($focused)
+                StableTextField(designWorkspaceText("Search files, commits, branches…"), text: $query, rounded: false, initialFocus: true)
                 Button(designWorkspaceText("Close")) { dismiss() }
             }.padding(16)
             Divider()
@@ -36,6 +35,6 @@ struct WorkspaceSearchSheet: View {
                     }
                 }
             }.listStyle(.plain).buttonStyle(.plain)
-        }.frame(width: 620, height: 440).background(RayGitStyle.canvas).onAppear { focused = true }
+        }.frame(width: 620, height: 440).background(RayGitStyle.canvas)
     }
 }

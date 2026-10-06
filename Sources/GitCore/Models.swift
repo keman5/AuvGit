@@ -51,7 +51,8 @@ public struct GitStash: Identifiable, Hashable, Sendable {
     public var id: String { ref }
     public let ref: String
     public let subject: String
-    public init(ref: String, subject: String) { self.ref = ref; self.subject = subject }
+    public let hash: String
+    public init(ref: String, subject: String, hash: String = "") { self.ref = ref; self.subject = subject; self.hash = hash }
 }
 public enum DiffTarget: Equatable, Sendable {
     case worktree(path: String, untracked: Bool)

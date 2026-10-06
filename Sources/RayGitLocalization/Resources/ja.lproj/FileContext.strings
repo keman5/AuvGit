@@ -1,0 +1,14 @@
+"compare" = "比較";
+"history" = "ファイル履歴";
+"stage" = "ステージ";
+"unstage" = "ステージ解除";
+"discard" = "変更を破棄…";
+"rename" = "名前を変更…";
+"ignore" = "無視";
+"trash" = "ゴミ箱に移動…";
+"copyName" = "名前をコピー";
+"copyRelativePath" = "相対パスをコピー";
+"copyPath" = "絶対パスをコピー";
+"open" = "デフォルトのアプリケーションで開く";
+"reveal" = "Finder で表示";
+"trashMessage" = "これらの項目をゴミ箱に移動しますか？ゴミ箱から復元できます。";

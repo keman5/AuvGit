@@ -23,8 +23,10 @@
 "untracked" = "未追蹤";
 "modified" = "已修改";
 "added" = "新增";
-"deleted" = "已刪除";
+"deleted" = "已移除";
 "renamed" = "已重新命名";
 "copied" = "已複製";
 "conflict" = "衝突";
 "type" = "類型變更";
+
+"stagedStatus" = "已暫存";

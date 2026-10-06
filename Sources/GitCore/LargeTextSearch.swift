@@ -113,7 +113,7 @@ public enum LargeTextSearch {
 }
 
 public enum LargeTextComparison {
-    public static func patch(source: String, target: String) async throws -> String {
+    public static func patch(source: String, target: String, ignoreWhitespace: Bool = false) async throws -> String {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("raygit-large-diff-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -122,6 +122,6 @@ public enum LargeTextComparison {
             try Task.checkCancellation(); try Data(target.utf8).write(to: directory.appendingPathComponent("modified"))
         }
         try await withTaskCancellationHandler { try await writer.value } onCancel: { writer.cancel() }
-        return try await GitProcess.run(at: directory, arguments: ["diff", "--no-index", "--no-ext-diff", "--no-textconv", "--no-color", "--", "original", "modified"], allowedCodes: [0, 1]).text
+        return try await GitProcess.run(at: directory, arguments: ["diff", "--no-index", "--no-ext-diff", "--no-textconv", "--no-color"] + (ignoreWhitespace ? ["--ignore-all-space"] : []) + ["--", "original", "modified"], allowedCodes: [0, 1]).text
     }
 }

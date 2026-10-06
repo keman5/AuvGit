@@ -12,10 +12,14 @@ struct RepositorySidebar: View {
     @ObservedObject var store: RepositoryStore
     let onAction: (SidebarAction, String) -> Void
     @State private var branchSelection: String?
+    @State private var contextTarget: RepositoryContextTarget?
+    @AppStorage("sidebar.localBranchesExpanded") private var localBranchesExpanded = true
+    @AppStorage("sidebar.remoteBranchesExpanded") private var remoteBranchesExpanded = true
+    @AppStorage("sidebar.stashesExpanded") private var stashesExpanded = true
     var body: some View {
         VSplitView {
             VStack(spacing: 0) {
-                HStack { Text(interactionText("Repositories")).font(.system(size: 13, weight: .semibold)); Spacer(); Button { store.chooseRepository() } label: { Image(systemName: "plus").frame(width: 24, height: 24).contentShape(Rectangle()) }.disabled(store.isBusy) }.padding(.horizontal, 16).frame(height: 42)
+                HStack { Text(interactionText("Repositories")).font(.system(size: 13, weight: .semibold)); Spacer(); Button { store.chooseRepository() } label: { Image(systemName: "plus").font(.system(size: 11, weight: .medium)).frame(width: 18, height: 18).contentShape(Rectangle()) }.buttonStyle(.plain).disabled(store.isBusy) }.padding(.horizontal, 16).frame(height: 32)
                 ScrollView {
                     LazyVStack(spacing: 2) {
                         ForEach(store.recentPaths, id: \.self) { path in repositoryRow(path) }
@@ -25,24 +29,46 @@ struct RepositorySidebar: View {
             VStack(spacing: 0) {
                 HStack { Text(interactionText("Branches")).font(.system(size: 13, weight: .semibold)); Spacer(); RayGitBadge(String(store.branches.count), tint: .secondary) }.padding(.horizontal, 16).frame(height: 42)
                 List(selection: $branchSelection) {
-                    Section(interactionText("Local Branches")) {
+                    branchGroupHeader("Local Branches", isExpanded: $localBranchesExpanded)
+                    if localBranchesExpanded {
                         ForEach(store.branches.filter { !$0.isRemote }) { branch in
                             HStack(spacing: 6) {
                                 Label(branch.name, systemImage: "arrow.triangle.branch").lineLimit(1).truncationMode(.middle)
                                 if branch.isCurrent { Spacer(minLength: 0); Image(systemName: "checkmark.circle.fill").font(.system(size: 11)).accessibilityHidden(true) }
                             }
+                                .frame(height: 18)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 2, leading: 28, bottom: 2, trailing: 8))
                                 .fontWeight(branch.isCurrent ? .semibold : .regular)
                                 .tag("branch:" + branch.name)
                                 .listRowBackground(branch.isCurrent ? RayGitStyle.blue.opacity(0.12) : Color.clear)
                         }
                     }
-                    Section(interactionText("Remote Branches")) {
-                        ForEach(store.branches.filter(\.isRemote)) { branch in Label(branch.name, systemImage: "network").tag("remote:" + branch.name) }
+                    branchGroupHeader("Remote Branches", isExpanded: $remoteBranchesExpanded)
+                    if remoteBranchesExpanded {
+                        ForEach(store.branches.filter(\.isRemote)) { branch in
+                            Label(branch.name, systemImage: "network")
+                                .lineLimit(1).truncationMode(.middle).frame(height: 18)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 2, leading: 28, bottom: 2, trailing: 8))
+                                .tag("remote:" + branch.name)
+                        }
                     }
-                    Section(interactionText("Stashes")) {
-                        ForEach(store.stashes) { stash in Label(stash.subject, systemImage: "archivebox").lineLimit(2).tag("stash:" + stash.ref) }
+                    branchGroupHeader("Stashes", isExpanded: $stashesExpanded)
+                    if stashesExpanded {
+                        ForEach(store.stashes) { stash in
+                            Label(stash.subject, systemImage: "archivebox")
+                                .lineLimit(1).truncationMode(.tail).frame(height: 18)
+                                .listRowSeparator(.hidden)
+                                .help(stash.subject)
+                                .listRowInsets(EdgeInsets(top: 2, leading: 28, bottom: 2, trailing: 8))
+                                .tag("stash:" + stash.ref)
+                        }
                     }
-                }.listStyle(.sidebar).font(.system(size: 12)).scrollContentBackground(.hidden)
+                }.listStyle(.plain).font(.system(size: 12)).scrollContentBackground(.hidden)
+                    .contentMargins(.vertical, 0, for: .scrollContent)
+                    .environment(\.defaultMinListRowHeight, 22)
+                    .background(BranchListDensity().allowsHitTesting(false).accessibilityHidden(true))
                     .contextMenu(forSelectionType: String.self) { items in
                         if let item = items.first, items.count == 1 {
                             let target = String(item.dropFirst(item.firstIndex(of: ":").map { item.distance(from: item.startIndex, to: $0) + 1 } ?? 0))
@@ -52,7 +78,7 @@ struct RepositorySidebar: View {
                                 Button(interactionText("Drop Stash…")) { onAction(.stashDrop, target) }.disabled(store.isBusy)
                             } else {
                                 if item.hasPrefix("branch:") {
-                                    Button(interactionText("Check Out…")) { onAction(.checkout, target) }.disabled(store.isBusy || store.branches.first(where: { $0.name == target })?.isCurrent == true)
+                                    Button(interactionText("Check Out…")) { onAction(.checkout, target) }.disabled(store.isBusy)
                                 }
                                 Button(interactionText("Log")) { onAction(.history, (item.hasPrefix("remote:") ? "refs/remotes/" : "refs/heads/") + target) }.disabled(store.isBusy)
                                 if item.hasPrefix("branch:") {
@@ -74,6 +100,22 @@ struct RepositorySidebar: View {
         }
         .controlSize(.small)
         .background(RayGitStyle.sidebar)
+        .sheet(item: $contextTarget) { target in RepositoryContextEditor(store: store, target: target) }
+    }
+    private func branchGroupHeader(_ title: String, isExpanded: Binding<Bool>) -> some View {
+        Button { isExpanded.wrappedValue.toggle() } label: {
+            HStack(spacing: 4) {
+                Image(systemName: isExpanded.wrappedValue ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 9, weight: .semibold)).frame(width: 12)
+                    .accessibilityHidden(true)
+                Text(interactionText(title)).font(.system(size: 11, weight: .semibold))
+                Spacer(minLength: 0)
+            }.foregroundStyle(.secondary).frame(height: 18).contentShape(Rectangle())
+        }.buttonStyle(.plain)
+            .accessibilityLabel(interactionText(title))
+            .accessibilityValue(isExpanded.wrappedValue ? sidebarRefinementText("Expanded") : sidebarRefinementText("Collapsed"))
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 2, leading: 12, bottom: 2, trailing: 8))
     }
     private func repositoryRow(_ path: String) -> some View {
         let active = path == store.repositoryURL?.path
@@ -83,26 +125,26 @@ struct RepositorySidebar: View {
         let symbol = hasConflict ? "exclamationmark.triangle.fill" : hasPush && hasPull ? "arrow.up.arrow.down.circle" : hasPull ? "arrow.down.circle" : hasPush ? "arrow.up.circle" : "folder"
         let status = hasConflict ? sidebarRefinementText("conflicts", conflicts) : hasPush && hasPull ? sidebarRefinementText("pushPull", ahead, behind) : hasPull ? sidebarRefinementText("pull", behind) : hasPush ? sidebarRefinementText("push", ahead) : path
         return Button { if !store.isBusy { onAction(.openRepository, path) } } label: {
-            HStack(spacing: 9) {
-                Image(systemName: "folder").font(.system(size: 15)).frame(width: 24, height: 23)
+            HStack(spacing: 6) {
+                Image(systemName: "folder").font(.system(size: 13)).frame(width: 20, height: 19)
                     .overlay(alignment: .bottomTrailing) {
                         if symbol != "folder" {
-                            Image(systemName: symbol).font(.system(size: 9, weight: .semibold))
+                            Image(systemName: symbol).font(.system(size: 8, weight: .semibold))
                                 .padding(1).background(active ? RayGitStyle.blue : RayGitStyle.sidebar, in: Circle())
                         }
                     }
                     .foregroundStyle(active ? Color.white : hasConflict ? Color.orange : hasPush || hasPull ? RayGitStyle.blue : Color.secondary)
                     .help(status).accessibilityLabel(status)
-                Text(URL(fileURLWithPath: path).lastPathComponent).font(.system(size: 13))
+                Text(URL(fileURLWithPath: path).lastPathComponent).font(.system(size: 12))
                     .lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 0)
-                if let count = store.repositoryChangeCounts[path] {
-                    Text(String(count)).font(.system(size: 11, weight: .medium))
-                        .padding(.horizontal, 6).padding(.vertical, 3)
+                if let count = store.repositoryChangeCounts[path], count > 0 {
+                    Text(String(count)).font(.system(size: 10, weight: .medium))
+                        .padding(.horizontal, 5).padding(.vertical, 1)
                         .background((active ? Color.white : Color.secondary).opacity(0.14), in: RoundedRectangle(cornerRadius: 5))
                 }
             }.foregroundStyle(active ? Color.white : Color.primary)
-                .padding(.horizontal, 10).frame(height: 34).frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10).frame(height: 26).frame(maxWidth: .infinity, alignment: .leading)
                 .background(active ? RayGitStyle.blue : Color.clear, in: RoundedRectangle(cornerRadius: 7))
                 .contentShape(Rectangle())
         }.buttonStyle(.plain).help(path).transaction { $0.animation = nil }
@@ -110,10 +152,61 @@ struct RepositorySidebar: View {
             .contentShape(RoundedRectangle(cornerRadius: 7))
             .contextMenu {
                 Button(interactionText("Open Repository")) { onAction(.openRepository, path) }.disabled(store.isBusy)
+                Button(L10n.text("Refresh Repository")) {
+                    Task { _ = await store.performRepositoryContextOperation(L10n.text("Refresh Repository"), path: path) { repository in _ = try await repository.status() } }
+                }.disabled(store.isBusy)
+                Divider()
+                Button(repositoryContextText("Edit Remote URL")) { contextTarget = RepositoryContextTarget(path: path, editor: .remote) }.disabled(store.isBusy)
+                Button(repositoryContextText("Edit Ignore File")) { contextTarget = RepositoryContextTarget(path: path, editor: .ignore) }.disabled(store.isBusy)
+                Divider()
                 Button(interactionText("Reveal in Finder")) { onAction(.revealRepository, path) }
                 Button(interactionText("Copy Path")) { onAction(.copy, path) }
                 Divider()
-                Button(interactionText("Remove from Recent")) { onAction(.removeRecent, path) }
+                Button(interactionText("Remove Repository")) { onAction(.removeRecent, path) }
             }
+    }
+}
+
+/// SwiftUI's macOS List can keep native row spacing despite compact row insets.
+private struct BranchListDensity: NSViewRepresentable {
+    func makeNSView(context: Context) -> Probe { Probe() }
+    func updateNSView(_ view: Probe, context: Context) { view.configure() }
+
+    final class Probe: NSView {
+        private weak var configuredTable: NSTableView?
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); configure() }
+        override func layout() { super.layout(); configure() }
+
+        func configure() {
+            if let table = configuredTable { apply(to: table); return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                var ancestor = self.superview
+                while let view = ancestor {
+                    if let table = Self.table(in: view) {
+                        self.configuredTable = table
+                        self.apply(to: table)
+                        return
+                    }
+                    ancestor = view.superview
+                }
+            }
+        }
+
+        private func apply(to table: NSTableView) {
+            if table.usesAutomaticRowHeights { table.usesAutomaticRowHeights = false }
+            if table.rowSizeStyle != .custom { table.rowSizeStyle = .custom }
+            if table.rowHeight != 24 { table.rowHeight = 24 }
+            if table.intercellSpacing.height != 0 { table.intercellSpacing.height = 0 }
+        }
+
+        private static func table(in view: NSView) -> NSTableView? {
+            if let table = view as? NSTableView { return table }
+            for child in view.subviews {
+                if let table = table(in: child) { return table }
+            }
+            return nil
+        }
     }
 }

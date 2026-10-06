@@ -7,6 +7,8 @@ struct PartialStagingPane: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
+                if session.isDirty { FloatingNotice(message: compareText("Save drafts before partial staging"), guidance: noticeText("The patch represents saved files. Save your draft first, then select the lines to stage. Saving updates the working file; staging updates the index.")) }
+                if let reason = session.partial?.unavailableReason { FloatingNotice(message: compareText(reason), guidance: noticeText("Partial staging is unavailable for this file. Review it in an external editor, then use Stage File only if you intend to include the entire file. For large generated files, consider adding their repository-relative paths to .gitignore before staging."), command: "git diff --stat") }
                 Picker(compareText("Changes"), selection: $session.unstagePartial) {
                     Text(compareText("Unstaged")).tag(false)
                     Text(compareText("Staged")).tag(true)
@@ -18,8 +20,6 @@ struct PartialStagingPane: View {
                 Button(compareText(session.unstagePartial ? "Unstage File" : session.snapshot?.isConflict == true ? "Save & Mark Resolved" : "Stage File")) { Task { if session.unstagePartial { await session.unstageFile() } else { await session.stage(resolve: false) } } }.disabled(session.isBusy || session.isDirty)
             }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8).background(.bar)
             Divider()
-            if session.isDirty { Text(compareText("Save drafts before partial staging")).font(.caption).foregroundStyle(.orange).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 8) }
-            if let reason = session.partial?.unavailableReason { Text(compareText(reason)).font(.caption).foregroundStyle(.orange).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 8) }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(session.partial?.hunks ?? []) { hunk in

@@ -31,5 +31,13 @@
 "SSH host key verification failed" = "SSHホスト鍵の検証に失敗";
 "Commit signing failed" = "コミット署名に失敗";
 "Git hook rejected the operation" = "Gitフックが操作を拒否";
+"Remote rejected the push" = "リモートがプッシュを拒否しました";
 "Git LFS operation failed" = "Git LFS操作に失敗";
 "Disk is full" = "ディスクの空き容量不足";
+
+"Remote changed; preview and confirm force push again" = "リモートが更新されました。再度プレビューして強制プッシュを確認してください";
+"Branch or push configuration changed; preview and confirm force push again" = "ブランチまたはプッシュ設定が変更されました。再度プレビューして強制プッシュを確認してください";
+
+"Cancelled" = "キャンセル済み";
+
+"Refreshed" = "更新済み";

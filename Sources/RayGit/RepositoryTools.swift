@@ -83,7 +83,7 @@ struct RepositoryTools: View {
     private func field(_ label: String, text: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(workflowText(label)).font(.callout)
-            TextField(workflowText(label), text: text).textFieldStyle(.roundedBorder)
+            StableTextField(workflowText(label), text: text).textFieldStyle(.roundedBorder)
                 .disabled(busy || store.isBusy)
         }
     }
@@ -169,26 +169,48 @@ struct CreateRepositorySheet: View {
     @State private var clone = false
     @State private var source = ""
     @State private var destination = ""
+    @State private var cloneDestination = CloneDestination()
     @State private var busy = false
     @State private var error = ""
+    init(store: RepositoryStore) {
+        self.store = store
+        let draft = RepositoryCreationDraft.load()
+        _clone = State(initialValue: draft.clone)
+        _source = State(initialValue: draft.source)
+        _destination = State(initialValue: draft.destination)
+        _cloneDestination = State(initialValue: draft.cloneDestination)
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(workflowText("Create Repository")).font(.title2.weight(.semibold))
             VStack(alignment: .leading, spacing: 12) {
                 Toggle(workflowText("Clone existing repository"), isOn: $clone)
+                    .onChange(of: clone) { _, value in
+                        if value { cloneDestination.sourceChanged(source); destination = cloneDestination.path }
+                    }
                 if clone {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(workflowText("Clone URL or local path")).font(.callout)
-                        TextField(workflowText("Clone URL or local path"), text: $source).textFieldStyle(.roundedBorder)
+                        StableTextField(workflowText("Clone URL or local path"), text: $source).textFieldStyle(.roundedBorder)
+                            .onChange(of: source) { _, value in
+                                cloneDestination.sourceChanged(value); destination = cloneDestination.path
+                            }
                     }
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     Text(workflowText("Destination folder")).font(.callout)
                     HStack(spacing: 8) {
-                        TextField(workflowText("Destination folder"), text: $destination).textFieldStyle(.roundedBorder)
-                        Button(workflowText("Choose…")) {
+                        StableTextField(workflowText("Destination folder"), text: Binding(get: { destination }, set: {
+                            destination = $0
+                            if clone { cloneDestination.edit($0) }
+                        })).textFieldStyle(.roundedBorder)
+                        Button(workflowText(clone ? "Choose parent folder…" : "Choose…")) {
                             let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
-                            if panel.runModal() == .OK { destination = panel.url?.path ?? "" }
+                            if clone { panel.directoryURL = cloneDestination.parent }
+                            if panel.runModal() == .OK, let folder = panel.url {
+                                if clone { cloneDestination.chooseParent(folder, source: source); destination = cloneDestination.path }
+                                else { destination = folder.path }
+                            }
                         }
                     }
                 }
@@ -200,15 +222,31 @@ struct CreateRepositorySheet: View {
                 Spacer()
                 Button(workflowText("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
                 Button(workflowText("Create")) { create() }.buttonStyle(.borderedProminent)
-                    .disabled(busy || destination.isEmpty || (clone && source.isEmpty))
+                    .disabled(busy || CloneDestination.targetURL(destination) == nil || (clone && source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
             }
         }.controlSize(.small).interactiveDismissDisabled(busy).padding(20).frame(width: 600)
+            .onChange(of: clone) { _, _ in saveDraft() }
+            .onChange(of: source) { _, _ in saveDraft() }
+            .onChange(of: destination) { _, _ in saveDraft() }
+            .onChange(of: cloneDestination) { _, _ in saveDraft() }
+            .onDisappear { saveDraft() }
+    }
+    private func saveDraft() {
+        var draft = RepositoryCreationDraft()
+        draft.clone = clone; draft.source = source; draft.destination = destination
+        draft.cloneDestination = cloneDestination
+        draft.save()
     }
     private func create() {
-        let cloning = clone, cloneSource = source, target = destination
+        let cloning = clone, cloneSource = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let target = CloneDestination.targetURL(destination) else { return }
         busy = true; store.isBusy = true
         Task {
-            do { let url = URL(fileURLWithPath: target); let repo = try await cloning ? GitRepository.clone(source: cloneSource, destination: url) : GitRepository.initialize(at: url); store.isBusy = false; await store.open(repo.url); dismiss() }
+            do {
+                let repo = try await cloning ? GitRepository.clone(source: cloneSource, destination: target) : GitRepository.initialize(at: target)
+                if cloning { cloneDestination.rememberSuccessfulClone(target) }
+                store.isBusy = false; await store.open(repo.url); dismiss()
+            }
             catch { self.error = OperationFailure.message(error) }
             busy = false; store.isBusy = false
         }

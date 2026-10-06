@@ -136,3 +136,5 @@
 "Preview tag push" = "タグのプッシュをプレビュー";
 "Preview remote deletion" = "リモートの削除をプレビュー";
 "Delete local tag" = "ローカルタグを削除";
+
+"Choose parent folder…" = "親フォルダを選択…";

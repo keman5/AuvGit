@@ -82,7 +82,7 @@ struct PreferencesWindow: View {
             VStack(spacing: 10) {
                 HStack(spacing: 7) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
-                    TextField(prefsText("Search preferences"), text: $query).textFieldStyle(.plain)
+                    StableTextField(prefsText("Search preferences"), text: $query, rounded: false)
                     if !query.isEmpty {
                         Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
                             .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel(prefsText("Clear search"))

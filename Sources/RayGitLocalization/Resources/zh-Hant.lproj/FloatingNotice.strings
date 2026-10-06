@@ -1,0 +1,10 @@
+"Copy command" = "複製命令";
+"Close" = "關閉";
+"Copying does not execute this command." = "複製不會執行此命令。";
+"AI generation has an input size limit. You can still write a commit message manually and commit normally. Inspect the staged summary, then select a smaller group of changes for a separate commit using the staging controls. Your working files are preserved." = "AI 產生有輸入大小限制，仍可手動填寫提交訊息並正常提交。先檢查暫存摘要，再透過暫存控制項選取較小的一組變更另行提交；工作檔案會保留。";
+"Review the file and reload the comparison before trying again. Save any draft you want to keep before reloading. The message remains available here until the next operation." = "檢查檔案後重新載入比較，再嘗試操作。重新載入前請儲存需要保留的草稿。此訊息保留至下一次操作。";
+"The patch represents saved files. Save your draft first, then select the lines to stage. Saving updates the working file; staging updates the index." = "修補內容顯示已儲存檔案。先儲存草稿，再選取要暫存的行。儲存會更新工作檔案，暫存會更新索引。";
+"Partial staging is unavailable for this file. Review it in an external editor, then use Stage File only if you intend to include the entire file. For large generated files, consider adding their repository-relative paths to .gitignore before staging." = "此檔案無法部分暫存。先在外部編輯器中檢查，只有打算提交整個檔案時才使用「暫存檔案」。對於大型產生檔案，可在暫存前將其儲存庫相對路徑加入 .gitignore。";
+"Ignored files could not be loaded. Toggle Show ignored files off and on to retry. Check the repository status below; this command only reads files and does not stage ignored files." = "無法載入忽略檔案。關閉再開啟「顯示忽略檔案」以重試。可透過下方命令檢查儲存庫狀態；它只讀取檔案，不會暫存忽略檔案。";
+"Open Search to check the query. Disable Regex to search literal text, or correct the expression and narrow the query. Turn off Changes only to inspect the original file pages." = "開啟搜尋檢查查詢。關閉規則運算式可搜尋字面文字，或修正運算式並縮小查詢範圍。關閉「僅變更」可檢查原檔案分頁。";
+"Check that the repository and selected revision are still available, then use Refresh to retry. The command below reports the current repository state without changing files or the index." = "檢查儲存庫和所選版本是否仍可存取，再點擊重新整理重試。下方命令報告目前儲存庫狀態，不會修改檔案或索引。";

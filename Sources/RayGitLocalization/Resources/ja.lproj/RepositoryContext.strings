@@ -1,0 +1,12 @@
+"Edit Remote URL" = "リモート URL を編集";
+"Edit Ignore File" = "無視ファイルを編集";
+"No remotes configured" = "リモートが設定されていません";
+"Remote" = "リモート";
+"Fetch URL" = "取得 URL";
+"Edit explicit push URL" = "個別のプッシュ URL を編集";
+"Push URL" = "プッシュ URL";
+"Empty removes the first explicit push URL" = "空欄にすると最初の個別プッシュ URL を削除します";
+"Only the first push URL is edited" = "最初のプッシュ URL のみ編集します";
+"Reload" = "再読み込み";
+"Cancel" = "キャンセル";
+"Save" = "保存";

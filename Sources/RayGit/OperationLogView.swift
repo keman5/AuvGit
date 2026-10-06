@@ -27,19 +27,19 @@ struct OperationLogView: View {
                                 Text(text(record.fullOutputAvailable ? "Preview truncated at 32K characters. Full sanitized output is available." : "Preview truncated at 32K characters. Full output cache has expired.")).font(.caption).foregroundStyle(.secondary)
                             }
                             HStack {
-                                Button(text("View full output")) { fullRecord = record }.disabled(!record.fullOutputAvailable)
-                                Button(text("Copy full output")) { copy(record) }.disabled(!record.fullOutputAvailable)
-                                Button(text("Export output")) { export(record) }.disabled(!record.fullOutputAvailable)
+                                Button(text("View full output")) { fullRecord = record }.disabled(!fullOutputAvailable(record))
+                                Button(text("Copy full output")) { copy(record) }.disabled(!fullOutputAvailable(record))
+                                Button(text("Export output")) { export(record) }.disabled(!fullOutputAvailable(record))
                             }.controlSize(.small)
                             OperationLogTextView(content: details, focused: activeDetail == record.id, onFocus: { activeDetail = record.id })
                                 .frame(height: min(240, max(60, CGFloat(details.components(separatedBy: "\n").count) * 15 + 12)))
                                 .padding(.top, 8)
                         } label: {
                             HStack {
-                                Image(systemName: record.error == nil ? "checkmark.circle" : "exclamationmark.triangle").foregroundStyle(record.error == nil ? Color.secondary : .red)
+                                Image(systemName: record.cancelled ? "minus.circle" : record.error == nil ? "checkmark.circle" : "exclamationmark.triangle").foregroundStyle(record.error == nil ? Color.secondary : .red)
                                 Text(record.date.formatted(date: .omitted, time: .standard)).monospacedDigit()
-                                Text(record.operation).fontWeight(.medium)
-                                Text(record.error.flatMap { GitFailureSummary.key(for: $0) }.map(text) ?? text(record.error == nil ? "Completed" : "Failed"))
+                                Text(record.command.isEmpty ? record.operation : "git " + record.operation).fontWeight(.medium)
+                                Text(record.error.flatMap { GitFailureSummary.message(for: $0, localize: text) } ?? text(record.cancelled ? "Cancelled" : record.error == nil ? "Completed" : "Failed"))
                                 Spacer()
                                 Text(String(format: "%.2fs", record.duration)).foregroundStyle(.secondary)
                             }.font(.caption)
@@ -63,22 +63,29 @@ struct OperationLogView: View {
         if !contents.output.isEmpty { lines.append(contents.output) }
         if let error = contents.error { lines.append(error) }
         if full && !contents.complete { lines.append(text("Preview truncated at 32K characters. Full output cache has expired.")) }
+        if !full && record.previewTruncated { lines.append(text(record.fullOutputAvailable ? "Preview truncated at 32K characters. Full sanitized output is available." : "Preview truncated at 32K characters. Full output cache has expired.")) }
         if record.error?.contains("32 MB display limit") == true { lines.append(text("Process output exceeded 32 MiB. Complete output was not captured.")) }
+        for command in store.commands(for: record) {
+            lines.append(detailText(command, full: full))
+        }
         return lines.joined(separator: "\n")
     }
 
+    private func fullOutputAvailable(_ record: GitCommandRecord) -> Bool {
+        record.fullOutputAvailable && store.commands(for: record).allSatisfy { $0.fullOutputAvailable }
+    }
     private func unavailable() {
         exportError = OperationFailure.message(GitError(text("Preview truncated at 32K characters. Full output cache has expired.")), repository: store.repositoryURL)
     }
     private func copy(_ record: GitCommandRecord) {
         let contents = record.fullContents()
-        guard contents.complete else { unavailable(); return }
+        guard contents.complete, fullOutputAvailable(record) else { unavailable(); return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(detailText(record, full: true, snapshot: contents), forType: .string)
     }
     private func export(_ record: GitCommandRecord) {
         let contents = record.fullContents()
-        guard contents.complete else { unavailable(); return }
+        guard contents.complete, fullOutputAvailable(record) else { unavailable(); return }
         let panel = NSSavePanel(); panel.nameFieldStringValue = "RayGit-operation.txt"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do { try detailText(record, full: true, snapshot: contents).write(to: url, atomically: true, encoding: .utf8); exportError = nil }

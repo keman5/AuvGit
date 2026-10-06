@@ -9,3 +9,4 @@
 "Discard selected tracked changes, or all eligible tracked changes when none are selected" = "Discard selected tracked changes, or all eligible tracked changes when none are selected";
 "Choose a commit message template" = "Choose a commit message template";
 "Load configured template" = "Load configured template";
+"Open in Finder" = "Open in Finder";

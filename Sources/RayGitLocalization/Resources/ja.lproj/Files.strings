@@ -23,8 +23,10 @@
 "untracked" = "未追跡";
 "modified" = "変更";
 "added" = "追加";
-"deleted" = "削除";
+"deleted" = "削除済み";
 "renamed" = "名前変更";
 "copied" = "コピー";
 "conflict" = "競合";
 "type" = "種類変更";
+
+"stagedStatus" = "ステージ済み";

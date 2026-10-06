@@ -57,8 +57,10 @@ struct ComparisonSearchPopover: View {
             HStack {
                 ComparisonSearchField(text: $options.query, placeholder: comparisonSearchText("Find"), initialFocus: true,
                     onNavigate: onNavigate, onEscape: close).frame(height: 24)
-                Button { onNavigate(false) } label: { Image(systemName: "chevron.up").frame(width: 24, height: 24).contentShape(Rectangle()) }.help(comparisonSearchText("Previous match"))
-                Button { onNavigate(true) } label: { Image(systemName: "chevron.down").frame(width: 24, height: 24).contentShape(Rectangle()) }.help(comparisonSearchText("Next match"))
+                HStack(spacing: 2) {
+                    Button { onNavigate(false) } label: { ComparisonToolbarIcon(name: "chevron.up") }.buttonStyle(ComparisonToolbarButtonStyle()).help(comparisonSearchText("Previous match"))
+                    Button { onNavigate(true) } label: { ComparisonToolbarIcon(name: "chevron.down") }.buttonStyle(ComparisonToolbarButtonStyle()).help(comparisonSearchText("Next match"))
+                }
             }
             HStack {
                 Toggle(comparisonSearchText("Case sensitive"), isOn: $options.caseSensitive)

@@ -79,3 +79,5 @@
 
 "toolbarFlexibleSpace" = "Flexible Space";
 "toolbarSeparator" = "Vertical Separator";
+
+"stagedRatio" = "%ld/%ld staged";

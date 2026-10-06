@@ -13,10 +13,10 @@ struct CompareDisplayButton: View {
     var body: some View {
         Button { enabled.toggle() } label: {
             Image(systemName: symbol).font(.system(size: 11, weight: .medium))
-                .frame(width: 25, height: 24)
+                .frame(width: 22, height: 24).contentShape(Rectangle())
                 .foregroundStyle(enabled ? Color.accentColor : Color.secondary)
                 .background(enabled ? Color.accentColor.opacity(0.11) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
-        }.buttonStyle(.plain).help(title).accessibilityLabel(title).accessibilityValue(enabled ? designCompareText("On") : designCompareText("Off"))
+        }.buttonStyle(ComparisonToolbarButtonStyle()).help(title).accessibilityLabel(title).accessibilityValue(enabled ? designCompareText("On") : designCompareText("Off"))
     }
 }
 

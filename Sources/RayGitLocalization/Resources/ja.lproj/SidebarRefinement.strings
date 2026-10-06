@@ -5,3 +5,6 @@
 "operationLog" = "操作ログを開く";
 "viewLog" = "ログを表示";
 "commitDetails" = "コミットの詳細";
+
+"Expanded" = "展開済み";
+"Collapsed" = "折りたたみ";

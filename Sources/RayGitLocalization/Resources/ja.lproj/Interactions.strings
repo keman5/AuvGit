@@ -6,7 +6,7 @@
 "Open Repository" = "リポジトリを開く";
 "Reveal in Finder" = "Finder に表示";
 "Copy Path" = "パスをコピー";
-"Remove from Recent" = "最近使った項目から削除";
+"Remove Repository" = "リポジトリを削除";
 "Add Repository…" = "リポジトリを追加…";
 "Local Branches" = "ローカルブランチ";
 "Remote Branches" = "リモートブランチ";

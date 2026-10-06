@@ -1,0 +1,7 @@
+"title" = "Push rejected: remote history differs";
+"target" = "Remote: %@\nTarget branch: %@";
+"count" = "The remote contains %d commit(s) absent from this local history.";
+"unknownCount" = "Remote-only commit count is unavailable.";
+"explanation" = "Force push replaces the remote branch history with the current local commit. The operation stops if the remote changes after this preview.";
+"cancel" = "Cancel";
+"action" = "Force Push";

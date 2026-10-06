@@ -37,7 +37,7 @@ enum LogPresenter {
 
 @MainActor
 private final class LogWindowController: NSWindowController, NSWindowDelegate {
-    let store = RepositoryStore(persistsSession: false)
+    let store = RepositoryStore(persistsSession: false, usesCheckedHistoryScope: true)
     private let closed: () -> Void
     private var ready = false
     private var requested: (path: String?, ref: String?, search: String?, selection: String?, stashCommit: String?, stashRef: String?) = (nil, nil, nil, nil, nil, nil)
@@ -71,14 +71,38 @@ private final class LogWindowController: NSWindowController, NSWindowDelegate {
         store.isRestoringViewState = true
         defer { if version == requestVersion { store.isRestoringViewState = false } }
         store.mode = "history"
-        store.historyPath = request.path; store.historyRef = HistoryReference.canonical(request.ref, branches: store.branches)
+        store.configureCheckedHistoryRefs()
+        var reference = HistoryReference.canonical(request.ref, branches: store.branches)
+        if reference == nil, let selection = request.selection, request.stashCommit == nil,
+           let repository = store.repository {
+            reference = HistoryBranchScope.preferred(containing: (try? await repository.branchesContaining(commit: selection)) ?? [], branches: store.branches) ?? selection
+            guard version == requestVersion else { return }
+        }
+        let branchRefs = Set(store.branches.map(HistoryBranchScope.branchRef))
+        if let reference, branchRefs.contains(reference) {
+            // An explicit branch/commit context must be visible when reusing a Log window.
+            let scope = HistoryBranchScope.preservingStashes(in: store.checkedHistoryRefs ?? HistoryBranchScope.defaultRefs(branches: store.branches, branch: store.branch), forBranch: reference)
+            store.checkedHistoryRefs = scope
+            if let root = store.repositoryURL { HistoryBranchScope.save(scope, repository: root) }
+        }
+        store.historyPath = request.path
+        store.historyRef = HistoryBranchScope.presentationReference(requested: reference, previous: store.historyRef, availableBranches: branchRefs)
+        store.historyPinnedCommit = request.stashCommit == nil && reference == request.selection ? request.selection : nil
         store.historySearch = request.search ?? ""; store.historyAuthor = ""
         store.historyStashHash = request.stashCommit; store.historyStashRef = request.stashRef
         store.selectedCommit = request.selection; store.selectedCommitPath = nil
         store.commitFiles = []
         await store.loadHistory(reset: true)
         guard version == requestVersion else { return }
-        if store.selectedCommit == nil { store.selectedCommit = store.commits.first?.hash }
+        if let selection = request.selection {
+            while !store.commits.contains(where: { $0.hash == selection }), store.hasMore {
+                let count = store.commits.count
+                await store.loadHistory(reset: false)
+                guard version == requestVersion else { return }
+                if store.commits.count == count { break }
+            }
+        }
+        if !store.commits.contains(where: { $0.hash == store.selectedCommit }) { store.selectedCommit = store.commits.first?.hash }
         store.historyNavigationGeneration = UUID()
         await store.loadCommitFiles()
     }
@@ -90,7 +114,7 @@ private struct LogWindowContent: View {
     @ObservedObject var store: RepositoryStore
     @AppStorage(L10n.preferenceKey) private var language = "system"
     @State private var refSearch = ""
-    @State private var pathQuery = ""
+    @State private var highlightedReference: String?
     @State private var tags: [ManagedTag] = []
     @State private var showOperationLog = false
     @State private var mutation: Mutation?
@@ -125,17 +149,19 @@ private struct LogWindowContent: View {
             Divider()
             HStack(spacing: 10) {
                 if store.isBusy || store.loadingHistory { ProgressView().controlSize(.mini) }
-                if let error = store.error {
+                if store.error != nil {
                     Button { showOperationLog = true } label: {
-                        Label(error, systemImage: "exclamationmark.triangle.fill")
-                            .lineLimit(1).truncationMode(.tail).foregroundStyle(Color.orange)
+                        Label(store.displayStatus, systemImage: "exclamationmark.triangle.fill")
+                            .lineLimit(1).truncationMode(.tail).foregroundStyle(Color.orange).frame(height: 24)
                     }.buttonStyle(.plain).help(sidebarRefinementText("operationLog"))
-                        .accessibilityLabel(sidebarRefinementText("operationLog") + ": " + error)
+                        .accessibilityLabel(sidebarRefinementText("operationLog") + ": " + store.displayStatus)
                 } else {
-                    Text(store.repositoryURL?.path ?? "").lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                    Button { showOperationLog = true } label: {
+                        Text(store.hasLatestOperation ? store.status : (store.repositoryURL?.path ?? "")).lineLimit(1).truncationMode(.middle)
+                    }.buttonStyle(.plain).help(sidebarRefinementText("operationLog"))
                 }
                 Spacer()
-                Text("\(store.commits.count)").monospacedDigit()
+                Text("\(store.commits.count)").monospacedDigit().fixedSize(horizontal: true, vertical: false).layoutPriority(1)
                 if !store.branch.isEmpty { Label(store.branch, systemImage: "arrow.triangle.branch") }
             }.font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 12).frame(height: 28).rayGitChrome()
         }.background(RayGitStyle.canvas).buttonBorderShape(.roundedRectangle(radius: 6)).environment(\.locale, L10n.locale)
@@ -143,7 +169,6 @@ private struct LogWindowContent: View {
             .onChange(of: store.selectedCommitPath) { _, _ in guard !store.isRestoringViewState else { return }; Task { await store.loadDiff() } }
             .onChange(of: store.historySearch) { _, _ in guard !store.isRestoringViewState else { return }; store.scheduleSearch() }
             .onChange(of: store.historyAuthor) { _, _ in guard !store.isRestoringViewState else { return }; store.scheduleSearch() }
-            .onChange(of: store.historyPath) { _, value in pathQuery = value ?? "" }
             .onChange(of: store.branches) { _, _ in Task { await loadTags() } }
             .onChange(of: store.commits) { _, _ in Task { await loadTags() } }
             .onReceive(NotificationCenter.default.publisher(for: .rayGitWorktreeChanged)) { event in
@@ -160,14 +185,12 @@ private struct LogWindowContent: View {
                 Spacer()
                 Button { Task { await store.refresh(); await loadTags() } } label: { Image(systemName: "arrow.clockwise").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(.plain).disabled(store.isBusy)
             }.padding(12).rayGitChrome()
-            HStack { Image(systemName: "magnifyingglass").foregroundStyle(.secondary); TextField(logText("Filter references"), text: $refSearch).textFieldStyle(.plain) }
+            HStack { Image(systemName: "magnifyingglass").foregroundStyle(.secondary); StableTextField(logText("Filter references"), text: $refSearch, rounded: false) }
                 .font(.system(size: 12)).padding(8).rayGitInputSurface().padding(10)
             ScrollViewReader { proxy in
-            List(selection: Binding<String?>(get: { referenceSelection }, set: { value in
-                if value?.hasPrefix("stash@{") == true, let value { store.showStashHistory(ref: value) }
-                else { store.showHistory(path: nil, ref: value == "__all__" ? nil : value) }
-            })) {
-                Label(logText("All branches"), systemImage: "arrow.triangle.branch").tag("__all__").id("__all__")
+            List(selection: $highlightedReference) {
+                scopeRow("HEAD", title: "HEAD", symbol: "arrow.triangle.branch")
+                scopeRow(HistoryBranchScope.recyclable, title: logText("Recyclable commits"), symbol: "arrow.uturn.backward")
                 Section(logText("Local branches")) { referenceRows(remote: false) }
                 Section(logText("Remote branches")) { referenceRows(remote: true) }
                 if !tags.isEmpty {
@@ -179,32 +202,31 @@ private struct LogWindowContent: View {
                 }
                 if !store.stashes.isEmpty {
                     Section(interactionText("Stashes")) {
-                        ForEach(store.stashes) { stash in Label(stash.subject, systemImage: "archivebox").tag(stash.ref).id(stash.ref).lineLimit(1).truncationMode(.tail) }
+                        ForEach(store.stashes) { stash in scopeRow(HistoryBranchScope.stashRef(stash), title: stash.subject, symbol: "archivebox") }
                     }
                 }
             }.listStyle(.sidebar).scrollContentBackground(.hidden).font(.system(size: 12))
-                .onChange(of: store.historyNavigationGeneration) { _, _ in refSearch = ""; proxy.scrollTo(referenceSelection, anchor: .center) }
+                .onChange(of: store.historyNavigationGeneration) { _, _ in refSearch = ""; highlightedReference = referenceSelection; proxy.scrollTo(referenceSelection, anchor: .center) }
                 .onChange(of: store.branches) { _, _ in proxy.scrollTo(referenceSelection, anchor: .center) }
                 .onChange(of: tags.map(\.name)) { _, _ in proxy.scrollTo(referenceSelection, anchor: .center) }
-                .onAppear { proxy.scrollTo(referenceSelection, anchor: .center) }
+                .onAppear { highlightedReference = referenceSelection; proxy.scrollTo(referenceSelection, anchor: .center) }
             }
-            Divider()
-            VStack(alignment: .leading, spacing: 8) {
-                Text(logText("File history")).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                HStack(spacing: 5) {
-                    TextField(logText("Repository-relative path"), text: $pathQuery).textFieldStyle(.roundedBorder).onSubmit { applyPath() }
-                    Button(action: applyPath) { Image(systemName: "arrow.right").frame(width: 24, height: 24).contentShape(Rectangle()) }.disabled(pathQuery.isEmpty)
-                }
-                if store.historyPath != nil { Button(logText("Clear file filter")) { store.showHistory(path: nil, ref: nil) }.font(.caption) }
-            }.padding(12)
+
         }.background(RayGitStyle.sidebar)
     }
-    private var referenceSelection: String { store.historyStashRef ?? HistoryReference.canonical(store.historyRef, branches: store.branches) ?? "__all__" }
+    private var referenceSelection: String { store.historyStashRef ?? HistoryReference.canonical(store.historyRef, branches: store.branches) ?? "" }
     private func referenceRows(remote: Bool) -> some View {
         ForEach(store.branches.filter { $0.isRemote == remote && (refSearch.isEmpty || $0.name.localizedCaseInsensitiveContains(refSearch)) }) { branch in
-            Label(branch.name, systemImage: branch.isCurrent ? "checkmark.circle.fill" : "arrow.triangle.branch")
-                .tag((remote ? "refs/remotes/" : "refs/heads/") + branch.name).id((remote ? "refs/remotes/" : "refs/heads/") + branch.name).lineLimit(1).help(branch.name)
+            let ref = HistoryBranchScope.branchRef(branch)
+            scopeRow(ref, title: branch.name, symbol: branch.isCurrent ? "checkmark.circle.fill" : "arrow.triangle.branch")
         }
+    }
+    private func scopeRow(_ ref: String, title: String, symbol: String) -> some View {
+        HStack(spacing: 6) {
+            Toggle("", isOn: Binding(get: { HistoryBranchScope.isChecked(ref, in: store.checkedHistoryRefs ?? []) }, set: { store.setHistoryBranchChecked(ref, checked: $0) }))
+                .labelsHidden().toggleStyle(.checkbox).accessibilityLabel(title)
+            Label(title, systemImage: symbol).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+        }.contentShape(Rectangle()).tag(ref).id(ref).help(ref)
     }
     private var commitMetadata: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -236,14 +258,21 @@ private struct LogWindowContent: View {
                         .tag(file.path).help(file.originalPath.map { $0 + " → " + file.path } ?? file.path)
                 }.listStyle(.plain).scrollContentBackground(.hidden)
                     .contextMenu(forSelectionType: String.self) { paths in
-                        if let path = paths.first { Button(interactionText("Show Changes")) { compare(path) }; Button(interactionText("Copy Relative Path")) { copy(path) } }
+                        if let path = paths.first {
+                            Button(interactionText("Show Changes")) { compare(path) }
+                            if let root = store.repositoryURL {
+                                let fileURL = root.appendingPathComponent(path)
+                                let exists = FileManager.default.fileExists(atPath: fileURL.path)
+                                Divider()
+                                Button(L10n.text("copyPath", table: "Files")) { copy(paths.sorted().map { root.appendingPathComponent($0).path }.joined(separator: "\n")) }
+                                Divider()
+                                Button(L10n.text("open", table: "Files")) { NSWorkspace.shared.open(fileURL) }.disabled(!exists)
+                                Button(L10n.text("reveal", table: "Files")) { NSWorkspace.shared.activateFileViewerSelecting([fileURL]) }.disabled(!exists)
+                            }
+                        }
                     } primaryAction: { paths in if let path = paths.first { compare(path) } }
             }
         }.background(RayGitStyle.canvas)
-    }
-    private func applyPath() {
-        let path = pathQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        store.showHistory(path: path.isEmpty ? nil : path, ref: nil)
     }
     private func loadTags() async {
         guard let repository = store.repository else { return }

@@ -39,7 +39,8 @@ struct DiffPane: View {
     @State private var openedDocumentIdentity = ""
     @State private var showSearch = false
     @Environment(\.colorScheme) private var colorScheme
-    private var parsed: ParsedDiff { DiffParser.parse(text) }
+    @StateObject private var parseCache = ComparisonPatchCache()
+    private var parsed: ParsedDiff { parseCache.value(for: text) }
     var body: some View {
         let diff = parsed
         VStack(spacing: 0) {
@@ -76,7 +77,7 @@ struct DiffPane: View {
                     }.font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 16).frame(height: 32).rayGitChrome()
                     Divider()
                 }
-                DiffTextSurface(diff: diff, languagePath: title, documentIdentity: documentIdentity, sideBySide: sideBySide, selectedHunk: hunk, dark: colorScheme == .dark, wraps: wraps, lineNumbers: lineNumbers, synchronized: synchronized, fontSize: CGFloat(fontSize), compact: forceCompact || compact, searchOptions: searchOptions, searchStep: searchStep, matchCount: $matchCount, matchIndex: $matchIndex, searchError: $searchError, scrollsToFirstChange: openedDocumentIdentity != documentIdentity, onFirstScroll: { openedDocumentIdentity = documentIdentity })
+                DiffTextSurface(diff: diff, sourceText: text, languagePath: title, documentIdentity: documentIdentity, sideBySide: sideBySide, selectedHunk: hunk, dark: colorScheme == .dark, wraps: wraps, lineNumbers: lineNumbers, synchronized: synchronized, fontSize: CGFloat(fontSize), compact: forceCompact || compact, searchOptions: searchOptions, searchStep: searchStep, matchCount: $matchCount, matchIndex: $matchIndex, searchError: $searchError, scrollsToFirstChange: openedDocumentIdentity != documentIdentity, onFirstScroll: { openedDocumentIdentity = documentIdentity })
             }
         }.background(RayGitStyle.canvas).onChange(of: documentIdentity) { _, _ in hunk = 0 }
             .onExitCommand { closeSearch() }
@@ -90,20 +91,20 @@ struct DiffPane: View {
             .font(.system(size: 12, weight: .semibold)).lineLimit(1).truncationMode(.middle).help(title)
     }
     private func hunkControls(_ diff: ParsedDiff) -> some View {
-        HStack(spacing: 8) {
-            RayGitBadge(diffText("diff.hunkCount", diff.hunks.count), tint: .secondary).fixedSize()
-            Button { hunk = max(0, hunk - 1) } label: { Image(systemName: "chevron.up").frame(width: 24, height: 24).contentShape(Rectangle()) }
+        HStack(spacing: 2) {
+            RayGitBadge(diffText("diff.hunkCount", diff.hunks.count), tint: .secondary).fixedSize().padding(.trailing, 6)
+            Button { hunk = max(0, hunk - 1) } label: { ComparisonToolbarIcon(name: "chevron.up") }.buttonStyle(ComparisonToolbarButtonStyle())
                 .disabled(diff.hunks.isEmpty).help(diffText("diff.previousHunk")).accessibilityLabel(diffText("diff.previousHunk"))
-            Button { hunk = min(diff.hunks.count - 1, hunk + 1) } label: { Image(systemName: "chevron.down").frame(width: 24, height: 24).contentShape(Rectangle()) }
+            Button { hunk = min(diff.hunks.count - 1, hunk + 1) } label: { ComparisonToolbarIcon(name: "chevron.down") }.buttonStyle(ComparisonToolbarButtonStyle())
                 .disabled(diff.hunks.isEmpty).help(diffText("diff.nextHunk")).accessibilityLabel(diffText("diff.nextHunk"))
-        }
+        }.buttonStyle(ToolbarRowButtonStyle(minimumWidth: 22))
     }
     private var displayControls: some View {
         HStack(spacing: 8) {
             Picker(diffText("diff.view"), selection: $sideBySide) {
                 Text(diffText("diff.sideBySide")).tag(true)
                 Text(diffText("diff.unified")).tag(false)
-            }.pickerStyle(.segmented).labelsHidden().fixedSize(horizontal: true, vertical: false).accessibilityLabel(diffText("diff.view"))
+            }.pickerStyle(.segmented).labelsHidden().frame(height: 24).fixedSize(horizontal: true, vertical: false).accessibilityLabel(diffText("diff.view"))
             Menu {
                 Toggle(L10n.text("Changes only", table: "DiffRefinement"), isOn: $compact)
                 Toggle(diffControlText("wrap"), isOn: $wraps)
@@ -114,24 +115,25 @@ struct DiffPane: View {
                 Button(diffControlText("smaller")) { fontSize = max(9, fontSize - 1) }
                 Button(diffControlText("resetFont")) { fontSize = 12 }
                 if let extraMenuItems { Divider(); extraMenuItems }
-            } label: { Image(systemName: "ellipsis").frame(width: 24, height: 24).contentShape(Rectangle()) }
+            } label: { ComparisonToolbarIcon(name: "ellipsis") }.buttonStyle(ComparisonToolbarButtonStyle())
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help(diffControlText("display"))
-            Button { showSearch.toggle() } label: { Image(systemName: "magnifyingglass").frame(width: 24, height: 24).contentShape(Rectangle()) }
+            Button { showSearch.toggle() } label: { ComparisonToolbarIcon(name: "magnifyingglass") }.buttonStyle(ComparisonToolbarButtonStyle())
                 .help(diffControlText("search")).accessibilityLabel(diffControlText("search"))
                 .popover(isPresented: $showSearch) {
                     ComparisonSearchPopover(options: $searchOptions, replacement: $replacement, matchCount: matchCount, matchIndex: matchIndex, canReplace: false,
                         onNavigate: { searchStep += $0 ? 1 : -1 }, onReplace: { _ in },
                         onOpenEditor: onOpenEditableComparison.map { action in { action(searchOptions, replacement); showSearch = false } }, error: searchError, onClose: { showSearch = false })
                 }
-        }
+        }.buttonStyle(ToolbarRowButtonStyle(minimumWidth: 22))
     }
     private func closeSearch() { searchOptions.query = ""; showSearch = false }
 }
 
 /// AppKit lays out a single attributed document per column, keeping large patches
 /// out of SwiftUI's view tree. Selection and Cmd-C use standard text editing behavior.
-private struct DiffTextSurface: NSViewRepresentable {
+struct DiffTextSurface: NSViewRepresentable {
     let diff: ParsedDiff
+    let sourceText: String
     let languagePath: String
     let documentIdentity: String
     let sideBySide: Bool
@@ -161,7 +163,8 @@ private struct DiffTextSurface: NSViewRepresentable {
     func makeNSView(context: Context) -> NSStackView {
         let stack = AlignedDiffStackView(); stack.onResize = { [weak coordinator = context.coordinator] in coordinator?.alignWrappedRows() }; stack.orientation = .horizontal; stack.spacing = 1; stack.distribution = .fillEqually
         for _ in 0..<2 {
-            let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true; scroll.autohidesScrollers = true
+            let scroll = ComparisonOverviewScrollView(); scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true; scroll.autohidesScrollers = true
+            scroll.verticalScrollElasticity = .none; scroll.horizontalScrollElasticity = .none
             let view = ReadOnlyDiffTextView(); view.isEditable = false; view.isSelectable = true; view.isRichText = false; view.allowsUndo = false
             view.isHorizontallyResizable = true; view.isVerticallyResizable = true
             view.minSize = .zero; view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
@@ -176,12 +179,8 @@ private struct DiffTextSurface: NSViewRepresentable {
             })
             scroll.contentView.postsBoundsChangedNotifications = true
             context.coordinator.observers.append(NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main) { [weak coordinator = context.coordinator, weak scroll] _ in
-                guard let coordinator, let scroll, !coordinator.syncing, coordinator.synchronized else { return }
-                coordinator.syncing = true
-                for other in coordinator.scrolls where other !== scroll && !other.isHidden {
-                    other.contentView.scroll(to: NSPoint(x: other.contentView.bounds.origin.x, y: scroll.contentView.bounds.origin.y)); other.reflectScrolledClipView(other.contentView)
-                }
-                coordinator.syncing = false
+                guard let coordinator, let scroll else { return }
+                coordinator.synchronizeScroll(from: scroll)
             })
         }
         return stack
@@ -194,7 +193,7 @@ private struct DiffTextSurface: NSViewRepresentable {
             coordinator.pendingFirstScroll = false
             coordinator.lastHunk = -1
         }
-        let signature = diff.lines.map { "\($0.kind):\($0.oldNumber ?? -1):\($0.newNumber ?? -1):\($0.text)" }.joined(separator: "\n")
+        let signature = sourceText
         coordinator.synchronized = synchronized
         let changedDocument = changedIdentity || coordinator.signature != signature
         let style = "\(compact)|\(additionColor)|\(deletionColor)|\(modificationColor)|\(fontName)|\(syntaxHighlight)|\(characterDiff)|\(tabWidth)|\(showWhitespace)"
@@ -203,9 +202,17 @@ private struct DiffTextSurface: NSViewRepresentable {
         if changedStyle || changedDocument || coordinator.split != sideBySide || coordinator.dark != dark || coordinator.lineNumbers != lineNumbers || coordinator.fontSize != fontSize {
             coordinator.syncing = true
             coordinator.lineNumbers = lineNumbers; coordinator.fontSize = fontSize
+            coordinator.lastAlignedSignature = nil
             coordinator.signature = signature; coordinator.split = sideBySide; coordinator.dark = dark
             let documents = render()
             coordinator.hunkRanges = documents.ranges
+            coordinator.hunkKinds = diff.hunks.indices.map { index in
+                let start = diff.hunks[index].lineIndex
+                let end = index + 1 < diff.hunks.count ? diff.hunks[index + 1].lineIndex : diff.lines.count
+                let rows = diff.lines[start..<end]
+                let additions = rows.contains { $0.kind == .addition }, deletions = rows.contains { $0.kind == .deletion }
+                return additions && !deletions ? .addition : deletions && !additions ? .deletion : .modification
+            }
             coordinator.scrolls[1].isHidden = !sideBySide
             for (index, scroll) in coordinator.scrolls.enumerated() {
                 let view = scroll.documentView as! NSTextView
@@ -351,6 +358,10 @@ private struct DiffTextSurface: NSViewRepresentable {
                 let old = lineNumbers ? ((line.oldNumber.map { String(format: "%6d", $0) } ?? "      ") + " ") : ""
                 append(line, to: left, number: line.newNumber, prefix: old + (line.kind == .addition ? "+ " : line.kind == .deletion ? "− " : "  "))
             }
+            if row.isChange, let hunk = row.hunk, ranges.indices.contains(hunk) {
+                ranges[hunk][0].length = left.length - ranges[hunk][0].location
+                if sideBySide { ranges[hunk][1].length = right.length - ranges[hunk][1].location }
+            }
         }
         return ([left, right], ranges)
     }
@@ -368,7 +379,28 @@ private struct DiffTextSurface: NSViewRepresentable {
         var signature = "", lastHunk = -1
         var documentIdentity = ""
         var hunkRanges: [[NSRange]] = []
+        var hunkKinds: [ComparisonOverviewMarker.Kind] = []
+        var lastAlignedSignature: String?
+        private var lastAlignedWidths: [CGFloat] = []
+        private var lastAlignedWrap: Bool?
         private var aligning = false
+        func synchronizeScroll(from source: NSScrollView) {
+            guard !syncing, synchronized || wraps == false else { return }
+            syncing = true; defer { syncing = false }
+            // Elastic bounds lie outside the document. Forward only the legal
+            // document position, and constrain it independently for each pane.
+            let sourcePosition = source.contentView.constrainBoundsRect(source.contentView.bounds).origin
+            for target in scrolls where target !== source && !target.isHidden {
+                var bounds = target.contentView.bounds
+                if wraps == false { bounds.origin.x = sourcePosition.x }
+                if synchronized { bounds.origin.y = sourcePosition.y }
+                let position = target.contentView.constrainBoundsRect(bounds).origin
+                guard abs(position.x - target.contentView.bounds.minX) > 0.01
+                        || abs(position.y - target.contentView.bounds.minY) > 0.01 else { continue }
+                target.contentView.scroll(to: position)
+                target.reflectScrolledClipView(target.contentView)
+            }
+        }
         func highlightCurrentRow(in active: NSTextView) {
             guard let sourceIndex = scrolls.firstIndex(where: { $0.documentView === active }) else { return }
             let string = active.string as NSString
@@ -398,10 +430,43 @@ private struct DiffTextSurface: NSViewRepresentable {
             syncing = false
             highlightCurrentRow(in: view)
         }
+        private func refreshOverviews() {
+            for (column, scroll) in scrolls.enumerated() {
+                guard let scroll = scroll as? ComparisonOverviewScrollView, let view = scroll.documentView as? NSTextView,
+                      let layout = view.layoutManager, let container = view.textContainer else { continue }
+                layout.ensureLayout(for: container)
+                let height = max(1, view.bounds.height)
+                scroll.overview.markers = hunkRanges.enumerated().map { index, ranges in
+                    let range = ranges[column]
+                    let location = min(range.location, max(0, view.string.utf16.count - 1))
+                    let glyph = layout.numberOfGlyphs > 0 ? layout.glyphIndexForCharacter(at: location) : 0
+                    let rect = layout.numberOfGlyphs > 0 ? layout.lineFragmentRect(forGlyphAt: min(glyph, layout.numberOfGlyphs - 1), effectiveRange: nil) : .zero
+                    let end = min(max(location, NSMaxRange(range) - 1), max(0, view.string.utf16.count - 1))
+                    let last = layout.numberOfGlyphs > 0 ? layout.glyphIndexForCharacter(at: end) : 0
+                    let bottom = layout.numberOfGlyphs > 0 ? layout.lineFragmentRect(forGlyphAt: min(last, layout.numberOfGlyphs - 1), effectiveRange: nil).maxY : rect.maxY
+                    return ComparisonOverviewMarker(lower: min(1, Double((rect.minY + view.textContainerInset.height) / height)), upper: min(1, Double((bottom + view.textContainerInset.height) / height)), kind: self.hunkKinds.indices.contains(index) ? self.hunkKinds[index] : .modification, index: index)
+                }
+                scroll.overview.onNavigate = { [weak self] fraction in
+                    guard let self else { return }
+                    let point = NSPoint(x: 0, y: max(0, CGFloat(fraction) * height - view.textContainerInset.height))
+                    let glyph = layout.glyphIndex(for: point, in: container)
+                    let character = fraction == 1 ? view.string.utf16.count : layout.numberOfGlyphs > 0 ? layout.characterIndexForGlyph(at: min(glyph, layout.numberOfGlyphs - 1)) : 0
+                    self.navigate(column: column, range: NSRange(location: character, length: 0))
+                }
+                scroll.overview.onSelect = { [weak self] index in
+                    guard let self, self.hunkRanges.indices.contains(index) else { return }
+                    self.lastHunk = index; self.navigate(column: column, range: self.hunkRanges[index][column])
+                }
+            }
+        }
         func alignWrappedRows() {
+            refreshOverviews()
             guard !aligning, split, scrolls.count == 2 else { return }
+            let widths = scrolls.map { $0.contentSize.width }
+            guard lastAlignedSignature != signature || lastAlignedWidths != widths || lastAlignedWrap != wraps else { return }
+            lastAlignedSignature = signature; lastAlignedWidths = widths; lastAlignedWrap = wraps
             aligning = true
-            defer { aligning = false }
+            defer { aligning = false; refreshOverviews() }
             let views = scrolls.compactMap { $0.documentView as? NSTextView }
             guard views.count == 2 else { return }
             var rows: [[NSRange]] = []
@@ -468,7 +533,28 @@ private extension NSAttributedString.Key {
 }
 
 /// The attributed preview contains visual gutters, but copying returns selected code.
-private final class ReadOnlyDiffTextView: NSTextView {
+final class ReadOnlyDiffTextView: NSTextView {
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        ComparisonCaret.draw(in: self, dirtyRect: dirtyRect)
+    }
+    override var shouldDrawInsertionPoint: Bool { ComparisonCaret.shouldDraw(in: self) }
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        updateInsertionPointStateAndRestartTimer(true)
+        needsDisplay = true
+        return accepted
+    }
+    override func resignFirstResponder() -> Bool {
+        let accepted = super.resignFirstResponder()
+        needsDisplay = true
+        return accepted
+    }
+    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        updateInsertionPointStateAndRestartTimer(true)
+        needsDisplay = true
+    }
     var highlightedRow: Int?
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
@@ -515,5 +601,15 @@ private final class ReadOnlyDiffTextView: NSTextView {
         }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(value, forType: .string)
+    }
+}
+
+/// Parsing and signatures are independent of search/caret/display changes.
+private final class ComparisonPatchCache: ObservableObject {
+    private var source: String?
+    private var parsed: ParsedDiff?
+    func value(for text: String) -> ParsedDiff {
+        if source != text { source = text; parsed = DiffParser.parse(text) }
+        return parsed ?? DiffParser.parse("")
     }
 }

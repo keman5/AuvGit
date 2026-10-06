@@ -61,7 +61,7 @@ struct RebaseWorkflowView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(sessionText("Base revision")).font(.system(size: 13, weight: .semibold))
                     HStack {
-                        TextField(sessionText("Base revision"), text: $base).textFieldStyle(.roundedBorder)
+                        StableTextField(sessionText("Base revision"), text: $base).textFieldStyle(.roundedBorder)
                             .onChange(of: base) { _, _ in loadRequest = UUID(); captured = nil; todo = ""; messages = [:]; originalMessages = [:]; metadata = [:]; messageSelection = nil }
                         Menu {
                             Button("HEAD") { base = "HEAD" }
@@ -152,7 +152,7 @@ struct RebaseWorkflowView: View {
                 VStack(spacing: 14) {
                     DesignCard(sessionText("Explicit exec commands")) {
                         HStack(spacing: 8) {
-                            TextField(designText("Command to insert in the plan"), text: $execCommand).textFieldStyle(.roundedBorder)
+                            StableTextField(designText("Command to insert in the plan"), text: $execCommand).textFieldStyle(.roundedBorder)
                             Button { insertExec() } label: { Image(systemName: "plus") }.help(designText("Add exec command"))
                                 .disabled(execCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || captured == nil || store.isBusy)
                         }

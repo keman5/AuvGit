@@ -25,3 +25,8 @@
 "Save" = "保存";
 "Codex generation failed; check login, executable and model" = "Codex の生成に失敗しました。ログイン、実行ファイル、モデルを確認してください";
 "Uses your current Codex login and model provider; tools and project settings remain isolated." = "現在の Codex ログインとモデルプロバイダーを使用します。ツールとプロジェクト設定は分離されます。";
+"Staged patch limit (KB)" = "ステージ済みパッチの上限（KB）";
+"Staged diff exceeds the configured limit" = "ステージ済みの差分が設定された上限を超えています";
+"Generate from staged summary" = "ステージ済みの概要から生成";
+"Staged summary is too large; select fewer staged files" = "ステージ済みの概要が大きすぎます。ファイル数を減らしてください";
+"Increase the staged patch limit in AI settings, or generate from staged file names and change counts. Summary mode cannot describe code details." = "AI 設定でパッチの上限を増やすか、ステージ済みのファイル名と変更数から生成できます。概要モードではコードの詳細を説明できません。";

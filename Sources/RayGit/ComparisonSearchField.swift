@@ -27,6 +27,7 @@ struct ComparisonSearchField: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSTextField {
         let field = ClickableSearchTextField()
+        field.cell = StableSingleLineCell(textCell: "")
         field.isEditable = true; field.isSelectable = true
         field.isBezeled = true; field.bezelStyle = .roundedBezel
         field.font = .systemFont(ofSize: 12)

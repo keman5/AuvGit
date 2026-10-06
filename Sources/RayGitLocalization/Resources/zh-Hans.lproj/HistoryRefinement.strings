@@ -11,3 +11,5 @@
 "Empty tree" = "空版本";
 "Expanded" = "已展开";
 "Collapsed" = "已折叠";
+
+"Show merged commits" = "显示合并进来的提交";

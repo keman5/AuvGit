@@ -11,3 +11,5 @@
 "Empty tree" = "空のバージョン";
 "Expanded" = "展開済み";
 "Collapsed" = "折りたたみ済み";
+
+"Show merged commits" = "マージされたコミットを表示";

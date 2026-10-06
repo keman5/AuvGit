@@ -12,3 +12,5 @@
 "Select a commit" = "选择提交";
 "Name" = "名称";
 "This operation changes the repository. Review the selected commit before continuing." = "此操作会修改仓库。继续前请确认所选提交。";
+
+"Recyclable commits" = "可回收提交";

@@ -11,7 +11,7 @@ struct ExternalToolsPreferencesView: View {
     var body: some View {
         Form {
             Section(editorPrefsText("External comparison tool")) {
-                TextField(editorPrefsText("Executable or application"), text: $executable)
+                StableTextField(editorPrefsText("Executable or application"), text: $executable)
                 HStack {
                     Button(editorPrefsText("Choose tool")) { let panel = NSOpenPanel(); panel.canChooseFiles = true; panel.canChooseDirectories = false; panel.allowsMultipleSelection = false; panel.treatsFilePackagesAsDirectories = false; if panel.runModal() == .OK, let url = panel.url { executable = url.path; validation = nil } }
                     Button(editorPrefsText("Validate")) { _ = validate() }

@@ -1,21 +1,24 @@
 import SwiftUI
+import AppKit
+import RayGitLocalization
 import GitCore
 
 struct WorkspaceTree: View {
     let repository: GitRepository
     let openFile: (String) -> Void
     var visiblePaths: Set<String>? = nil
+    var selection: Binding<Set<String>> = .constant([])
+    var changedPaths: Set<String> = []
     var primaryAction: ((String) -> Void)? = nil
     var isBusy: Bool = false
     var setBusy: (Bool) -> Void = { _ in }
+    var files: [GitFile] = []
+    let onAction: (FileAction, Set<String>) -> Void
     @State private var mutationBusy = false
     @State private var editorError: String?
     @State private var nodes: [WorkspaceFileNode] = []
     @State private var error: String?
     @State private var loading = true
-    @State private var renamePath: String?
-    @State private var destination = ""
-    @State private var trashPath: String?
     @State private var trashed: [TrashedRepositoryFile] = []
     @State private var ignored: [String] = []
     @State private var showIgnored = false
@@ -38,16 +41,16 @@ struct WorkspaceTree: View {
             }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8)
             Divider()
             if let error { Text(error).foregroundStyle(.orange).font(.caption).padding(.horizontal, 12).padding(.vertical, 8).textSelection(.enabled) }
-            List {
+            List(selection: treeSelection) {
                 OutlineGroup(filteredNodes, children: \.outlineChildren) { node in
                     Label(node.path.split(separator: "/").last.map(String.init) ?? node.path, systemImage: node.isDirectory ? "folder" : "doc")
-                        .font(.system(size: 12)).lineLimit(1).truncationMode(.middle).help(node.path)
+                        .font(.system(size: 12)).lineLimit(1).truncationMode(.middle).help(node.path).tag(node.path)
                         .onTapGesture(count: 2) { if !node.isDirectory { (primaryAction ?? openFile)(node.path) } }
                         .contextMenu {
-                            if !node.isDirectory { Button(compareText("Open Compare")) { openFile(node.path) } }
-                            Button(compareText("Rename File")) { destination = node.path; renamePath = node.path }
-                            Button(compareText("Move to Trash")) { trashPath = node.path }
-                            Button(compareText("Ignore Path")) { perform { try await repository.ignoreWorkspacePath(node.path, directory: node.isDirectory) } }
+                            WorkspaceContextMenu(paths: [node.path], files: files, repository: repository, isBusy: isBusy || mutationBusy, directories: node.isDirectory ? [node.path] : [], allowsCleanHistory: true, onAction: { action, paths in
+                                onAction(action, paths)
+                            })
+
                         }
                 }
             }.listStyle(.inset)
@@ -56,15 +59,6 @@ struct WorkspaceTree: View {
             .onReceive(NotificationCenter.default.publisher(for: .rayGitWorktreeChanged)) { note in
                 if let changed = note.object as? URL, changed == repository.url { Task { await reload() } }
             }
-            .alert(compareText("Rename File"), isPresented: Binding(get: { renamePath != nil }, set: { if !$0 { renamePath = nil } })) {
-                TextField(compareText("Repository-relative destination"), text: $destination)
-                Button(compareText("Rename File")) { if let path = renamePath { perform { try await repository.renameWorkspaceFile(path: path, destination: destination) } }; renamePath = nil }
-                Button(compareText("Cancel"), role: .cancel) { renamePath = nil }
-            }
-            .alert(compareText("Move to Trash"), isPresented: Binding(get: { trashPath != nil }, set: { if !$0 { trashPath = nil } })) {
-                Button(compareText("Move to Trash"), role: .destructive) { if let path = trashPath { perform { trashed.append(try await repository.trashWorkspaceFile(path: path)) } }; trashPath = nil }
-                Button(compareText("Cancel"), role: .cancel) { trashPath = nil }
-            } message: { Text(trashPath ?? "") }
             .sheet(isPresented: $showIgnored) {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(compareText("Ignored Files")).font(.headline)
@@ -95,6 +89,9 @@ struct WorkspaceTree: View {
                     }
                 }.controlSize(.small).padding(20).frame(width: 650, height: 500)
             }
+    }
+    private var treeSelection: Binding<Set<String>> {
+        Binding(get: { selection.wrappedValue }, set: { selection.wrappedValue = WorkspaceTreeSelection.resolve($0, changedPaths: changedPaths) })
     }
     private var filteredNodes: [WorkspaceFileNode] {
         guard let visiblePaths else { return nodes }
@@ -128,4 +125,15 @@ struct WorkspaceTree: View {
 }
 private extension WorkspaceFileNode {
     var outlineChildren: [WorkspaceFileNode]? { isDirectory ? children : nil }
+}
+
+/// Expand directories to changed descendants. Preserve an unmatched path so a
+/// clean or empty directory never becomes an empty/global toolbar selection.
+enum WorkspaceTreeSelection {
+    static func resolve(_ paths: Set<String>, changedPaths: Set<String>) -> Set<String> {
+        Set(paths.flatMap { path in
+            let descendants = changedPaths.filter { $0.hasPrefix(path + "/") }
+            return descendants.isEmpty ? [path] : Array(descendants)
+        })
+    }
 }

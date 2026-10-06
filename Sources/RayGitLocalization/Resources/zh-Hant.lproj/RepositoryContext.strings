@@ -1,0 +1,12 @@
+"Edit Remote URL" = "編輯遠端位址";
+"Edit Ignore File" = "編輯忽略檔案";
+"No remotes configured" = "尚未設定遠端儲存庫";
+"Remote" = "遠端儲存庫";
+"Fetch URL" = "拉取位址";
+"Edit explicit push URL" = "編輯獨立推送位址";
+"Push URL" = "推送位址";
+"Empty removes the first explicit push URL" = "留空可移除第一個獨立推送位址";
+"Only the first push URL is edited" = "僅編輯第一個推送位址";
+"Reload" = "重新載入";
+"Cancel" = "取消";
+"Save" = "儲存";

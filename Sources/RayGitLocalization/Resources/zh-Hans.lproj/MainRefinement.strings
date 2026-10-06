@@ -9,3 +9,4 @@
 "Discard selected tracked changes, or all eligible tracked changes when none are selected" = "丢弃选中的已跟踪改动；未选择时丢弃全部可丢弃的已跟踪改动";
 "Choose a commit message template" = "选择提交消息模板";
 "Load configured template" = "加载已配置模板";
+"Open in Finder" = "在 Finder 中打开";

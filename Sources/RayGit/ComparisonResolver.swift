@@ -24,8 +24,10 @@ struct ConflictResolverToolbar: View {
                 .foregroundStyle(blocks.isEmpty && !malformed ? Color.green : Color.orange)
             Text(malformed ? resolverText("Incomplete conflict markers — repair the result manually") : (blocks.isEmpty ? resolverText("No unresolved conflicts") : resolverText("Conflict %d of %d", current + 1, blocks.count)))
                 .fontWeight(.semibold).lineLimit(1).frame(maxWidth: 190, alignment: .leading)
-            Button { state.select?((current + blocks.count - 1) % blocks.count) } label: { Image(systemName: "chevron.up") }.help(resolverText("Previous conflict")).accessibilityLabel(resolverText("Previous conflict")).disabled(blocks.isEmpty || !enabled)
-            Button { state.select?((current + 1) % blocks.count) } label: { Image(systemName: "chevron.down") }.help(resolverText("Next conflict")).accessibilityLabel(resolverText("Next conflict")).disabled(blocks.isEmpty || !enabled)
+            HStack(spacing: 2) {
+                Button { state.select?((current + blocks.count - 1) % blocks.count) } label: { ComparisonToolbarIcon(name: "chevron.up") }.buttonStyle(ComparisonToolbarButtonStyle()).help(resolverText("Previous conflict")).accessibilityLabel(resolverText("Previous conflict")).disabled(blocks.isEmpty || !enabled)
+                Button { state.select?((current + 1) % blocks.count) } label: { ComparisonToolbarIcon(name: "chevron.down") }.buttonStyle(ComparisonToolbarButtonStyle()).help(resolverText("Next conflict")).accessibilityLabel(resolverText("Next conflict")).disabled(blocks.isEmpty || !enabled)
+            }.buttonStyle(ToolbarRowButtonStyle(minimumWidth: 22))
             Divider().frame(height: 16)
             choice("Use Ours", .ours)
             choice("Use Theirs", .theirs)
@@ -36,12 +38,12 @@ struct ConflictResolverToolbar: View {
                     Divider()
                     Button(resolverText("Use Base")) { state.accept?(.base, current) }
                 }
-            } label: { Image(systemName: "ellipsis") }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            } label: { Image(systemName: "ellipsis").frame(width: 24, height: 24).contentShape(Rectangle()) }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().frame(height: 24)
                 .help(resolverText("Apply to the current conflict only")).accessibilityLabel(resolverText("Apply to the current conflict only")).disabled(blocks.isEmpty || !enabled)
             Spacer(minLength: 0)
             if blocks.indices.contains(current) { Text(resolverText("Lines %d–%d", blocks[current].startLine, blocks[current].endLine)).foregroundStyle(.secondary) }
-        }.font(.system(size: 11)).controlSize(.small)
+        }.buttonStyle(ToolbarRowButtonStyle()).font(.system(size: 11)).controlSize(.small)
     }
     private func choice(_ key: String, _ side: ConflictDraft.Side) -> some View {
         Button { state.accept?(side, current) } label: {
@@ -52,7 +54,7 @@ struct ConflictResolverToolbar: View {
                 if side == .theirsThenOurs { Image(systemName: "chevron.backward.2") }
                 Text(resolverText(key))
             }
-        }.buttonStyle(.bordered).tint(side == .theirs ? .green : .blue)
+        }.buttonStyle(ToolbarRowButtonStyle()).foregroundStyle(side == .theirs ? Color.green : Color.blue)
             .help(resolverText("Apply to the current conflict only")).disabled(blocks.isEmpty || !enabled)
     }
 }

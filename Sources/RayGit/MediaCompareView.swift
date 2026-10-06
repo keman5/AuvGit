@@ -171,7 +171,7 @@ struct ExternalComparisonButton: View {
                 launch(executable)
             }
         } label: {
-            if iconOnly { Image(systemName: "arrow.up.forward.square") }
+            if iconOnly { ComparisonToolbarIcon(name: "arrow.up.forward.square") }
             else { Text(advancedText("external")) }
         }
         .menuStyle(.borderlessButton).menuIndicator(iconOnly ? .hidden : .visible).fixedSize()

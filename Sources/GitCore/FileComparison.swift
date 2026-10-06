@@ -25,6 +25,27 @@ public struct FileComparisonSnapshot: Sendable {
     public var requiresStaticPreview: Bool { ["svg", "pdf"].contains(URL(fileURLWithPath: path).pathExtension.lowercased()) || [head, index, worktree, base, ours, theirs].compactMap { $0 }.contains { $0.isBinary || $0.exceedsPreviewLimit || ($0.data != nil && $0.text == nil) } }
 }
 
+public extension FileComparisonSnapshot {
+    /// Maps a full editor snapshot to the index → worktree display patch.
+    func worktreeDisplayPatch(fallingBackFrom patch: String, ignoreWhitespace: Bool = false) async throws -> String {
+        guard !isConflict else { return patch }
+        let preview = FileComparisonSnapshot(path: path, head: index, index: index, worktree: worktree,
+                                             base: nil, ours: nil, theirs: nil,
+                                             previewTarget: .worktree(path: path, untracked: !index.exists))
+        return try await preview.displayPatch(fallingBackFrom: patch, ignoreWhitespace: ignoreWhitespace)
+    }
+    /// Display-only UTF-8 patch for decoded text that Git classified as binary (e.g. UTF-16).
+    /// Never used for staging: original byte snapshots and fresh apply checks remain intact.
+    func displayPatch(fallingBackFrom patch: String, ignoreWhitespace: Bool = false) async throws -> String {
+        guard !requiresStaticPreview, previewTarget != nil,
+              !head.isBinary, !worktree.isBinary,
+              !head.exists || head.text != nil, !worktree.exists || worktree.text != nil,
+              (patch.contains("Binary files ") || patch.contains("GIT binary patch")),
+              DiffParser.parse(patch).isBinary else { return patch }
+        return try await LargeTextComparison.patch(source: head.text ?? "", target: worktree.text ?? "", ignoreWhitespace: ignoreWhitespace)
+    }
+}
+
 public enum FileComparisonLimits { public static let previewBytes = 32 * 1024 * 1024 }
 private func hasUTF8TextPrefix(_ data: Data) -> Bool {
     guard !data.contains(0) else { return false }
@@ -42,11 +63,18 @@ private func decodeContent(_ data: Data, reason: String? = nil) -> FileRevisionC
     let decoded = ComparisonTextDecoder.decode(data)
     let binary = decoded.isBinary
     let text = decoded.text
-    let mixedEndings = text.map { value in
-        let remainder = value.replacingOccurrences(of: "\r\n", with: "")
-        return [value.contains("\r\n"), remainder.contains("\n"), remainder.contains("\r")].filter { $0 }.count > 1
-    } ?? false
-    return FileRevisionContent(data: data, text: text?.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n"), exists: true, isBinary: binary,
+    var hasCRLF = false, hasLF = false, hasCR = false, previousCR = false
+    if let text {
+        for byte in text.utf8 {
+            if previousCR { if byte == 10 { hasCRLF = true } else { hasCR = true } }
+            if byte == 10 && !previousCR { hasLF = true }
+            previousCR = byte == 13
+        }
+        if previousCR { hasCR = true }
+    }
+    let mixedEndings = [hasCRLF, hasLF, hasCR].filter { $0 }.count > 1
+    let normalized = (hasCRLF || hasCR) ? text?.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n") : text
+    return FileRevisionContent(data: data, text: normalized, exists: true, isBinary: binary,
         unavailableReason: reason ?? (mixedEndings ? "Files with mixed line endings are read-only." : data.count > comparisonLimit ? "Files larger than 2 MB are read-only." : decoded.readOnlyReason), byteCount: data.count)
 }
 
@@ -91,7 +119,7 @@ extension GitRepository {
         content.gitMode = permissions & 0o111 != 0 ? "100755" : "100644"
         return content
     }
-    private func blobContent(_ oid: String, mode: String) async throws -> FileRevisionContent {
+    private nonisolated func blobContent(_ oid: String, mode: String) async throws -> FileRevisionContent {
         if mode == "160000" || mode == "040000" { return FileRevisionContent(data: nil, text: nil, exists: true, isBinary: false, unavailableReason: "Directories and submodules are read-only.", gitMode: mode, objectID: oid) }
         let size = try await GitProcess.run(at: url, arguments: ["cat-file", "-s", oid])
         let byteCount = Int(size.text.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
@@ -104,33 +132,45 @@ extension GitRepository {
         content.gitMode = mode; content.objectID = oid
         return content
     }
-    private func blobPrefix(_ oid: String) async throws -> Data {
+    private nonisolated func blobPrefix(_ oid: String) async throws -> Data {
         return try await GitCommandLog.$suppressRoutineReads.withValue(true) {
             try await GitProcess.run(at: url, arguments: ["cat-file", "blob", oid], timeout: 5, outputPrefixBytes: 4096).data
         }
     }
     public func fileComparison(path: String) async throws -> FileComparisonSnapshot {
         let file = try comparisonURL(path)
-        let fileStatus = try await status().first(where: { $0.path == path })
+        async let statusRead = status()
+        async let headRead = GitProcess.run(at: url, arguments: ["rev-parse", "--verify", "HEAD"], allowedCodes: [0, 128])
+        async let indexRead = GitProcess.run(at: url, arguments: ["ls-files", "--stage", "-z", "--", path])
+        let fileStatus = try await statusRead.first(where: { $0.path == path })
         let original = fileStatus?.originalPath ?? path
-        let headCheck = try await GitProcess.run(at: url, arguments: ["rev-parse", "--verify", "HEAD"], allowedCodes: [0, 128])
-        var head = missingContent()
+        let headCheck = try await headRead
+        var versions: [Int: (oid: String, mode: String)] = [:]
         if headCheck.code == 0 {
-            let tree = try await GitProcess.run(at: url, arguments: ["ls-tree", "-z", "HEAD", "--", original])
+            let tree = try await GitProcess.run(at: url, arguments: ["ls-tree", "-z", headCheck.text.trimmingCharacters(in: .whitespacesAndNewlines), "--", original])
             if let entry = tree.data.split(separator: 0).first, let tab = entry.firstIndex(of: 9) {
                 let fields = String(decoding: entry[..<tab], as: UTF8.self).split(separator: " ")
-                if fields.count == 3 { head = try await blobContent(String(fields[2]), mode: String(fields[0])) }
+                if fields.count == 3 { versions[-1] = (String(fields[2]), String(fields[0])) }
             }
         }
-        let listing = try await GitProcess.run(at: url, arguments: ["ls-files", "--stage", "-z", "--", path])
-        var stages: [Int: FileRevisionContent] = [:]
+        let listing = try await indexRead
         for entry in listing.data.split(separator: 0) {
             guard let tab = entry.firstIndex(of: 9), String(decoding: entry[entry.index(after: tab)...], as: UTF8.self) == path else { continue }
             let fields = String(decoding: entry[..<tab], as: UTF8.self).split(separator: " ")
-            if fields.count == 3, let stage = Int(fields[2]) { stages[stage] = try await blobContent(String(fields[1]), mode: String(fields[0])) }
+            if fields.count == 3, let stage = Int(fields[2]) { versions[stage] = (String(fields[1]), String(fields[0])) }
         }
-        return FileComparisonSnapshot(path: path, head: head, index: stages[0] ?? missingContent(), worktree: try diskContent(file), base: stages[1], ours: stages[2], theirs: stages[3], status: fileStatus)
+        // HEAD and index commonly point at the same immutable blob. Read/decode it once.
+        let unique = Dictionary(versions.values.map { ($0.mode + ":" + $0.oid, $0) }, uniquingKeysWith: { first, _ in first })
+        let content = try await withThrowingTaskGroup(of: (String, FileRevisionContent).self) { group in
+            for (key, version) in unique { group.addTask { (key, try await self.blobContent(version.oid, mode: version.mode)) } }
+            var result: [String: FileRevisionContent] = [:]
+            for try await (key, value) in group { result[key] = value }
+            return result
+        }
+        func revision(_ stage: Int) -> FileRevisionContent? { versions[stage].flatMap { content[$0.mode + ":" + $0.oid] } }
+        return FileComparisonSnapshot(path: path, head: revision(-1) ?? missingContent(), index: revision(0) ?? missingContent(), worktree: try diskContent(file), base: revision(1), ours: revision(2), theirs: revision(3), status: fileStatus)
     }
+
     public func comparisonPreview(target: DiffTarget) async throws -> FileComparisonSnapshot {
         switch target {
         case let .worktree(path, _):

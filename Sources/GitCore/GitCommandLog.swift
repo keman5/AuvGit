@@ -10,6 +10,9 @@ public struct GitCommandRecord: Identifiable, Sendable {
     public let duration: TimeInterval
     public let exitCode: Int32?
     public let operation: String
+    public let cancelled: Bool
+    public let userInitiated: Bool
+    public let operationID: UUID?
     private let archive: GitLogArchive?
     public let previewTruncated: Bool
     public var fullOutputAvailable: Bool { !previewTruncated || archive?.available == true }
@@ -19,9 +22,9 @@ public struct GitCommandRecord: Identifiable, Sendable {
         guard let contents = archive?.read() else { return (output, error, !previewTruncated) }
         return (contents.output, contents.error, true)
     }
-    init(date: Date, directory: String, command: String, output: String, error: String?, duration: TimeInterval, exitCode: Int32?, operation: String) {
+    init(date: Date, directory: String, command: String, output: String, error: String?, duration: TimeInterval, exitCode: Int32?, operation: String, cancelled: Bool = false, userInitiated: Bool = false, operationID: UUID? = nil) {
         self.date = date; self.directory = directory; self.command = command
-        self.duration = duration; self.exitCode = exitCode; self.operation = operation
+        self.duration = duration; self.exitCode = exitCode; self.operation = operation; self.cancelled = cancelled; self.userInitiated = userInitiated; self.operationID = operationID
         previewTruncated = output.count > 32_768 || (error?.count ?? 0) > 32_768
         self.output = String(output.prefix(32_768)); self.error = error.map { String($0.prefix(32_768)) }
         archive = previewTruncated ? GitLogArchive(output: output, error: error) : nil
@@ -74,7 +77,14 @@ private final class GitLogArchive: @unchecked Sendable {
 }
 public enum GitCommandLog {
     @TaskLocal public static var suppressRoutineReads = false
+    @TaskLocal public static var userInitiated = false
+    @TaskLocal public static var operationID: UUID?
     public static let notification = Notification.Name("RayGitCommandCompleted")
+    public static func userOperation(directory: URL, name: String, started: Date, error: String? = nil, cancelled: Bool = false, operationID: UUID? = nil) -> GitCommandRecord {
+        GitCommandRecord(date: started, directory: directory.path, command: "",
+                         output: cancelled ? "Cancelled" : "", error: error.map(redact),
+                         duration: Date().timeIntervalSince(started), exitCode: nil, operation: redact(name), cancelled: cancelled, userInitiated: true, operationID: operationID)
+    }
     public static func applicationFailure(directory: URL?, message: String) -> GitCommandRecord {
         GitCommandRecord(date: Date(), directory: directory?.path ?? "", command: "",
                          output: "", error: redact(message), duration: 0, exitCode: nil, operation: "Application operation")
@@ -108,13 +118,27 @@ public enum GitCommandLog {
         let record = GitCommandRecord(date: started, directory: directory.path,
             command: ([executable] + safeArguments).map(quote).joined(separator: " "),
             output: sensitive ? "[configuration output omitted]" : redact(output),
-            error: sensitive ? error.map { _ in "[configuration error omitted]" } : error.map(redact), duration: Date().timeIntervalSince(started), exitCode: exitCode, operation: operation)
+            error: sensitive ? error.map { _ in "[configuration error omitted]" } : error.map(redact), duration: Date().timeIntervalSince(started), exitCode: exitCode, operation: operation, userInitiated: userInitiated, operationID: operationID)
         NotificationCenter.default.post(name: notification, object: record)
     }
 }
 public enum GitFailureSummary {
+    public static func message(for message: String, localize: (String) -> String) -> String? {
+        guard let key = key(for: message) else { return nil }
+        let summary = localize(key)
+        guard key == "Remote rejected the push" else { return summary }
+        let lines = GitCommandLog.redact(message).split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        let remote = lines.filter { $0.lowercased().hasPrefix("remote:") }.map { String($0.dropFirst(7)).trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("Enumerating objects:") && !$0.hasPrefix("Counting objects:") && !$0.hasPrefix("Compressing objects:") && !$0.hasPrefix("Total ") && !$0.hasPrefix("Resolving deltas:") }
+        let reasons = remote.isEmpty ? lines.filter { $0.lowercased().contains("[remote rejected]") }
+            : remote.filter { $0.lowercased().hasPrefix("error:") } + remote.filter { !$0.lowercased().hasPrefix("error:") }
+        return summary + ": " + reasons.joined(separator: " · ")
+    }
     public static func key(for message: String) -> String? {
         let text = message.lowercased()
+        if text.contains("stale info") { return "Remote changed; preview and confirm force push again" }
+        if text.contains("branch or push configuration changed") { return "Branch or push configuration changed; preview and confirm force push again" }
+        if text.contains("[remote rejected]") || text.split(separator: "\n").contains(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("remote: error:") }) { return "Remote rejected the push" }
         if text.contains("ssl certificate") || text.contains("certificate verify failed") || text.contains("certificate verification failed") || text.contains("ssl connect error") || text.contains("tls handshake") { return "TLS certificate verification failed" }
         if text.contains("proxy authentication") || text.contains("could not resolve proxy") || text.contains("failed to connect to proxy") || text.contains("proxy connect aborted") || text.contains("http code 407") { return "Proxy connection or authentication failed" }
         if text.contains("host key verification failed") || text.contains("remote host identification has changed") { return "SSH host key verification failed" }

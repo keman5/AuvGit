@@ -23,8 +23,10 @@
 "untracked" = "Untracked";
 "modified" = "Modified";
 "added" = "Added";
-"deleted" = "Deleted";
+"deleted" = "Removed";
 "renamed" = "Renamed";
 "copied" = "Copied";
 "conflict" = "Conflict";
 "type" = "Type Changed";
+
+"stagedStatus" = "Staged";

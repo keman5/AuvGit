@@ -9,6 +9,7 @@ public extension GitRepository {
     }
     static func clone(source: String, destination: URL) async throws -> GitRepository {
         guard !source.isEmpty, !source.hasPrefix("-"), !source.contains("\0") else { throw GitError("Invalid clone source") }
+        try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
         _ = try await GitProcess.run(at: destination.deletingLastPathComponent(), arguments: ["clone", "--", source, destination.path])
         return try await open(destination)
     }

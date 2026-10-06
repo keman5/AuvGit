@@ -29,8 +29,8 @@ struct ComparisonExtrasMenu: View {
                 ForEach(versions, id: \.0) { name, version in Button(name) { restore = version; restoreName = name; confirmRestore = true } }
             }.disabled(session.isDirty)
             Button(compareExtra(session.snapshot?.isConflict == true ? "deleteResolve" : "deleteFile"), role: .destructive) { confirmDelete = true }.disabled(session.isDirty)
-        } label: { Image(systemName: "ellipsis") }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help(compareExtra("more")).disabled(session.isBusy || session.snapshot == nil)
+        } label: { ComparisonToolbarIcon(name: "ellipsis") }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().frame(width: 22, height: 24).help(compareExtra("more")).disabled(session.isBusy || session.snapshot == nil)
         .sheet(isPresented: $showEncoding) { EncodingConversionSheet(session: session) }
         .sheet(isPresented: $showRename) { RenameIdentitySheet(session: session) }
         .alert(compareExtra("applyExternalResult"), isPresented: $confirmExternal) {

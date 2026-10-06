@@ -31,5 +31,13 @@
 "SSH host key verification failed" = "SSH host key verification failed";
 "Commit signing failed" = "Commit signing failed";
 "Git hook rejected the operation" = "Git hook rejected the operation";
+"Remote rejected the push" = "Remote rejected the push";
 "Git LFS operation failed" = "Git LFS operation failed";
 "Disk is full" = "Disk is full";
+
+"Remote changed; preview and confirm force push again" = "Remote changed; preview and confirm force push again";
+"Branch or push configuration changed; preview and confirm force push again" = "Branch or push configuration changed; preview and confirm force push again";
+
+"Cancelled" = "Cancelled";
+
+"Refreshed" = "Refreshed";

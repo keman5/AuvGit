@@ -12,3 +12,5 @@
 "Select a commit" = "Select a commit";
 "Name" = "Name";
 "This operation changes the repository. Review the selected commit before continuing." = "This operation changes the repository. Review the selected commit before continuing.";
+
+"Recyclable commits" = "Recyclable commits";

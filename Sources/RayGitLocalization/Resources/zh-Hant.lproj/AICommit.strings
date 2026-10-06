@@ -25,3 +25,8 @@
 "Save" = "儲存";
 "Codex generation failed; check login, executable and model" = "Codex 產生失敗；請檢查登入、執行檔與模型";
 "Uses your current Codex login and model provider; tools and project settings remain isolated." = "使用目前 Codex 登入與模型服務；工具和專案設定保持隔離。";
+"Staged patch limit (KB)" = "暫存補丁限制（KB）";
+"Staged diff exceeds the configured limit" = "暫存差異超過設定的限制";
+"Generate from staged summary" = "根據暫存摘要產生";
+"Staged summary is too large; select fewer staged files" = "暫存摘要過大；請減少暫存檔案";
+"Increase the staged patch limit in AI settings, or generate from staged file names and change counts. Summary mode cannot describe code details." = "可在 AI 設定中提高暫存補丁限制，或根據暫存檔名和變更數量產生。摘要模式無法描述程式碼細節。";

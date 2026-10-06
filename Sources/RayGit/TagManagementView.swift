@@ -54,7 +54,7 @@ struct TagManagementView: View {
                     Spacer()
                     HStack {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField(designText("Search tags, annotations or commits"), text: $query).textFieldStyle(.plain)
+                        StableTextField(designText("Search tags, annotations or commits"), text: $query, rounded: false)
                         if !query.isEmpty { Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(.secondary) }
                     }.padding(8).frame(width: 300).background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
                         .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(nsColor: .separatorColor).opacity(0.6)))
@@ -126,8 +126,8 @@ struct TagManagementView: View {
     private var createSheet: some View {
         VStack(alignment: .leading, spacing: 22) {
             DesignPageHeading(title: workflowText("Create tag"), subtitle: designText("Point a new tag at a repository revision"), icon: "tag")
-            DesignSettingRow(workflowText("Tag name")) { TextField(workflowText("Tag name"), text: $name).textFieldStyle(.roundedBorder).frame(width: 280) }
-            DesignSettingRow(workflowText("Target revision")) { TextField(workflowText("Target revision"), text: $revision).textFieldStyle(.roundedBorder).frame(width: 280) }
+            DesignSettingRow(workflowText("Tag name")) { StableTextField(workflowText("Tag name"), text: $name).textFieldStyle(.roundedBorder).frame(width: 280) }
+            DesignSettingRow(workflowText("Target revision")) { StableTextField(workflowText("Target revision"), text: $revision).textFieldStyle(.roundedBorder).frame(width: 280) }
             DesignSettingRow(designText("Tag type")) {
                 Picker(designText("Tag type"), selection: $tagKind) {
                     Text(designText("Lightweight")).tag("lightweight")
@@ -154,7 +154,7 @@ struct TagManagementView: View {
     private func field(_ label: String, text: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(workflowText(label)).font(.callout)
-            TextField(workflowText(label), text: text).textFieldStyle(.roundedBorder)
+            StableTextField(workflowText(label), text: text).textFieldStyle(.roundedBorder)
         }
     }
     private func reload() async {

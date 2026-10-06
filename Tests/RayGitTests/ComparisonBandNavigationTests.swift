@@ -33,12 +33,14 @@ final class ComparisonBandNavigationTests: XCTestCase {
         for _ in 0..<5 { split.layoutSubtreeIfNeeded(); coordinator.alignDisplay(); try? await Task.sleep(nanoseconds: 1_000_000) }
         let scrolls = split.subviews.compactMap { $0.subviews.compactMap { $0 as? NSScrollView }.first }
         XCTAssertEqual(scrolls.count, 3)
+        let alignmentBuilds = coordinator.alignmentBuildCount
         var ys: [CGFloat] = []
         for _ in 0..<4 {
             coordinator.navigateChange(forward: true)
             let y = scrolls[0].contentView.bounds.minY; ys.append(y)
             for scroll in scrolls { XCTAssertEqual(scroll.contentView.bounds.minY, y, accuracy: 0.1) }
         }
+        XCTAssertEqual(coordinator.alignmentBuildCount, alignmentBuilds, "Navigation must reuse the full logical alignment")
         XCTAssertEqual(ys, ys.sorted()); XCTAssertEqual(Set(ys).count, 4)
         let text = scrolls[2].documentView as! NSTextView
         XCTAssertNil(commands.replaceSearch(options: ComparisonSearchOptions(query: "working change"), replacement: "edited", all: true))
@@ -48,4 +50,46 @@ final class ComparisonBandNavigationTests: XCTestCase {
         XCTAssertEqual(text.selectedRange().location, prefix.utf16.count)
         commands.undo(); XCTAssertEqual(text.string, strings[2])
     }
+    func testProportionalRailSelectsUnchangedInteriorLineAndHorizontalSyncWithoutVerticalSync() async throws {
+        _ = NSApplication.shared
+        let long = String(repeating: "abcdefgh", count: 80)
+        let original = (1...300).map { "line \($0) " + long }.joined(separator: "\n") + "\n"
+        var cursor: ComparisonCursorStatus?
+        let changed = original.replacingOccurrences(of: "line 30 ", with: "changed 30 ")
+        let model = ComparisonEditor(columns: [
+            ComparisonEditorColumn(id: "head", title: "HEAD", text: original, isEditable: false, message: nil),
+            ComparisonEditorColumn(id: "worktree", title: "Working", text: changed, isEditable: true, message: nil)
+        ], wrapLines: false, showLineNumbers: true, synchronizeScroll: false, search: "", navigation: 0, changeNavigation: 0, onEdit: { _, _ in }, onCursorChange: { cursor = $0 })
+        let split = ComparisonSplitView(frame: NSRect(x: 0, y: 0, width: 1000, height: 300)); split.isVertical = true
+        let coordinator = ComparisonEditor.Coordinator(model); coordinator.split = split; coordinator.update(model)
+        let window = NSWindow(contentRect: split.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentView = split; defer { window.close() }
+        split.resetDistribution()
+        for _ in 0..<5 { split.layoutSubtreeIfNeeded(); coordinator.alignDisplay(); try? await Task.sleep(nanoseconds: 1_000_000) }
+        let scrolls = split.subviews.compactMap { $0.subviews.compactMap { $0 as? ComparisonOverviewScrollView }.first }
+        XCTAssertEqual(scrolls.count, 2)
+        let first = try XCTUnwrap(scrolls.first), second = scrolls[1]
+        first.overview.navigate(to: 0.5)
+        for scroll in scrolls {
+            let view = try XCTUnwrap(scroll.documentView as? NSTextView)
+            let row = (view.string as NSString).substring(to: view.selectedRange().location).filter { $0 == "\n" }.count
+            XCTAssertTrue((145...155).contains(row), "Rail must select the pointed unchanged line, not change30")
+        }
+        coordinator.navigateChange(forward: true)
+        try? await Task.sleep(nanoseconds: 1_000_000)
+        XCTAssertEqual(cursor?.line, 30)
+        XCTAssertEqual(cursor?.column, 1)
+        XCTAssertGreaterThan(cursor?.selectedCharacters ?? 0, 0)
+        let targetY = second.contentView.bounds.minY
+        first.contentView.scroll(to: NSPoint(x: 160, y: first.contentView.bounds.minY + 80))
+        coordinator.didScroll(Notification(name: NSView.boundsDidChangeNotification, object: first.contentView))
+        XCTAssertEqual(second.contentView.bounds.minX, first.contentView.bounds.minX, accuracy: 0.1)
+        XCTAssertEqual(second.contentView.bounds.minY, targetY, accuracy: 0.1)
+        first.overview.navigate(to: 1)
+        for scroll in scrolls {
+            let view = try XCTUnwrap(scroll.documentView as? NSTextView)
+            XCTAssertEqual(view.selectedRange().location, view.string.utf16.count)
+        }
+    }
+
 }
