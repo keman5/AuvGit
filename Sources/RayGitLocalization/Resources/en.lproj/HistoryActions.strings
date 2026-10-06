@@ -8,3 +8,7 @@
 "revert" = "Revert…";
 "files" = "Changed Files";
 "noFiles" = "No changed files";
+
+"reset" = "Reset…";
+
+"resetAdvanced" = "Advanced Reset…";

@@ -103,7 +103,7 @@ public extension GitRepository {
         case .pushPreview: args = ["push", "--dry-run", "--porcelain"]
         case .forcePush: args = ["push", "--force-with-lease"]
         case .merge: args = ["merge", "--no-edit", try await workflowRevision(first)]
-        case .resetSoft, .resetMixed, .resetHard: args = ["reset", operation == .resetSoft ? "--soft" : operation == .resetMixed ? "--mixed" : "--hard", try await workflowRevision(first)]
+        case .resetSoft, .resetMixed, .resetHard: return try await reset(to: first, mode: operation == .resetSoft ? .soft : operation == .resetMixed ? .mixed : .hard)
         case .mergeContinue: args = ["-c", "core.editor=true", "merge", "--continue"]
         case .mergeAbort: args = ["merge", "--abort"]
         case .rebaseContinue:
@@ -135,4 +135,27 @@ public enum RepositoryWorkflow: String, CaseIterable, Identifiable, Sendable {
     case rebasePlan, interactiveRebase, stashRename, compare, reflog, blame, remoteList, remoteAdd, remoteRemove, upstream, trackingBranch, tags, tagDelete, annotatedTag, aheadBehind, pushPreview, forcePush, merge, resetSoft, resetMixed, resetHard, mergeContinue, mergeAbort, rebaseContinue, rebaseAbort, cherryContinue, cherryAbort, revertContinue, revertAbort, partialStash, submodules, submoduleUpdate, submoduleAdd, lfsStatus, lfsInstall, lfsTrack, flowStart, commitTemplate, signingKey, signingEnable
     public var id: String { rawValue }
     public var writes: Bool { ![Self.rebasePlan, .compare, .reflog, .blame, .remoteList, .tags, .aheadBehind, .pushPreview, .submodules, .lfsStatus].contains(self) }
+}
+
+public enum GitResetMode: String, CaseIterable, Sendable { case mixed, soft, hard, keep, merge }
+public struct GitResetContext: Equatable, Sendable {
+    public let repositoryURL: URL
+    public let head: String
+    public let reference: String
+}
+public extension GitRepository {
+    func resetContext() async throws -> GitResetContext {
+        for marker in ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "sequencer"] {
+            let path = try await workflowRead(["rev-parse", "--git-path", marker]).trimmingCharacters(in: .newlines)
+            let target = path.hasPrefix("/") ? URL(fileURLWithPath: path) : url.appendingPathComponent(path)
+            guard !FileManager.default.fileExists(atPath: target.path) else { throw GitError("Finish or abort the active Git operation before resetting") }
+        }
+        return GitResetContext(repositoryURL: url.standardizedFileURL, head: try await workflowRevision("HEAD"), reference: try await workflowRead(["rev-parse", "--symbolic-full-name", "HEAD"]).trimmingCharacters(in: .newlines))
+    }
+    func reset(to revision: String, mode: GitResetMode, expected: GitResetContext? = nil) async throws -> String {
+        let hash = try await workflowRevision(revision)
+        let current = try await resetContext()
+        guard expected == nil || expected == current else { throw GitError("Repository or HEAD changed. Reopen the reset confirmation.") }
+        return try await workflowRead(["reset", "--" + mode.rawValue, hash, "--"])
+    }
 }

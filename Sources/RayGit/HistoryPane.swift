@@ -8,7 +8,7 @@ private func historyText(_ key: String, _ arguments: CVarArg...) -> String {
 }
 
 enum HistoryAction: String, CaseIterable {
-    case viewLog, show, copyHash, copyMessage, createBranch, createTag, checkout, cherryPick, revert
+    case viewLog, show, copyHash, copyMessage, createBranch, createTag, checkout, cherryPick, revert, reset, resetAdvanced
     var isMutation: Bool { ![Self.viewLog, .show, .copyHash, .copyMessage].contains(self) }
 }
 
@@ -31,6 +31,8 @@ struct HistoryPane: View {
     var navigationGeneration: UUID? = nil
     var onJump: (String) -> Void = { _ in }
     var firstParentGraph: Bool = false
+    var onFind: () -> Void = {}
+    @State private var searchFocusRequest: UUID?
 
     @Binding var authorFilter: String
     @AppStorage("history.showAuthorAvatars") private var showAvatars = true
@@ -141,14 +143,18 @@ struct HistoryPane: View {
                 }.listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, compact ? 22 : RayGitStyle.rowHeight)
                     .contextMenu(forSelectionType: String.self) { hashes in
                         if let hash = hashes.first, let commit = commits.first(where: { $0.hash == hash }) {
-                            Button(sidebarRefinementText("viewLog")) { onAction(.viewLog, commit) }
-                            Button(sidebarRefinementText("commitDetails")) { onAction(.show, commit) }
+                            Button(sidebarRefinementText("viewLog")) { onAction(.viewLog, commit) }.keyboardShortcut("l")
+                            Button(sidebarRefinementText("commitDetails")) { onAction(.show, commit) }.keyboardShortcut(.return, modifiers: [])
                             Divider()
-                            ForEach([HistoryAction.cherryPick, .revert, .createBranch, .createTag, .checkout], id: \.self) { action in
+                            Button(historyActionText("reset")) { onAction(.reset, commit) }.keyboardShortcut("r").disabled(isBusy)
+                            Button(historyActionText("resetAdvanced")) { onAction(.resetAdvanced, commit) }.keyboardShortcut("r", modifiers: [.command, .shift]).disabled(isBusy)
+                            Button(historyActionText("createBranch")) { onAction(.createBranch, commit) }.keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF7FunctionKey)!)), modifiers: []).disabled(isBusy)
+                            Button(historyActionText("createTag")) { onAction(.createTag, commit) }.keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF7FunctionKey)!)), modifiers: [.shift]).disabled(isBusy)
+                            ForEach([HistoryAction.cherryPick, .revert, .checkout], id: \.self) { action in
                                 Button(historyActionText(action.rawValue)) { onAction(action, commit) }.disabled(isBusy)
                             }
                             Divider()
-                            Button(historyActionText("copyHash")) { onAction(.copyHash, commit) }
+                            Button(historyActionText("copyHash")) { onAction(.copyHash, commit) }.keyboardShortcut("c")
                             Button(historyActionText("copyMessage")) { onAction(.copyMessage, commit) }
                         }
                     } primaryAction: { hashes in
@@ -187,6 +193,12 @@ struct HistoryPane: View {
                     .accessibilityLabel(historyText("history.details"))
             }
         }.background(RayGitStyle.canvas)
+            .background(HistoryKeyboardRegion(action: { action in
+                guard let commit = commits.first(where: { $0.hash == selection }), !action.isMutation || !isBusy else { return }
+                onAction(action, commit)
+            }, find: {
+                if showsSearch { searchFocusRequest = UUID() } else { onFind() }
+            }))
         }
     }
     private func scrollAfterNavigation(_ proxy: ScrollViewProxy) {
@@ -201,7 +213,7 @@ struct HistoryPane: View {
         let values = commit.refs.filter { (showRemoteLabels || !isRemoteRef($0)) && (showTagLabels || !$0.hasPrefix("tag: ")) }
         return compact ? Array(values.prefix(1)) : values
     }
-    private var searchControl: some View { HistorySearchControl(search: $search) }
+    private var searchControl: some View { HistorySearchControl(search: $search, focusRequest: searchFocusRequest) }
     private var filterControls: some View {
         HStack(spacing: 8) {
             HStack(spacing: 6) { Image(systemName: "person").foregroundStyle(.secondary); StableTextField(workflowText("Author"), text: $authorFilter, rounded: false) }.padding(.horizontal, 8).frame(height: 24).rayGitInputSurface().frame(width: 140)
@@ -371,11 +383,12 @@ private struct CommitGraphCell: View {
 
 struct HistorySearchControl: View {
     @Binding var search: String
+    var focusRequest: UUID? = nil
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
             HistorySearchField(text: $search, placeholder: historyText("history.searchPlaceholder"),
-                               accessibilityLabel: historyText("history.searchAccessibility"))
+                               accessibilityLabel: historyText("history.searchAccessibility"), focusRequest: focusRequest)
                 .frame(height: 18)
             if !search.isEmpty {
                 Button { search = "" } label: { Image(systemName: "xmark.circle.fill").frame(width: 24, height: 24).contentShape(Rectangle()) }

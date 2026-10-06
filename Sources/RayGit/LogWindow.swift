@@ -112,6 +112,7 @@ private final class LogWindowController: NSWindowController, NSWindowDelegate {
 
 private struct LogWindowContent: View {
     @ObservedObject var store: RepositoryStore
+    @State private var resetRequest: HistoryResetRequest?
     @AppStorage(L10n.preferenceKey) private var language = "system"
     @State private var refSearch = ""
     @State private var highlightedReference: String?
@@ -175,7 +176,8 @@ private struct LogWindowContent: View {
                 if let url = event.object as? URL, url == store.repositoryURL { Task { await store.refresh(); await loadTags() } }
             }
             .onReceive(Timer.publish(every: 3, on: .main, in: .common).autoconnect()) { _ in Task { await store.pollForChanges() } }
-            .sheet(isPresented: $showOperationLog) { OperationLogView(store: store) }
+            .sheet(item: $resetRequest) { HistoryResetSheet(store: store, request: $0) }
+        .sheet(isPresented: $showOperationLog) { OperationLogView(store: store) }
             .sheet(item: $mutation) { request in mutationSheet(request) }
     }
     private var referenceSidebar: some View {
@@ -298,6 +300,9 @@ private struct LogWindowContent: View {
     private func historyAction(_ action: HistoryAction, _ commit: GitCommit) {
         guard let repository = store.repository else { return }
         switch action {
+        case .reset, .resetAdvanced:
+            guard !store.isBusy else { return }
+            resetRequest = HistoryResetRequest(commit: commit, repositoryURL: repository.url, advanced: action == .resetAdvanced)
         case .viewLog: LogPresenter.show(repository: repository, selectedCommit: commit.hash, applyFilter: true)
         case .show: CommitDetailPresenter.show(commit: commit, repository: repository)
         case .copyHash: copy(commit.hash)

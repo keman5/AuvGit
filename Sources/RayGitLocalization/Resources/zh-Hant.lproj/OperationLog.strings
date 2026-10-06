@@ -41,3 +41,7 @@
 "Cancelled" = "已取消";
 
 "Refreshed" = "已重新整理";
+
+"Finish or abort the active Git operation before resetting" = "請先完成或中止進行中的 Git 操作，再重設";
+
+"Repository or HEAD changed. Reopen the reset confirmation." = "儲存庫或 HEAD 已變更，請重新開啟重設確認。";

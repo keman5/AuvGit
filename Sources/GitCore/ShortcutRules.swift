@@ -2,7 +2,7 @@ import Foundation
 
 public enum ShortcutRules {
     public static let defaults = ["o", "r", "t", "k"]
-    public static let reserved = Set("qwhm,cvxzafs`".map(String.init))
+    public static let reserved = Set("qwhm,cvxzafsl`".map(String.init))
     public static func isValid(_ key: String) -> Bool {
         key.count == 1 && key.first?.isASCII == true && key.first?.isLetter == true && !reserved.contains(key.lowercased())
     }
@@ -16,7 +16,7 @@ public enum ShortcutRules {
         let candidates = defaults + "bdegijklnoprtuy".map(String.init)
         for index in result.indices where result[index].isEmpty {
             let preferred = defaults[index]
-            let key = !used.contains(preferred) ? preferred : candidates.first { !used.contains($0) }!
+            let key = !used.contains(preferred) ? preferred : candidates.first { isValid($0) && !used.contains($0) }!
             result[index] = key; used.insert(key)
         }
         return result

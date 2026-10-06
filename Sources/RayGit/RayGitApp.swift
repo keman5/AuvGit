@@ -35,6 +35,8 @@ struct RayGitApp: App {
                     .disabled(store.repository == nil && !LogPresenter.hasWindows)
                 Button(L10n.text("Refresh Repository")) { if !LogPresenter.refreshCurrentWindow() { Task { await store.refresh() } } }.keyboardShortcut(KeyEquivalent(configuredShortcuts[1].first ?? "r"))
                     .disabled(!LogPresenter.isLogWindowActive && (store.repository == nil || store.isBusy))
+                Button(L10n.text("Refresh Repository")) { if !LogPresenter.refreshCurrentWindow() { Task { await store.refresh() } } }.keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF5FunctionKey)!)), modifiers: [])
+                    .disabled(!LogPresenter.isLogWindowActive && (store.repository == nil || store.isBusy))
                 Button(L10n.text("stage", table: "Main")) { store.stageSelection() }.keyboardShortcut(KeyEquivalent(configuredShortcuts[2].first ?? "t"))
                     .disabled(LogPresenter.isLogWindowActive || !store.canStageSelection)
                 Button(L10n.text("unstage", table: "Main")) { store.unstageSelection() }

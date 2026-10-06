@@ -41,3 +41,7 @@
 "Cancelled" = "キャンセル済み";
 
 "Refreshed" = "更新済み";
+
+"Finish or abort the active Git operation before resetting" = "リセットする前に、実行中の Git 操作を完了または中止してください";
+
+"Repository or HEAD changed. Reopen the reset confirmation." = "リポジトリまたは HEAD が変更されました。リセットの確認を開き直してください。";

@@ -1,0 +1,12 @@
+"mode" = "Reset mode";
+"mixed" = "Mixed — keep working files, unstage changes";
+"soft" = "Soft — keep working files and index";
+"hard" = "Hard — discard tracked changes";
+"merge" = "Merge — preserve unstaged changes where possible";
+"keep" = "Keep — preserve local changes";
+"confirm" = "Reset";
+"mixedMessage" = "Moves HEAD and clears the index changes; working files remain.";
+"softMessage" = "Moves HEAD; working files and staged changes remain.";
+"hardMessage" = "Moves HEAD and replaces the index and tracked working files. Uncommitted tracked changes will be lost. Untracked files or directories blocking tracked files may also be deleted.";
+"mergeMessage" = "Moves HEAD and updates files; Git refuses when unstaged changes would be overwritten.";
+"keepMessage" = "Moves HEAD and updates files; Git refuses when local changes would be overwritten.";

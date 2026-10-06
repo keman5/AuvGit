@@ -11,9 +11,11 @@ struct HistorySearchField: NSViewRepresentable {
     var onSubmit: (() -> Void)? = nil
     var rounded = false
     var initialFocus = false
+    var focusRequest: UUID? = nil
 
     final class Coordinator: NSObject, NSTextFieldDelegate {
         var didFocus = false
+        var focusRequest: UUID?
         var parent: HistorySearchField
         init(_ parent: HistorySearchField) { self.parent = parent }
         func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
@@ -48,7 +50,8 @@ struct HistorySearchField: NSViewRepresentable {
         if field.stringValue != text { field.stringValue = text }
         field.isBezeled = rounded
         field.bezelStyle = .roundedBezel
-        if initialFocus && !context.coordinator.didFocus {
+        if (initialFocus && !context.coordinator.didFocus) || (focusRequest != nil && focusRequest != context.coordinator.focusRequest) {
+            context.coordinator.focusRequest = focusRequest
             context.coordinator.didFocus = true
             DispatchQueue.main.async { [weak field] in field?.window?.makeFirstResponder(field) }
         }

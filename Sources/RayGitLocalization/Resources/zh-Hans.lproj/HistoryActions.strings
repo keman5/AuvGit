@@ -8,3 +8,7 @@
 "revert" = "还原…";
 "files" = "变更文件";
 "noFiles" = "没有变更文件";
+
+"reset" = "重置…";
+
+"resetAdvanced" = "高级重置…";

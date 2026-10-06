@@ -9,7 +9,7 @@ final class GitExtensionsTests: XCTestCase {
         XCTAssertTrue(try UpdateManifest.isNewer("1.0.0", than: "1.0.0-rc.1"))
         XCTAssertTrue(try UpdateManifest.isNewer("1.0.0-beta.10", than: "1.0.0-beta.2"))
         XCTAssertThrowsError(try UpdateManifest.isNewer("invalid", than: "1.0.0"))
-        XCTAssertFalse(ShortcutRules.isValid("q")); XCTAssertFalse(ShortcutRules.isValid("s")); XCTAssertFalse(ShortcutRules.isValid("c"))
+        XCTAssertFalse(ShortcutRules.isValid("l")); XCTAssertFalse(ShortcutRules.isValid("q")); XCTAssertFalse(ShortcutRules.isValid("s")); XCTAssertFalse(ShortcutRules.isValid("c"))
         let repaired = ShortcutRules.normalized(["q", "r", "r", "C"])
         XCTAssertEqual(Set(repaired).count, 4); XCTAssertTrue(repaired.allSatisfy(ShortcutRules.isValid))
     }

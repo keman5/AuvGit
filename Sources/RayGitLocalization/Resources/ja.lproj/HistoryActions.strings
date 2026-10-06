@@ -8,3 +8,7 @@
 "revert" = "取り消し…";
 "files" = "変更ファイル";
 "noFiles" = "変更ファイルはありません";
+
+"reset" = "リセット…";
+
+"resetAdvanced" = "詳細リセット…";

@@ -4,7 +4,9 @@ import GitCore
 import RayGitLocalization
 
 struct MainWindow: View {
+    @State private var historySearchFocusRequest: UUID?
     @ObservedObject var store: RepositoryStore
+    @State private var resetRequest: HistoryResetRequest?
     var usesBorderlessToolbar = false
     var shellToolbarModel: BorderlessToolbarModel? = nil
     @StateObject private var fileFocus = WorkspaceFileFocus()
@@ -380,6 +382,7 @@ struct MainWindow: View {
         .sheet(isPresented: $showNetwork) { NetworkOperationsView(store: store) }
         .sheet(isPresented: $showTools) { RepositoryTools(store: store) }
         .sheet(isPresented: $showCreate) { CreateRepositorySheet(store: store) }
+        .sheet(item: $resetRequest) { HistoryResetSheet(store: store, request: $0) }
         .sheet(isPresented: $showActivity) { OperationLogView(store: store) }
         .sheet(item: $mergeAction) { prompt in
             VStack(alignment: .leading, spacing: 16) {
@@ -631,8 +634,8 @@ struct MainWindow: View {
 extension MainWindow {
     private func historyPane(compact: Bool) -> some View {
         VStack(spacing: 0) {
-            if compact { HStack { Label(interactionText("Log"), systemImage: "clock.arrow.circlepath").font(.system(size: 12, weight: .semibold)); HistorySearchControl(search: $store.historySearch).frame(maxWidth: .infinity); HistoryDisplayMenu(showMergedCommits: Binding(get: { store.showMergedCommits }, set: { store.setShowMergedCommits($0) })); Button { if let repo = store.repository { LogPresenter.show(repository: repo) } } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(.plain).help(interactionText("Expand History")) }.padding(.horizontal, 12).frame(height: 36).rayGitChrome() }
-            HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch, isLoading: store.loadingHistory, hasMore: store.hasMore, onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy, onAction: historyAction, compact: compact, showsSearch: !compact, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), navigationGeneration: store.historyNavigationGeneration, onJump: jumpToCommit, firstParentGraph: store.followsCurrentBranch && !store.showMergedCommits, authorFilter: $store.historyAuthor)
+            if compact { HStack { Label(interactionText("Log"), systemImage: "clock.arrow.circlepath").font(.system(size: 12, weight: .semibold)); HistorySearchControl(search: $store.historySearch, focusRequest: historySearchFocusRequest).frame(maxWidth: .infinity); HistoryDisplayMenu(showMergedCommits: Binding(get: { store.showMergedCommits }, set: { store.setShowMergedCommits($0) })); Button { if let repo = store.repository { LogPresenter.show(repository: repo) } } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(.plain).help(interactionText("Expand History")) }.padding(.horizontal, 12).frame(height: 36).rayGitChrome() }
+            HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch, isLoading: store.loadingHistory, hasMore: store.hasMore, onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy, onAction: historyAction, compact: compact, showsSearch: !compact, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), navigationGeneration: store.historyNavigationGeneration, onJump: jumpToCommit, firstParentGraph: store.followsCurrentBranch && !store.showMergedCommits, onFind: { historySearchFocusRequest = UUID() }, authorFilter: $store.historyAuthor)
         }
     }
     private func copyText(_ text: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
@@ -721,6 +724,9 @@ extension MainWindow {
             return
         }
         switch action {
+        case .reset, .resetAdvanced:
+            guard !store.isBusy else { return }
+            resetRequest = HistoryResetRequest(commit: commit, repositoryURL: repository.url, advanced: action == .resetAdvanced)
         case .show: CommitDetailPresenter.show(commit: commit, repository: repository)
         case .viewLog: LogPresenter.show(repository: repository, selectedCommit: commit.hash, applyFilter: true)
         case .copyHash: copyText(commit.hash)

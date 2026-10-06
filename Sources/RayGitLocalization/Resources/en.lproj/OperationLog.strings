@@ -41,3 +41,7 @@
 "Cancelled" = "Cancelled";
 
 "Refreshed" = "Refreshed";
+
+"Finish or abort the active Git operation before resetting" = "Finish or abort the active Git operation before resetting";
+
+"Repository or HEAD changed. Reopen the reset confirmation." = "Repository or HEAD changed. Reopen the reset confirmation.";

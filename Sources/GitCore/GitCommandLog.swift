@@ -136,6 +136,8 @@ public enum GitFailureSummary {
     }
     public static func key(for message: String) -> String? {
         let text = message.lowercased()
+        if text.contains("finish or abort the active git operation before resetting") { return "Finish or abort the active Git operation before resetting" }
+        if text.contains("repository or head changed. reopen the reset confirmation.") { return "Repository or HEAD changed. Reopen the reset confirmation." }
         if text.contains("stale info") { return "Remote changed; preview and confirm force push again" }
         if text.contains("branch or push configuration changed") { return "Branch or push configuration changed; preview and confirm force push again" }
         if text.contains("[remote rejected]") || text.split(separator: "\n").contains(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("remote: error:") }) { return "Remote rejected the push" }
