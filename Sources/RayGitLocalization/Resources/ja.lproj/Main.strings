@@ -2,7 +2,7 @@
 "open" = "開く";
 "openHelp" = "リポジトリを開く ⌘O";
 "refresh" = "更新";
-"refreshHelp" = "更新 ⌘R";
+"refreshHelp" = "更新 ⌥⌘R";
 "pullTitle" = "リモートの変更をプル";
 "pullMessage" = "現在のブランチを fast-forward のみでプルします。分岐している場合は停止してエラーを表示します。";
 "pushTitle" = "現在のブランチをプッシュ";
@@ -29,7 +29,7 @@
 "applyMessage" = "スタッシュの変更を作業ツリーに復元し、元のスタッシュを保持します。";
 "welcomeSubtitle" = "作業ツリー、コード差分、コミット履歴";
 "openLocal" = "ローカルリポジトリを開く…";
-"shortcuts" = "⌘O リポジトリを開く  ·  ⌘R 更新";
+"shortcuts" = "⌘O リポジトリを開く  ·  ⌥⌘R 更新";
 "view" = "表示";
 "workspaceCount" = "作業ツリー  %ld";
 "history" = "コミット履歴";

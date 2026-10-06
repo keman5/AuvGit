@@ -9,11 +9,7 @@ struct RayGitApp: App {
     @NSApplicationDelegateAdaptor(RayGitApplicationDelegate.self) private var appDelegate
     @StateObject private var store = RepositoryStore()
     @AppStorage(L10n.preferenceKey) private var languageCode = AppLanguage.system.rawValue
-    @AppStorage("shortcut.open") private var openKey = "o"
-    @AppStorage("shortcut.refresh") private var refreshKey = "r"
-    @AppStorage("shortcut.stage") private var stageKey = "t"
-    @AppStorage("shortcut.commit") private var commitKey = "k"
-    private var configuredShortcuts: [String] { ShortcutRules.normalized([openKey, refreshKey, stageKey, commitKey]) }
+    @StateObject private var shortcuts = KeyboardShortcuts.shared
     var body: some Scene {
         WindowGroup {
             MainWindow(store: store)
@@ -28,21 +24,21 @@ struct RayGitApp: App {
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button(L10n.text("Open Repository…")) { store.chooseRepository() }.keyboardShortcut(KeyEquivalent(configuredShortcuts[0].first ?? "o"))
+                Button(L10n.text("Open Repository…")) { store.chooseRepository() }.configuredShortcut(.open, using: shortcuts)
             }
             CommandGroup(after: .newItem) {
-                Button(logText("Log")) { LogPresenter.showForCurrentWindow(fallback: store.repository) }.keyboardShortcut("l")
+                Button(logText("Log")) { LogPresenter.showForCurrentWindow(fallback: store.repository) }.configuredShortcut(.viewLog, using: shortcuts)
                     .disabled(store.repository == nil && !LogPresenter.hasWindows)
-                Button(L10n.text("Refresh Repository")) { if !LogPresenter.refreshCurrentWindow() { Task { await store.refresh() } } }.keyboardShortcut(KeyEquivalent(configuredShortcuts[1].first ?? "r"))
+                Button(L10n.text("Refresh Repository")) { if !LogPresenter.refreshCurrentWindow() { Task { await store.refresh() } } }.configuredShortcut(.refresh, using: shortcuts)
                     .disabled(!LogPresenter.isLogWindowActive && (store.repository == nil || store.isBusy))
-                Button(L10n.text("Refresh Repository")) { if !LogPresenter.refreshCurrentWindow() { Task { await store.refresh() } } }.keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF5FunctionKey)!)), modifiers: [])
+                Button(L10n.text("Refresh Repository")) { if !LogPresenter.refreshCurrentWindow() { Task { await store.refresh() } } }.configuredShortcut(.refreshAlternate, using: shortcuts)
                     .disabled(!LogPresenter.isLogWindowActive && (store.repository == nil || store.isBusy))
-                Button(L10n.text("stage", table: "Main")) { store.stageSelection() }.keyboardShortcut(KeyEquivalent(configuredShortcuts[2].first ?? "t"))
+                Button(L10n.text("stage", table: "Main")) { store.stageSelection() }.configuredShortcut(.stage, using: shortcuts)
                     .disabled(LogPresenter.isLogWindowActive || !store.canStageSelection)
                 Button(L10n.text("unstage", table: "Main")) { store.unstageSelection() }
-                    .keyboardShortcut(KeyEquivalent(configuredShortcuts[2].first ?? "t"), modifiers: [.command, .shift])
+                    .configuredShortcut(.unstage, using: shortcuts)
                     .disabled(LogPresenter.isLogWindowActive || !store.canUnstageSelection)
-                Button(compareText("Commit")) { store.commit() }.keyboardShortcut(KeyEquivalent(configuredShortcuts[3].first ?? "k"))
+                Button(compareText("Commit")) { store.commit() }.configuredShortcut(.commit, using: shortcuts)
                     .disabled(LogPresenter.isLogWindowActive || store.repository == nil || store.isBusy || store.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }

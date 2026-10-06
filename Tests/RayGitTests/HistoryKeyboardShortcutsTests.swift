@@ -13,6 +13,10 @@ final class HistoryKeyboardShortcutsTests: XCTestCase {
         let scroll = NSScrollView(frame: region.frame)
         scroll.documentView = table
         content.addSubview(scroll); content.addSubview(region)
+        let suite = "HistoryKeyboardShortcutsTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        region.shortcuts = KeyboardShortcuts(defaults: defaults)
         var actions: [HistoryAction] = []
         var finds = 0
         region.action = { actions.append($0) }; region.find = { finds += 1 }
@@ -63,12 +67,26 @@ final class HistoryKeyboardShortcutsTests: XCTestCase {
         region.isHidden = true
         XCTAssertNotNil(region.handle(try key("r")))
         region.isHidden = false
+        XCTAssertTrue(region.shortcuts.set(.init(key: "F8", modifiers: 6), for: .reset))
+        XCTAssertNotNil(region.handle(try key("r")))
+        XCTAssertNil(region.handle(try key(String(UnicodeScalar(NSF8FunctionKey)!), [.shift, .option])))
+        XCTAssertEqual(actions.last, .reset)
+        XCTAssertEqual(actions.count, 12)
+        XCTAssertTrue(window.makeFirstResponder(editor))
+        XCTAssertTrue(region.shortcuts.set(.init(key: "b", modifiers: 5), for: .copyHash))
+        XCTAssertNil(region.handle(try key("b", [.command, .option])))
+        XCTAssertEqual(actions.last, .copyHash)
+        XCTAssertNotNil(region.handle(try key("c")))
+        XCTAssertTrue(region.shortcuts.set(.init(key: "j", modifiers: 5), for: .show))
+        XCTAssertNil(region.handle(try key("j", [.command, .option])))
+        XCTAssertEqual(actions.last, .show)
+        XCTAssertNotNil(region.handle(try key("\r", [])))
         XCTAssertTrue(window.makeFirstResponder(table))
         let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
         window.beginSheet(sheet)
         XCTAssertNotNil(window.attachedSheet)
-        XCTAssertNotNil(region.handle(try key("r")))
-        XCTAssertEqual(actions.count, 11)
+        XCTAssertNotNil(region.handle(try key(String(UnicodeScalar(NSF8FunctionKey)!), [.shift, .option])))
+        XCTAssertEqual(actions.count, 14)
         window.endSheet(sheet)
     }
 }

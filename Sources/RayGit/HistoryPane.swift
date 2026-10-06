@@ -39,6 +39,7 @@ struct HistoryPane: View {
     @AppStorage("history.showAuthorNames") private var showNames = true
     @AppStorage("history.showRemoteLabels") private var showRemoteLabels = true
     @AppStorage("history.showTagLabels") private var showTagLabels = true
+    @ObservedObject private var shortcuts = KeyboardShortcuts.shared
     @StateObject private var graphCache = HistoryGraphCache()
     @State private var pendingNavigationScroll = true
     @State private var jumpHash = ""
@@ -143,18 +144,18 @@ struct HistoryPane: View {
                 }.listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, compact ? 22 : RayGitStyle.rowHeight)
                     .contextMenu(forSelectionType: String.self) { hashes in
                         if let hash = hashes.first, let commit = commits.first(where: { $0.hash == hash }) {
-                            Button(sidebarRefinementText("viewLog")) { onAction(.viewLog, commit) }.keyboardShortcut("l")
-                            Button(sidebarRefinementText("commitDetails")) { onAction(.show, commit) }.keyboardShortcut(.return, modifiers: [])
+                            Button(sidebarRefinementText("viewLog")) { onAction(.viewLog, commit) }.configuredShortcut(.viewLog, using: shortcuts)
+                            Button(sidebarRefinementText("commitDetails")) { onAction(.show, commit) }.configuredShortcut(.show, using: shortcuts)
                             Divider()
-                            Button(historyActionText("reset")) { onAction(.reset, commit) }.keyboardShortcut("r").disabled(isBusy)
-                            Button(historyActionText("resetAdvanced")) { onAction(.resetAdvanced, commit) }.keyboardShortcut("r", modifiers: [.command, .shift]).disabled(isBusy)
-                            Button(historyActionText("createBranch")) { onAction(.createBranch, commit) }.keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF7FunctionKey)!)), modifiers: []).disabled(isBusy)
-                            Button(historyActionText("createTag")) { onAction(.createTag, commit) }.keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF7FunctionKey)!)), modifiers: [.shift]).disabled(isBusy)
+                            Button(historyActionText("reset")) { onAction(.reset, commit) }.configuredShortcut(.reset, using: shortcuts).disabled(isBusy)
+                            Button(historyActionText("resetAdvanced")) { onAction(.resetAdvanced, commit) }.configuredShortcut(.resetAdvanced, using: shortcuts).disabled(isBusy)
+                            Button(historyActionText("createBranch")) { onAction(.createBranch, commit) }.configuredShortcut(.createBranch, using: shortcuts).disabled(isBusy)
+                            Button(historyActionText("createTag")) { onAction(.createTag, commit) }.configuredShortcut(.createTag, using: shortcuts).disabled(isBusy)
                             ForEach([HistoryAction.cherryPick, .revert, .checkout], id: \.self) { action in
                                 Button(historyActionText(action.rawValue)) { onAction(action, commit) }.disabled(isBusy)
                             }
                             Divider()
-                            Button(historyActionText("copyHash")) { onAction(.copyHash, commit) }.keyboardShortcut("c")
+                            Button(historyActionText("copyHash")) { onAction(.copyHash, commit) }.configuredShortcut(.copyHash, using: shortcuts)
                             Button(historyActionText("copyMessage")) { onAction(.copyMessage, commit) }
                         }
                     } primaryAction: { hashes in

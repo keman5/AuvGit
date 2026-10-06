@@ -2,7 +2,7 @@
 "open" = "開啟";
 "openHelp" = "開啟儲存庫 ⌘O";
 "refresh" = "重新整理";
-"refreshHelp" = "重新整理 ⌘R";
+"refreshHelp" = "重新整理 ⌥⌘R";
 "pullTitle" = "拉取遠端變更";
 "pullMessage" = "將以 fast-forward-only 方式拉取目前分支；分歧時會停止並顯示錯誤。";
 "pushTitle" = "推送目前分支";
@@ -29,7 +29,7 @@
 "applyMessage" = "將儲藏變更還原至工作區；保留原儲藏記錄。";
 "welcomeSubtitle" = "工作區、程式碼比較與提交歷史";
 "openLocal" = "開啟本機儲存庫…";
-"shortcuts" = "⌘O 開啟儲存庫  ·  ⌘R 重新整理";
+"shortcuts" = "⌘O 開啟儲存庫  ·  ⌥⌘R 重新整理";
 "view" = "檢視";
 "workspaceCount" = "工作區  %ld";
 "history" = "提交歷史";

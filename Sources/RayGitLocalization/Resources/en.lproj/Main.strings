@@ -2,7 +2,7 @@
 "open" = "Open";
 "openHelp" = "Open Repository ⌘O";
 "refresh" = "Refresh";
-"refreshHelp" = "Refresh ⌘R";
+"refreshHelp" = "Refresh ⌥⌘R";
 "pullTitle" = "Pull Remote Changes";
 "pullMessage" = "Pull the current branch using fast-forward only. Diverged branches will stop with an error.";
 "pushTitle" = "Push Current Branch";
@@ -29,7 +29,7 @@
 "applyMessage" = "Restore stashed changes to the working tree and keep the original stash.";
 "welcomeSubtitle" = "Working Tree, Code Diffs and Commit History";
 "openLocal" = "Open Local Repository…";
-"shortcuts" = "⌘O Open Repository  ·  ⌘R Refresh";
+"shortcuts" = "⌘O Open Repository  ·  ⌥⌘R Refresh";
 "view" = "View";
 "workspaceCount" = "Working Tree  %ld";
 "history" = "Commit History";

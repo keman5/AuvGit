@@ -4,6 +4,7 @@ import GitCore
 import RayGitLocalization
 
 struct MainWindow: View {
+    @ObservedObject private var shortcuts = KeyboardShortcuts.shared
     @State private var historySearchFocusRequest: UUID?
     @ObservedObject var store: RepositoryStore
     @State private var resetRequest: HistoryResetRequest?
@@ -146,7 +147,7 @@ struct MainWindow: View {
                 if #available(macOS 26.0, *) { ToolbarSpacer(.flexible) }
                 ToolbarItem(id: "refresh") {
                     Button { performToolbarCommand("refresh") } label: { toolbarLabel(mainText("refresh"), systemImage: "arrow.clockwise") }
-                        .buttonStyle(ToolbarRowButtonStyle(height: 28, minimumWidth: 32)).controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).help(mainText("refreshHelp")).disabled(store.repository == nil || store.isBusy)
+                        .buttonStyle(ToolbarRowButtonStyle(height: 28, minimumWidth: 32)).controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).help(shortcutText(ShortcutCommand.refresh.title) + " " + shortcuts.binding(.refresh).displayString).disabled(store.repository == nil || store.isBusy)
                 }.compactMainToolbarItem()
                 ToolbarItem(id: "create") {
                     Button { performToolbarCommand("create") } label: { toolbarLabel(refinementText("Create"), systemImage: "folder.badge.plus") }
@@ -154,7 +155,7 @@ struct MainWindow: View {
                 }.compactMainToolbarItem()
                 ToolbarItem(id: "open") {
                     Button { store.chooseRepository() } label: { toolbarLabel(mainText("open"), systemImage: "folder.badge.plus") }
-                        .buttonStyle(ToolbarRowButtonStyle(height: 28, minimumWidth: 32)).controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).help(mainText("openHelp")).disabled(store.isBusy)
+                        .buttonStyle(ToolbarRowButtonStyle(height: 28, minimumWidth: 32)).controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).help(shortcutText(ShortcutCommand.open.title) + " " + shortcuts.binding(.open).displayString).disabled(store.isBusy)
                 }.compactMainToolbarItem().defaultCustomization(.hidden)
                 ToolbarItem(id: "fetch") {
                     Button { store.operation("Fetch") { try await $0.fetch() } } label: { toolbarLabel(mainText("fetch"), systemImage: "arrow.down.to.line") }
@@ -184,7 +185,7 @@ struct MainWindow: View {
                 ToolbarItem(id: "search") {
                     Button { showWorkspaceSearch = true } label: { toolbarLabel(designWorkspaceText("Search files, commits, branches…"), systemImage: "magnifyingglass") }
                         .buttonStyle(ToolbarRowButtonStyle(height: 28, minimumWidth: 32))
-                        .keyboardShortcut("k").disabled(store.repository == nil)
+                        .disabled(store.repository == nil)
                 }.compactMainToolbarItem().defaultCustomization(.hidden)
                 ToolbarItem(id: "tools") {
                     Menu {
@@ -458,7 +459,7 @@ struct MainWindow: View {
             Text("RayGit").font(.largeTitle.bold())
             Text(mainText("welcomeSubtitle")).font(.title3).foregroundStyle(.secondary)
             Button(mainText("openLocal")) { store.chooseRepository() }.buttonStyle(.borderedProminent).controlSize(.large)
-            Text(mainText("shortcuts")).font(.caption).foregroundStyle(.tertiary)
+            Text([ShortcutCommand.open, .refresh].map { shortcuts.binding($0).displayString + " " + shortcutText($0.title) }.joined(separator: "  ·  ")).font(.caption).foregroundStyle(.tertiary)
         }
     }
     var workspace: some View {

@@ -6,6 +6,7 @@ struct HistoryKeyboardRegion: NSViewRepresentable {
     let action: (HistoryAction) -> Void
     let find: () -> Void
     final class RegionView: NSView {
+        var shortcuts = KeyboardShortcuts.shared
         var action: (HistoryAction) -> Void = { _ in }
         var find: () -> Void = {}
         private var monitor: Any?
@@ -29,19 +30,9 @@ struct HistoryKeyboardRegion: NSViewRepresentable {
             if window.firstResponder is NSTextView || window.firstResponder is NSTextField {
                 if (key == "c" && modifiers == .command) || (key == "\r" && modifiers.isEmpty) { return event }
             }
-            if modifiers == .command, key == "f" { find(); return nil }
-            let selectedAction: HistoryAction?
-            switch (key, modifiers) {
-            case ("r", .command): selectedAction = .reset
-            case ("r", [.command, .shift]): selectedAction = .resetAdvanced
-            case ("c", .command): selectedAction = .copyHash
-            case ("l", .command): selectedAction = .viewLog
-            case (String(UnicodeScalar(NSF7FunctionKey)!), []): selectedAction = .createBranch
-            case (String(UnicodeScalar(NSF7FunctionKey)!), .shift): selectedAction = .createTag
-            case ("\r", []): selectedAction = .show
-            default: selectedAction = nil
-            }
-            guard let selectedAction else { return event }
+            if shortcuts.binding(.find).matches(event) { find(); return nil }
+            guard let command = ShortcutCommand.allCases.first(where: { $0.historyAction != nil && shortcuts.binding($0).matches(event) }),
+                  let selectedAction = command.historyAction else { return event }
             action(selectedAction); return nil
         }
     }

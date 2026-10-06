@@ -2,7 +2,7 @@
 "open" = "打开";
 "openHelp" = "打开仓库 ⌘O";
 "refresh" = "刷新";
-"refreshHelp" = "刷新 ⌘R";
+"refreshHelp" = "刷新 ⌥⌘R";
 "pullTitle" = "拉取远程变更";
 "pullMessage" = "将以 fast-forward-only 方式拉取当前分支；分叉时会停止并显示错误。";
 "pushTitle" = "推送当前分支";
@@ -29,7 +29,7 @@
 "applyMessage" = "将贮藏变更恢复到工作区；保留原贮藏记录。";
 "welcomeSubtitle" = "工作区、代码对比与提交历史";
 "openLocal" = "打开本地仓库…";
-"shortcuts" = "⌘O 打开仓库  ·  ⌘R 刷新";
+"shortcuts" = "⌘O 打开仓库  ·  ⌥⌘R 刷新";
 "view" = "视图";
 "workspaceCount" = "工作区  %ld";
 "history" = "提交历史";

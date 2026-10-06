@@ -6,10 +6,7 @@ struct ExtensionsSettings: View {
     enum Page { case all, shortcuts, workflow, updates }
     var page: Page = .all
     @ObservedObject var store: RepositoryStore
-    @AppStorage("shortcut.open") private var openKey = "o"
-    @AppStorage("shortcut.refresh") private var refreshKey = "r"
-    @AppStorage("shortcut.stage") private var stageKey = "t"
-    @AppStorage("shortcut.commit") private var commitKey = "k"
+    @ObservedObject private var shortcuts = KeyboardShortcuts.shared
     @AppStorage("updates.manifest") private var manifestURL = ""
     @State private var kind = GitFlowKind.feature
     @State private var flowName = ""
@@ -23,18 +20,15 @@ struct ExtensionsSettings: View {
     @State private var updateTask: Task<Void, Never>?
     @State private var checkedSource: URL?
     @State private var shortcutError: String?
-    private var keys: [String] { [openKey, refreshKey, stageKey, commitKey] }
-    private var validKeys: Bool { keys.allSatisfy { ShortcutRules.isValid($0) } && Set(keys.map { $0.lowercased() }).count == 4 }
     var body: some View {
         Form {
             if page == .all || page == .shortcuts {
             Section(compareText("Keyboard Shortcuts")) {
-                shortcut("Open Repository", $openKey)
-                shortcut("Refresh", $refreshKey)
-                shortcut("Stage", $stageKey)
-                shortcut("Commit", $commitKey)
+                ForEach(ShortcutCommand.allCases, id: \.self) { command in shortcut(command) }
+                Text(shortcutText("Letter shortcuts require Command or Control. Copy and Return keep native text editing."))
+                    .font(.caption).foregroundStyle(.secondary)
                 if let shortcutError { Text(shortcutError).font(.caption).foregroundStyle(.orange) }
-                if !validKeys { Text(compareText("Use four distinct single letters; shortcuts use Command.")).font(.caption).foregroundStyle(.orange) }
+                Button(shortcutText("Restore Defaults")) { shortcuts.restoreDefaults(); shortcutError = nil }
             }
             }
             if page == .all || page == .workflow {
@@ -85,7 +79,6 @@ struct ExtensionsSettings: View {
                 Section(panelText("Results")) { Text(message).font(.callout).foregroundStyle(.orange).textSelection(.enabled) }
             }
         }.formStyle(.grouped).controlSize(.small)
-            .onAppear { repairShortcuts() }
             .onChange(of: manifestURL) { _, _ in updateGeneration += 1; updateTask?.cancel(); checking = false; update = nil; checkedSource = nil; message = "" }
             .onDisappear { updateGeneration += 1; updateTask?.cancel(); checking = false }
     }
@@ -94,23 +87,26 @@ struct ExtensionsSettings: View {
             StableTextField(compareText(title), text: text).labelsHidden().textFieldStyle(.roundedBorder).frame(maxWidth: 280)
         }
     }
-    private func shortcut(_ title: String, _ key: Binding<String>) -> some View {
-        LabeledContent(compareText(title)) {
-            HStack(spacing: 8) {
-                Text("⌘").foregroundStyle(.secondary)
-                StableTextField(compareText(title), text: Binding(get: { key.wrappedValue }, set: { new in
-                    let value = new.lowercased()
-                    let index = ["Open Repository", "Refresh", "Stage", "Commit"].firstIndex(of: title) ?? 0
-                    let other = keys.enumerated().filter { $0.offset != index }.map(\.element)
-                    if ShortcutRules.isValid(value), !other.map({ $0.lowercased() }).contains(value) { key.wrappedValue = value; shortcutError = nil }
-                    else { shortcutError = compareText("Shortcut conflicts with another action or a macOS command.") }
-                })).labelsHidden().textFieldStyle(.roundedBorder).multilineTextAlignment(.center).frame(width: 44)
+    private func shortcut(_ command: ShortcutCommand) -> some View {
+        LabeledContent(shortcutText(command.title)) {
+            HStack(spacing: 6) {
+                ForEach([(1, "⌘"), (2, "⇧"), (4, "⌥"), (8, "⌃")], id: \.0) { bit, symbol in
+                    Toggle(symbol, isOn: Binding(get: { shortcuts.binding(command).modifiers & bit != 0 }, set: { enabled in
+                        var value = shortcuts.binding(command)
+                        if enabled { value.modifiers |= bit } else { value.modifiers &= ~bit }
+                        saveShortcut(value, command)
+                    })).toggleStyle(.button).accessibilityLabel(shortcutText(command.title) + ": " + shortcutText([1: "Command", 2: "Shift", 4: "Option", 8: "Control"][bit]!)).help(shortcutText([1: "Command", 2: "Shift", 4: "Option", 8: "Control"][bit]!))
+                }
+                Picker(shortcutText("Key"), selection: Binding(get: { shortcuts.binding(command).key }, set: { key in
+                    var value = shortcuts.binding(command); value.key = key; saveShortcut(value, command)
+                })) {
+                    ForEach(ShortcutBinding.keys, id: \.self) { key in Text(key == "Return" ? shortcutText("Return") : key.uppercased()).tag(key) }
+                }.labelsHidden().accessibilityLabel(shortcutText(command.title) + ": " + shortcutText("Key")).frame(width: 90)
             }
         }
     }
-    private func repairShortcuts() {
-        let repaired = ShortcutRules.normalized(keys)
-        openKey = repaired[0]; refreshKey = repaired[1]; stageKey = repaired[2]; commitKey = repaired[3]
+    private func saveShortcut(_ value: ShortcutBinding, _ command: ShortcutCommand) {
+        shortcutError = shortcuts.set(value, for: command) ? nil : shortcutText("Shortcut conflicts with another action or a macOS command.")
     }
     private func checkUpdates() {
         guard let url = URL(string: manifestURL) else { message = compareText("Invalid update manifest."); return }

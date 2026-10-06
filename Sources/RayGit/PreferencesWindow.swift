@@ -54,7 +54,7 @@ struct PreferencesWindow: View {
          "Appearance": ["Theme", "Language", "Light", "Dark"], "History": ["Commits per page", "Commit dates", "Relative"],
          "Editor": ["Editor", "Font", "Font size", "Wrap lines", "Difference colors", "Syntax colors", "Character differences", "Highlight current line", "Synchronized scrolling", "Comparison layout", "Whitespace", "Tab", "Line numbers"], "Commands and Git": ["Git", "Commit", "Trim", "Executable", "Timeout", "Signing", "Email", "Identity", "Commit message cleanup"],
          "Network and Authentication": ["Proxy", "Authentication", "SSH", "Credentials", "Fetch", "Prune"], "External Tools": ["Compare", "Merge", "Tools", "Executable", "Arguments"],
-         "Keyboard Shortcuts": ["Open Repository", "Stage", "Refresh", "Commit"], "Git Flow and Hosting": ["Feature", "Release", "Hotfix", "Review"],
+         "Keyboard Shortcuts": ["Open Repository", "Stage", "Unstage", "Refresh", "Commit", "Log", "Reset", "Branch", "Tag", "Filter", "Hash", "Details"], "Git Flow and Hosting": ["Feature", "Release", "Hotfix", "Review"],
          "Updates": ["Manifest", "Download"], "Privacy": ["Clear recent repositories…", "Clear session drafts…", "Telemetry"],
          "Advanced": ["Background refresh", "Polling interval (seconds)"]]
     }
