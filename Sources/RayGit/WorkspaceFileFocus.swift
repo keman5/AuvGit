@@ -17,6 +17,25 @@ final class WorkspaceFileFocus: ObservableObject {
     }
     deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
     func register(_ view: NSView, toolbar: Bool) { regions[ObjectIdentifier(view)] = WeakRegion(view: view, toolbar: toolbar) }
+    @discardableResult func focus(in window: NSWindow, text: Bool = false) -> Bool {
+        let live = regions.values.compactMap { region -> NSView? in
+            guard !region.toolbar, let view = region.view, view.window === window, !view.isHiddenOrHasHiddenAncestor else { return nil }
+            return view
+        }
+        guard !live.isEmpty, let content = window.contentView else { return false }
+        func candidates(_ view: NSView) -> [NSView] {
+            guard !view.isHiddenOrHasHiddenAncestor else { return [] }
+            let visible = view.visibleRect.intersection(view.bounds)
+            let center = NSPoint(x: visible.midX, y: visible.midY)
+            let inside = !visible.isEmpty && live.contains { $0.bounds.contains($0.convert(center, from: view)) }
+            let supported = text ? view is NSTextView : view is NSTableView
+            let current: [NSView] = inside && view.acceptsFirstResponder && supported ? [view] : []
+            return current + view.subviews.flatMap(candidates)
+        }
+        let targets = candidates(content)
+        for target in targets where window.makeFirstResponder(target) { updateScope(true); return true }
+        return false
+    }
     func handle(_ event: NSEvent) {
         guard let window = event.window else { return }
         guard event.type != .leftMouseUp, event.type != .rightMouseUp else { return }

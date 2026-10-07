@@ -7,6 +7,10 @@ enum FileAction {
     case compare, open, reveal, history, stage, unstage, discard
     case copyName, copyPath, copyRelativePath, stageAll, unstageAll, rename, ignore, trash
 }
+struct FilePaneShortcutRequest {
+    let id = UUID()
+    let command: ShortcutCommand
+}
 
 struct WorkspaceFilesPane<TreeContent: View>: View {
     let files: [GitFile]
@@ -19,6 +23,8 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
     let treeContent: (Set<String>?) -> TreeContent
     var repository: GitRepository? = nil
     var fileFocus: WorkspaceFileFocus? = nil
+    var shortcutRequest: FilePaneShortcutRequest? = nil
+    @State private var filterFocusRequest: UUID?
 
     @AppStorage("workspace.columns.v1") private var columnCustomization = TableColumnCustomization<Row>()
     @State private var sortOrder = [KeyPathComparator(\Row.path, comparator: .localizedStandard)]
@@ -108,7 +114,7 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
             .disabled(isBusy || targets.isEmpty || (single && paths.count != 1))
     }
 
-    var body: some View {
+    private var content: some View {
         VStack(spacing: 0) {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 10) { statusControls; Spacer(minLength: 4); fileControls }
@@ -120,18 +126,36 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
                 RayGitEmptyState(title: text(files.isEmpty ? "clean" : "noFiles"), systemImage: files.isEmpty ? "checkmark.circle" : "magnifyingglass")
             } else { fileTable }
         }
+    }
+    private var filteredContent: some View {
+        content
         .onAppear { rebuildVisibleFiles(); if treeMode && showIgnored { treeMode = false } }
+        .onChange(of: shortcutRequest?.id) { _, _ in performShortcut() }
         .onChange(of: files) { _, _ in rebuildVisibleFiles(); if showIgnored { Task { await loadIgnored() } } }
         .onChange(of: filter) { _, _ in rebuildVisibleFiles() }
         .onChange(of: filterCase) { _, _ in rebuildVisibleFiles() }
         .onChange(of: category) { _, _ in rebuildVisibleFiles() }
         .onChange(of: showHidden) { _, _ in rebuildVisibleFiles() }
+    }
+    var body: some View {
+        filteredContent
         .onChange(of: ignoredPaths) { _, _ in rebuildVisibleFiles() }
         .onChange(of: sortOrder) { _, _ in rebuildVisibleFiles() }
         .task(id: (repository?.url.path ?? "") + "|\(showIgnored)") { await loadIgnored() }
         .onChange(of: showIgnored) { _, value in rebuildVisibleFiles(); if value { treeMode = false } }
         .onReceive(NotificationCenter.default.publisher(for: .rayGitWorktreeChanged)) { notification in
-            if let root = notification.object as? URL, root == repository?.url, showIgnored { Task { await loadIgnored() } }
+            refreshIgnored(notification)
+        }
+    }
+    private func refreshIgnored(_ notification: Notification) {
+        if let root = notification.object as? URL, root == repository?.url, showIgnored { Task { await loadIgnored() } }
+    }
+    private func performShortcut() {
+        switch shortcutRequest?.command {
+        case .filterFiles: filterFocusRequest = UUID()
+        case .showUnversionedFiles: category = category == .untracked ? .all : .untracked
+        case .showIgnoredFiles: showIgnored.toggle(); category = .all; treeMode = false
+        default: break
         }
     }
     private var statusControls: some View {
@@ -161,7 +185,7 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
         HStack(spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                StableTextField(text("filter"), text: $filter, rounded: false)
+                HistorySearchField(text: $filter, placeholder: text("filter"), accessibilityLabel: text("filter"), rounded: false, focusRequest: filterFocusRequest)
                     .frame(height: 20)
             }.padding(.horizontal, 9).frame(height: 24).rayGitInputSurface().frame(width: 170)
             Button {
@@ -230,11 +254,11 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
     private func fileStatus(_ file: GitFile) -> some View {
         let presentation = WorkspaceFileStatus(file)
         let title = presentation.keys.map(text).joined(separator: " · ")
-        return RayGitBadge(title, tint: presentation.kind == "conflict" ? .orange : presentation.kind == "deleted" ? .red : presentation.kind == "added" || presentation.kind == "untracked" || presentation.kind == "stagedStatus" ? .green : .orange).help(title)
+        return RayGitBadge(title, tint: presentation.kind == "conflict" ? .orange : presentation.kind == "deleted" ? .red : presentation.kind == "untracked" ? .blue : presentation.kind == "added" || presentation.kind == "stagedStatus" ? .green : .orange).help(title)
     }
     private func status(_ value: String, selected: Bool) -> some View {
         let key = [" ": "none", "?": "untracked", "M": "modified", "A": "added", "D": "deleted", "R": "renamed", "C": "copied", "U": "conflict", "T": "type"][value]
-        let color: Color = value == "A" || value == "?" ? .green : value == "D" ? .red : ["M", "R", "U"].contains(value) ? .orange : .secondary
+        let color: Color = value == "?" ? .blue : value == "A" ? .green : value == "D" ? .red : ["M", "R", "U"].contains(value) ? .orange : .secondary
         return Group {
             if value == " " { Text(text("none")).foregroundStyle(.tertiary).font(.system(size: 11)) }
             else { RayGitBadge(key.map(text) ?? value, tint: color) }

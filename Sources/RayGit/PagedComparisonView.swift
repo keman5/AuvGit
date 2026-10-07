@@ -14,6 +14,7 @@ struct PagedComparisonView: View {
     var searchRequested = false
     var onSearchClosed: (() -> Void)? = nil
     var changeNavigation = 0
+    var searchNavigation = 0
     var onCursorChange: ((ComparisonCursorStatus) -> Void)? = nil
     @State private var page = 0
     @State private var pendingOverviewFraction: Double?
@@ -81,6 +82,7 @@ struct PagedComparisonView: View {
             searchOptions = initialSearchOptions; replacement = initialReplacement; compactDisplay = compact; showSearch = searchRequested
             compactSource = revisions.first?.0 ?? ""; loadPages(); loadOverview(); search(); if compactDisplay { loadPatch() }
         }
+        .onChange(of: searchNavigation) { old, new in locate(new > old) }
         .onChange(of: changeNavigation) { old, new in
             guard !overviewBands.isEmpty else { return }
             let index = selectedChange < 0 ? (new > old ? 0 : overviewBands.count - 1) : (selectedChange + (new > old ? 1 : overviewBands.count - 1)) % overviewBands.count

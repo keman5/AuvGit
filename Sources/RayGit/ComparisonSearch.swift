@@ -37,6 +37,7 @@ enum ComparisonSearch {
 }
 
 struct ComparisonSearchPopover: View {
+    @ObservedObject private var shortcuts = KeyboardShortcuts.shared
     @Environment(\.dismiss) private var dismiss
     @Binding var options: ComparisonSearchOptions
     @Binding var replacement: String
@@ -58,8 +59,8 @@ struct ComparisonSearchPopover: View {
                 ComparisonSearchField(text: $options.query, placeholder: comparisonSearchText("Find"), initialFocus: true,
                     onNavigate: onNavigate, onEscape: close).frame(height: 24)
                 HStack(spacing: 2) {
-                    Button { onNavigate(false) } label: { ComparisonToolbarIcon(name: "chevron.up") }.buttonStyle(ComparisonToolbarButtonStyle()).help(comparisonSearchText("Previous match"))
-                    Button { onNavigate(true) } label: { ComparisonToolbarIcon(name: "chevron.down") }.buttonStyle(ComparisonToolbarButtonStyle()).help(comparisonSearchText("Next match"))
+                    Button { onNavigate(false) } label: { ComparisonToolbarIcon(name: "chevron.up") }.buttonStyle(ComparisonToolbarButtonStyle()).configuredShortcut(.compareFindPrevious, using: shortcuts).help(comparisonSearchText("Previous match"))
+                    Button { onNavigate(true) } label: { ComparisonToolbarIcon(name: "chevron.down") }.buttonStyle(ComparisonToolbarButtonStyle()).configuredShortcut(.compareFindNext, using: shortcuts).help(comparisonSearchText("Next match"))
                 }
             }
             HStack {

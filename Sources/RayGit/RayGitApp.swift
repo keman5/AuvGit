@@ -10,6 +10,18 @@ struct RayGitApp: App {
     @StateObject private var store = RepositoryStore()
     @AppStorage(L10n.preferenceKey) private var languageCode = AppLanguage.system.rawValue
     @StateObject private var shortcuts = KeyboardShortcuts.shared
+    private var workspaceActive: Bool {
+        guard let window = NSApp.keyWindow, window.attachedSheet == nil else { return false }
+        return window.contentView.map { containsWorkspaceRegion($0) } ?? false
+    }
+    private func containsWorkspaceRegion(_ view: NSView) -> Bool {
+        if view is WorkspaceKeyboardRegion.RegionView, !view.isHiddenOrHasHiddenAncestor { return true }
+        return view.subviews.contains { containsWorkspaceRegion($0) }
+    }
+    private func sendWorkspaceShortcut(_ command: ShortcutCommand) {
+        guard workspaceActive, let window = NSApp.keyWindow else { return }
+        NotificationCenter.default.post(name: .rayGitWorkspaceShortcut, object: command.rawValue, userInfo: ["window": window])
+    }
     var body: some Scene {
         WindowGroup {
             MainWindow(store: store)
@@ -29,17 +41,17 @@ struct RayGitApp: App {
             CommandGroup(after: .newItem) {
                 Button(logText("Log")) { LogPresenter.showForCurrentWindow(fallback: store.repository) }.configuredShortcut(.viewLog, using: shortcuts)
                     .disabled(store.repository == nil && !LogPresenter.hasWindows)
-                Button(L10n.text("Refresh Repository")) { if !LogPresenter.refreshCurrentWindow() { Task { await store.refresh() } } }.configuredShortcut(.refresh, using: shortcuts)
-                    .disabled(!LogPresenter.isLogWindowActive && (store.repository == nil || store.isBusy))
-                Button(L10n.text("Refresh Repository")) { if !LogPresenter.refreshCurrentWindow() { Task { await store.refresh() } } }.configuredShortcut(.refreshAlternate, using: shortcuts)
-                    .disabled(!LogPresenter.isLogWindowActive && (store.repository == nil || store.isBusy))
-                Button(L10n.text("stage", table: "Main")) { store.stageSelection() }.configuredShortcut(.stage, using: shortcuts)
-                    .disabled(LogPresenter.isLogWindowActive || !store.canStageSelection)
-                Button(L10n.text("unstage", table: "Main")) { store.unstageSelection() }
+                Button(L10n.text("Refresh Repository")) { if !LogPresenter.refreshCurrentWindow() { sendWorkspaceShortcut(.refresh) } }.configuredShortcut(.refresh, using: shortcuts)
+                    .disabled(!LogPresenter.isLogWindowActive && (!workspaceActive || store.repository == nil || store.isBusy))
+                Button(L10n.text("Refresh Repository")) { if !LogPresenter.refreshCurrentWindow() { sendWorkspaceShortcut(.refresh) } }.configuredShortcut(.refreshAlternate, using: shortcuts)
+                    .disabled(!LogPresenter.isLogWindowActive && (!workspaceActive || store.repository == nil || store.isBusy))
+                Button(L10n.text("stage", table: "Main")) { sendWorkspaceShortcut(.stage) }.configuredShortcut(.stage, using: shortcuts)
+                    .disabled(!workspaceActive || !store.canStageSelection)
+                Button(L10n.text("unstage", table: "Main")) { sendWorkspaceShortcut(.unstage) }
                     .configuredShortcut(.unstage, using: shortcuts)
-                    .disabled(LogPresenter.isLogWindowActive || !store.canUnstageSelection)
-                Button(compareText("Commit")) { store.commit() }.configuredShortcut(.commit, using: shortcuts)
-                    .disabled(LogPresenter.isLogWindowActive || store.repository == nil || store.isBusy || store.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(!workspaceActive || !store.canUnstageSelection)
+                Button(compareText("Commit")) { sendWorkspaceShortcut(.commit) }.configuredShortcut(.commit, using: shortcuts)
+                    .disabled(!workspaceActive || store.repository == nil || store.isBusy)
             }
         }
         Settings {
@@ -381,11 +393,10 @@ final class RepositoryStore: ObservableObject {
     private func scheduleFilesystemRefresh(root: URL) {
         guard RayGitPreferences.backgroundRefresh, repositoryURL == root else { return }
         if filesystemRefreshing { filesystemPending = true; return }
-        // This reference belongs only to the sleeping debounce task. Clear it
-        // before starting Git so a new event never cancels an active refresh.
+        // FSEvents already coalesces bursts; do not add another debounce.
+        // Clear the task before Git so new events never cancel an active read.
         filesystemRefresh?.cancel()
         filesystemRefresh = Task {
-            do { try await Task.sleep(nanoseconds: 350_000_000) } catch { return }
             guard RayGitPreferences.backgroundRefresh, !Task.isCancelled, repositoryURL == root else { return }
             filesystemRefresh = nil
             if isBusy { return } // The active write ends with its own refresh.
@@ -404,15 +415,17 @@ final class RepositoryStore: ObservableObject {
     private var lastHistoryState: String?
     func refreshIfChanged() async {
         guard let repository, !isBusy, !checkingFilesystemState else { return }
-        let version = repoVersion
+        let version = repoVersion, readVersion = refreshReadVersion
         checkingFilesystemState = true
         defer { checkingFilesystemState = false }
         do {
             let state = try await GitCommandLog.$suppressRoutineReads.withValue(true) {
-                let files = try await repository.status()
-                return try await repository.changeState(files: files)
+                let newFiles = try await repository.status()
+                guard version == repoVersion, readVersion == refreshReadVersion, !isBusy else { throw CancellationError() }
+                applyFileStatus(newFiles)
+                return try await repository.changeState(files: newFiles)
             }
-            guard version == repoVersion, repositoryURL == repository.url, state != lastObservedState else { return }
+            guard version == repoVersion, readVersion == refreshReadVersion, !isBusy, repositoryURL == repository.url, state != lastObservedState else { return }
             await refresh()
         } catch { /* A canceled background read never becomes an operation error. */ }
     }
@@ -426,9 +439,12 @@ final class RepositoryStore: ObservableObject {
             async let newBranches = repository.branches()
             async let newBranch = repository.currentBranch()
             async let newStashes = repository.stashes()
-            let result = try await (newFiles, newBranches, newBranch, newStashes)
+            let fileStatus = try await newFiles
             guard version == repoVersion, refreshReadVersion == refreshVersion else { return }
-            if repositoryChangeCounts[repository.url.path] != result.0.count { repositoryChangeCounts[repository.url.path] = result.0.count }
+            applyFileStatus(fileStatus)
+            if repositoryChangeCounts[repository.url.path] != fileStatus.count { repositoryChangeCounts[repository.url.path] = fileStatus.count }
+            let result = try await (fileStatus, newBranches, newBranch, newStashes)
+            guard version == repoVersion, refreshReadVersion == refreshVersion else { return }
             let syncText = try? await GitCommandLog.$suppressRoutineReads.withValue(true) {
                 try await repository.workflowRead(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
             }
@@ -436,7 +452,6 @@ final class RepositoryStore: ObservableObject {
             guard version == repoVersion, refreshReadVersion == refreshVersion else { return }
             let syncState = RepositorySyncState(ahead: syncCounts.count == 2 ? syncCounts[0] : nil, behind: syncCounts.count == 2 ? syncCounts[1] : nil, conflicts: result.0.filter(\.isConflict).count)
             if repositorySyncStates[repository.url.path] != syncState { repositorySyncStates[repository.url.path] = syncState }
-            applyFileStatus(result.0)
             if branches != result.1 { branches = result.1 }
             if branch != result.2 { branch = result.2 }
             if stashes != result.3 { stashes = result.3 }
@@ -477,9 +492,10 @@ final class RepositoryStore: ObservableObject {
         defer { if refreshReadVersion == refreshVersion { refreshingRepository = nil } }
         do {
             let newFiles = try await repository.status()
-            let state = try await repository.changeState(files: newFiles)
             guard version == repoVersion, refreshReadVersion == refreshVersion else { return }
             applyFileStatus(newFiles)
+            let state = try await repository.changeState(files: newFiles)
+            guard version == repoVersion, refreshReadVersion == refreshVersion else { return }
             if repositoryChangeCounts[repository.url.path] != newFiles.count { repositoryChangeCounts[repository.url.path] = newFiles.count }
             let previous = repositorySyncStates[repository.url.path]
             let sync = RepositorySyncState(ahead: previous?.ahead, behind: previous?.behind, conflicts: newFiles.filter(\.isConflict).count)

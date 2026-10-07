@@ -10,7 +10,14 @@ enum SidebarAction { case openRepository, revealRepository, removeRecent, checko
 
 struct RepositorySidebar: View {
     @ObservedObject var store: RepositoryStore
+    @ObservedObject private var shortcuts = KeyboardShortcuts.shared
+    @State private var renameStash: String?
+    @State private var stashName = ""
+    @State private var rebaseReference: String?
     let onAction: (SidebarAction, String) -> Void
+    var repositoryFocusRequest: UUID? = nil
+    var branchFocus: WorkspaceFileFocus? = nil
+    @FocusState private var focusedRepository: String?
     @State private var branchSelection: String?
     @State private var contextTarget: RepositoryContextTarget?
     @AppStorage("sidebar.localBranchesExpanded") private var localBranchesExpanded = true
@@ -20,11 +27,18 @@ struct RepositorySidebar: View {
         VSplitView {
             VStack(spacing: 0) {
                 HStack { Text(interactionText("Repositories")).font(.system(size: 13, weight: .semibold)); Spacer(); Button { store.chooseRepository() } label: { Image(systemName: "plus").font(.system(size: 11, weight: .medium)).frame(width: 18, height: 18).contentShape(Rectangle()) }.buttonStyle(.plain).disabled(store.isBusy) }.padding(.horizontal, 16).frame(height: 32)
+                ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 2) {
                         ForEach(store.recentPaths, id: \.self) { path in repositoryRow(path) }
                     }.padding(.horizontal, 12)
                 }.font(.system(size: 12))
+                    .onChange(of: repositoryFocusRequest) { _, _ in
+                        guard let path = store.repositoryURL?.path ?? store.recentPaths.first else { return }
+                        proxy.scrollTo(path)
+                        DispatchQueue.main.async { focusedRepository = path }
+                    }
+                }
             }.frame(minHeight: 130, idealHeight: 300)
             VStack(spacing: 0) {
                 HStack { Text(interactionText("Branches")).font(.system(size: 13, weight: .semibold)); Spacer(); RayGitBadge(String(store.branches.count), tint: .secondary) }.padding(.horizontal, 16).frame(height: 42)
@@ -68,13 +82,15 @@ struct RepositorySidebar: View {
                 }.listStyle(.plain).font(.system(size: 12)).scrollContentBackground(.hidden)
                     .contentMargins(.vertical, 0, for: .scrollContent)
                     .environment(\.defaultMinListRowHeight, 22)
-                    .background(BranchListDensity().allowsHitTesting(false).accessibilityHidden(true))
+                    .background(BranchListDensity(onShortcut: handleShortcut).allowsHitTesting(false).accessibilityHidden(true))
+                    .background { if let branchFocus { WorkspaceFileFocusRegion(focus: branchFocus).allowsHitTesting(false).accessibilityHidden(true) } }
                     .contextMenu(forSelectionType: String.self) { items in
                         if let item = items.first, items.count == 1 {
                             let target = String(item.dropFirst(item.firstIndex(of: ":").map { item.distance(from: item.startIndex, to: $0) + 1 } ?? 0))
                             if item.hasPrefix("stash:") {
                                 Button(interactionText("Show Changes")) { onAction(.stashShow, target) }
                                 Button(interactionText("Apply Stash…")) { onAction(.stashApply, target) }.disabled(store.isBusy)
+                                Button(shortcutText("Rename Stash")) { prepareStashRename(target) }.disabled(store.isBusy)
                                 Button(interactionText("Drop Stash…")) { onAction(.stashDrop, target) }.disabled(store.isBusy)
                             } else {
                                 if item.hasPrefix("branch:") {
@@ -101,6 +117,41 @@ struct RepositorySidebar: View {
         .controlSize(.small)
         .background(RayGitStyle.sidebar)
         .sheet(item: $contextTarget) { target in RepositoryContextEditor(store: store, target: target) }
+        .sheet(isPresented: Binding(get: { rebaseReference != nil }, set: { if !$0 { rebaseReference = nil } })) {
+            RebaseWorkflowView(store: store, onClose: { rebaseReference = nil }, initialBase: rebaseReference ?? "HEAD~1")
+                .frame(width: 1000, height: 700).padding(20)
+        }
+        .alert(shortcutText("Rename Stash"), isPresented: Binding(get: { renameStash != nil }, set: { if !$0 { renameStash = nil } })) {
+            TextField(workflowText("Stash message"), text: $stashName)
+            Button(workflowText("Cancel"), role: .cancel) { renameStash = nil }
+            Button(shortcutText("Rename Stash")) {
+                guard let reference = renameStash else { return }; let name = stashName; renameStash = nil
+                store.operation(shortcutText("Rename Stash")) { _ = try await $0.renameStash(reference: reference, message: name) }
+            }.disabled(stashName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+    }
+    private func prepareStashRename(_ reference: String) {
+        stashName = store.stashes.first { $0.ref == reference }?.subject ?? ""
+        renameStash = reference
+    }
+    private func handleShortcut(_ event: NSEvent) -> Bool {
+        guard !store.isBusy, let item = branchSelection, let separator = item.firstIndex(of: ":") else { return false }
+        let target = String(item[item.index(after: separator)...])
+        func matches(_ command: ShortcutCommand) -> Bool { shortcuts.binding(command).matches(event) }
+        if item.hasPrefix("stash:") {
+            if matches(.renameStash) { prepareStashRename(target); return true }
+            if matches(.applyStash) { onAction(.stashApply, target); return true }
+            if matches(.viewLog) || matches(.showChanges) { onAction(.stashShow, target); return true }
+        } else {
+            let reference = (item.hasPrefix("remote:") ? "refs/remotes/" : "refs/heads/") + target
+            if matches(.viewLog) { onAction(.history, reference); return true }
+            if matches(.rebase) { rebaseReference = reference; return true }
+            if item.hasPrefix("branch:") {
+                if matches(.renameBranch) { onAction(.rename, target); return true }
+                if matches(.checkout) { onAction(.checkout, target); return true }
+            }
+        }
+        return false
     }
     private func branchGroupHeader(_ title: String, isExpanded: Binding<Bool>) -> some View {
         Button { isExpanded.wrappedValue.toggle() } label: {
@@ -148,6 +199,8 @@ struct RepositorySidebar: View {
                 .background(active ? RayGitStyle.blue : Color.clear, in: RoundedRectangle(cornerRadius: 7))
                 .contentShape(Rectangle())
         }.buttonStyle(.plain).help(path).transaction { $0.animation = nil }
+            .focusable().focused($focusedRepository, equals: path).id(path)
+            .onKeyPress(.return) { guard !store.isBusy else { return .handled }; onAction(.openRepository, path); return .handled }
             .frame(maxWidth: .infinity)
             .contentShape(RoundedRectangle(cornerRadius: 7))
             .contextMenu {
@@ -169,13 +222,29 @@ struct RepositorySidebar: View {
 
 /// SwiftUI's macOS List can keep native row spacing despite compact row insets.
 private struct BranchListDensity: NSViewRepresentable {
+    var onShortcut: (NSEvent) -> Bool = { _ in false }
     func makeNSView(context: Context) -> Probe { Probe() }
-    func updateNSView(_ view: Probe, context: Context) { view.configure() }
+    func updateNSView(_ view: Probe, context: Context) { view.onShortcut = onShortcut; view.configure() }
 
     final class Probe: NSView {
         private weak var configuredTable: NSTableView?
+        var onShortcut: (NSEvent) -> Bool = { _ in false }
+        private var monitor: Any?
+        deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
-        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); configure() }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow(); configure()
+            if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, let window = self.window, event.window === window, window.attachedSheet == nil,
+                      !self.isHiddenOrHasHiddenAncestor, let table = self.configuredTable,
+                      let responder = window.firstResponder as? NSView,
+                      !(responder is NSTextView), !(responder is NSTextField),
+                      responder === table || responder.isDescendant(of: table) else { return event }
+                return self.onShortcut(event) ? nil : event
+            }
+        }
         override func layout() { super.layout(); configure() }
 
         func configure() {

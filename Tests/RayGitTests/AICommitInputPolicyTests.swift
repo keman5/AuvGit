@@ -1,7 +1,32 @@
 import XCTest
+import GitCore
 @testable import RayGit
 
 final class AICommitInputPolicyTests: XCTestCase {
+    @MainActor
+    func testGenerateWithEmptyIndexReportsStagingRequirement() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = try await GitRepository.initialize(at: root)
+        try Data("unstaged content".utf8).write(to: root.appendingPathComponent("unstaged.txt"))
+        let store = RepositoryStore(persistsSession: false)
+        store.repository = repository
+        store.repositoryURL = root
+        store.commitMessage = "Existing draft"
+        let controller = AICommitController()
+
+        controller.generate(store: store)
+        XCTAssertTrue(controller.isLoading)
+        for _ in 0..<200 where controller.isLoading {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertFalse(controller.isLoading)
+        XCTAssertEqual(controller.error, aiCommitText("No staged changes"))
+        XCTAssertEqual(store.commitMessage, "Existing draft")
+        let index = try await repository.workflowRead(["ls-files", "--stage"])
+        XCTAssertTrue(index.isEmpty)
+    }
+
     func testPersistedLimitsAndBounds() throws {
         let name = "AICommitInputPolicyTests." + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))

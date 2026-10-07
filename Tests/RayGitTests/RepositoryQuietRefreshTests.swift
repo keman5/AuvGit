@@ -5,6 +5,57 @@ import Combine
 
 @MainActor
 final class RepositoryQuietRefreshTests: XCTestCase {
+    func testFileStatusPublishesBeforeSlowRepositoryMetadata() async throws {
+        let backgroundKey = "preferences.backgroundRefresh", previousBackground = UserDefaults.standard.object(forKey: "preferences.backgroundRefresh")
+        UserDefaults.standard.set(false, forKey: backgroundKey)
+        defer { if let previousBackground { UserDefaults.standard.set(previousBackground, forKey: backgroundKey) } else { UserDefaults.standard.removeObject(forKey: backgroundKey) } }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        _ = try await GitProcess.run(at: root, arguments: ["init"])
+        let file = root.appendingPathComponent("file.txt")
+        try "new file\n".write(to: file, atomically: true, encoding: .utf8)
+        let store = RepositoryStore(persistsSession: false)
+        defer { store.closeTransientSession() }
+        await store.open(root)
+        _ = try await GitProcess.run(at: root, arguments: ["add", "file.txt"])
+
+        // Block metadata until the published status releases it. The timeout
+        // only prevents a broken implementation from hanging the test.
+        let wrapper = root.appendingPathComponent(".git/test-git")
+        let release = root.appendingPathComponent(".git/release-metadata")
+        let finished = root.appendingPathComponent(".git/metadata-finished")
+        try """
+        #!/bin/sh
+        for arg in "$@"; do
+            if [ "$arg" = "for-each-ref" ]; then
+                attempts=0
+                while [ ! -f .git/release-metadata ] && [ "$attempts" -lt 500 ]; do
+                    sleep 0.01
+                    attempts=$((attempts + 1))
+                done
+                touch .git/metadata-finished
+            fi
+        done
+        exec /usr/bin/git "$@"
+        """.write(to: wrapper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
+        let key = "raygit.git.executablePath", previous = UserDefaults.standard.object(forKey: "raygit.git.executablePath")
+        UserDefaults.standard.set(wrapper.path, forKey: key)
+        defer { if let previous { UserDefaults.standard.set(previous, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) } }
+        var publishedBeforeMetadata = false
+        let observation = store.$files.dropFirst().sink { files in
+            guard files.first(where: { $0.path == "file.txt" })?.isStaged == true else { return }
+            publishedBeforeMetadata = !FileManager.default.fileExists(atPath: finished.path)
+            _ = FileManager.default.createFile(atPath: release.path, contents: Data())
+        }
+        defer { observation.cancel() }
+        await store.refresh()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: finished.path), "The wrapper must exercise the metadata barrier")
+        XCTAssertTrue(publishedBeforeMetadata, "Staged status must publish before branch/stash metadata finishes")
+        XCTAssertTrue(store.files.first(where: { $0.path == "file.txt" })?.isStaged == true)
+    }
+
     func testSelectingSameRepositoryKeepsHistoryAndRefreshesChangedTextWithoutBusyFade() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let alias = root.deletingLastPathComponent().appendingPathComponent(UUID().uuidString)

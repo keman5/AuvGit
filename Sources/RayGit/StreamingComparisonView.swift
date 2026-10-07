@@ -11,6 +11,7 @@ struct StreamingComparisonView: View {
     var searchRequested = false
     var onSearchClosed: (() -> Void)? = nil
     var changeNavigation = 0
+    var searchNavigation = 0
     var onCursorChange: ((ComparisonCursorStatus) -> Void)? = nil
     @State private var reader: StreamingTextFile?
     @State private var page: StreamingTextPage?
@@ -88,6 +89,7 @@ struct StreamingComparisonView: View {
                 if !page.text.hasSuffix("\n"), page.next != nil { Text(largeText("The source line continues on the next page.")).font(.caption).foregroundStyle(.secondary).padding(6) }
             } else { Spacer() }
         }.onAppear { searchOptions = initialSearchOptions; replacement = initialReplacement; compactDisplay = compact; showSearch = searchRequested; start() }
+        .onChange(of: searchNavigation) { old, new in Task { await locate(new > old) } }
         .onChange(of: changeNavigation) { old, new in
             guard !overviewLines.isEmpty else { return }
             let index = selectedChange < 0 ? (new > old ? 0 : overviewLines.count - 1) : (selectedChange + (new > old ? 1 : overviewLines.count - 1)) % overviewLines.count

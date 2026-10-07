@@ -5,6 +5,22 @@ import Combine
 
 @MainActor
 final class WorkspaceFileFocusTests: XCTestCase {
+    func testProgrammaticFocusChoosesNativeResponderInsideMarkedPane() throws {
+        let (window, list, _, _, focus) = fixture()
+        defer { window.close() }
+        let table = NSTableView(frame: list.bounds)
+        table.addTableColumn(NSTableColumn(identifier: .init("file")))
+        list.addSubview(table)
+        let outside = NSTextView(frame: NSRect(x: 300, y: 0, width: 250, height: 300))
+        window.contentView!.addSubview(outside)
+        window.orderFront(nil)
+        XCTAssertTrue(window.makeFirstResponder(outside))
+        XCTAssertTrue(focus.focus(in: window))
+        XCTAssertTrue(window.firstResponder === table)
+        XCTAssertFalse(focus.focus(in: window, text: true))
+        table.isHidden = true
+        XCTAssertFalse(focus.focus(in: window))
+    }
     private final class KeyboardButton: NSButton {
         override var acceptsFirstResponder: Bool { true }
     }

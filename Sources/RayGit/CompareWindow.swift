@@ -293,6 +293,7 @@ final class FileCompareSession: ObservableObject {
 
 private struct FileCompareContent: View {
     @ObservedObject var session: FileCompareSession
+    @ObservedObject private var shortcuts = KeyboardShortcuts.shared
     @AppStorage(L10n.preferenceKey) private var language = "system"
     @State private var layout = "automatic"
     @State private var baseline = "index"
@@ -345,11 +346,11 @@ private struct FileCompareContent: View {
                     if let snapshot = session.snapshot, !isStaticDocument,
                        [snapshot.head, snapshot.index, snapshot.worktree, snapshot.base, snapshot.ours, snapshot.theirs].compactMap({ $0 }).contains(where: \.exceedsPreviewLimit),
                        [snapshot.head, snapshot.index, snapshot.worktree, snapshot.base, snapshot.ours, snapshot.theirs].compactMap({ $0 }).allSatisfy({ !$0.exists || (!$0.isBinary && (!$0.exceedsPreviewLimit || $0.canStreamText)) }) {
-                StreamingComparisonView(repository: session.repository, path: session.path, initialSearchOptions: searchOptions, initialReplacement: replacement, compact: compact, searchRequested: showSearch, onSearchClosed: { showSearch = false }, changeNavigation: changeNavigation, onCursorChange: { cursor = $0 })
+                StreamingComparisonView(repository: session.repository, path: session.path, initialSearchOptions: searchOptions, initialReplacement: replacement, compact: compact, searchRequested: showSearch, onSearchClosed: { showSearch = false }, changeNavigation: changeNavigation, searchNavigation: navigation, onCursorChange: { cursor = $0 })
             } else if let snapshot = session.snapshot, snapshot.requiresStaticPreview {
                 StaticComparisonView(snapshot: snapshot)
             } else if let snapshot = session.snapshot, [snapshot.head.data?.count ?? 0, snapshot.index.data?.count ?? 0, snapshot.worktree.data?.count ?? 0, snapshot.base?.data?.count ?? 0, snapshot.ours?.data?.count ?? 0, snapshot.theirs?.data?.count ?? 0].max()! > 2 * 1024 * 1024 {
-                PagedComparisonView(snapshot: snapshot, layout: layout, baseline: baseline, showBase: showBase, initialSearchOptions: searchOptions, initialReplacement: replacement, compact: compact, searchRequested: showSearch, onSearchClosed: { showSearch = false }, changeNavigation: changeNavigation, onCursorChange: { cursor = $0 })
+                PagedComparisonView(snapshot: snapshot, layout: layout, baseline: baseline, showBase: showBase, initialSearchOptions: searchOptions, initialReplacement: replacement, compact: compact, searchRequested: showSearch, onSearchClosed: { showSearch = false }, changeNavigation: changeNavigation, searchNavigation: navigation, onCursorChange: { cursor = $0 })
             } else if session.snapshot != nil {
                 ComparisonEditor(columns: columns, wrapLines: wrapLines, showLineNumbers: showNumbers, synchronizeScroll: synchronize, search: searchOptions.query, navigation: navigation, changeNavigation: changeNavigation, onEdit: { id, text in if id == "worktree" { session.draft = text } }, languagePath: session.path, resolver: session.snapshot?.isConflict == true ? resolver : nil, onCursorChange: { cursor = $0 }, editingCommands: editingCommands, scrollsToFirstChangeOnOpen: true, searchOptions: searchOptions)
             } else { Spacer(); if session.isBusy { ProgressView() } else { Text(compareText("No file loaded")).foregroundStyle(.secondary) }; Spacer() }
@@ -389,7 +390,8 @@ private struct FileCompareContent: View {
                         .buttonStyle(.borderedProminent).disabled(session.isBusy || !session.canEdit || ConflictDraft.hasConflictMarkers(in: session.draft))
                 }
             }.font(.caption).padding(.horizontal, 14).frame(height: session.snapshot?.isConflict == true ? 52 : 34).rayGitChrome()
-        }.buttonBorderShape(.roundedRectangle(radius: 6)).environment(\.locale, L10n.locale)
+        }.background(ComparisonKeyboardRegion(standalone: true, action: performShortcut))
+            .buttonBorderShape(.roundedRectangle(radius: 6)).environment(\.locale, L10n.locale)
             .onChange(of: supportsNativeComparison) { _, supported in
                 if supported, let line = pendingInitialLine {
                     pendingInitialLine = nil
@@ -416,6 +418,44 @@ private struct FileCompareContent: View {
                 Button(compareText("Reload"), role: .destructive) { Task { await session.reload() } }
                 Button(compareText("Cancel"), role: .cancel) {}
             }
+    }
+    private func performShortcut(_ command: ShortcutCommand) -> Bool {
+        guard !session.isBusy else { return false }
+        switch command {
+        case .compareReload:
+            if session.isDirty { confirmReload = true } else { Task { await session.reload() } }
+        case .compareSave:
+            guard session.isDirty else { return false }; Task { await session.save() }
+        case .compareStage:
+            guard session.canEdit else { return false }
+            if session.snapshot?.isConflict == true, ConflictDraft.hasConflictMarkers(in: session.draft) { return false }
+            Task { await session.stage(resolve: session.snapshot?.isConflict == true) }
+        case .compareReplace:
+            guard session.canEdit, supportsNativeComparison, layout != "patch" else { return false }; showSearch = true
+        case .compareTakeLeft, .compareTakeRight:
+            guard session.canEdit, supportsNativeComparison, layout != "patch", !compact else { return false }
+            return editingCommands.takeBlock(fromLeft: command == .compareTakeLeft)
+        case .compareNextConflict, .comparePreviousConflict:
+            let blocks = ConflictDraft.blocks(in: session.draft)
+            guard session.canEdit, supportsNativeComparison, layout != "patch", !compact, !blocks.isEmpty else { return false }
+            let current = min(max(0, resolver.selectedBlock), blocks.count - 1)
+            resolver.select?((current + (command == .compareNextConflict ? 1 : blocks.count - 1)) % blocks.count)
+        case .compareFind:
+            guard supportsTextComparison else { return false }; showSearch = true
+        case .compareFindNext, .compareFindPrevious:
+            guard supportsTextComparison, layout != "patch" else { return false }
+            compact = false; navigation += command == .compareFindNext ? 1 : -1
+        case .comparePreviousChange, .compareNextChange:
+            guard supportsTextComparison, layout != "patch", !compact else { return false }
+            changeNavigation += command == .compareNextChange ? 1 : -1
+        case .compareCompact:
+            guard supportsTextComparison, layout != "patch" else { return false }; compact.toggle()
+        case .compareWrap: wrapLines.toggle()
+        case .compareLines: showNumbers.toggle()
+        case .compareSync: synchronize.toggle()
+        default: return false
+        }
+        return true
     }
     private var isStaticDocument: Bool {
         ["pdf", "svg"].contains((session.path as NSString).pathExtension.lowercased())
@@ -483,7 +523,7 @@ private struct FileCompareContent: View {
                 }
                 ComparisonExtrasMenu(session: session).frame(height: 24)
                 Button { Task { await session.save() } } label: { ComparisonToolbarIcon(name: "square.and.arrow.down") }.buttonStyle(ComparisonToolbarButtonStyle())
-                    .keyboardShortcut("s").help(compareText("Save")).accessibilityLabel(compareText("Save"))
+                    .configuredShortcut(.compareSave, using: shortcuts).help(compareText("Save")).accessibilityLabel(compareText("Save"))
                     .fixedSize().layoutPriority(1).disabled(!session.isDirty || session.isBusy)
                 if session.snapshot?.isConflict != true {
                     Button { Task { await session.stage(resolve: false) } } label: { ComparisonToolbarIcon(name: "tray.and.arrow.down") }.buttonStyle(ComparisonToolbarButtonStyle())
@@ -631,8 +671,11 @@ private struct CompareWindowContent: View {
                 Toggle(interactionText("Ignore Whitespace"), isOn: $ignoreWhitespace).disabled(stash != nil)
                 Button(interactionText("Refresh")) { Task { await reload() } }
             }.font(.caption).padding(10)
-            DiffPane(text: text, title: title, isLoading: isLoading, preview: preview, leftRevisionTitle: revisionTitles.0, rightRevisionTitle: revisionTitles.1)
-        }.buttonBorderShape(.roundedRectangle(radius: 6)).environment(\.locale, L10n.locale).task { await reload() }
+            DiffPane(text: text, title: title, isLoading: isLoading, preview: preview, leftRevisionTitle: revisionTitles.0, rightRevisionTitle: revisionTitles.1, standaloneShortcuts: true)
+        }.background(ComparisonKeyboardRegion(standalone: true, commands: [.compareReload]) { command in
+            guard command == .compareReload, !isLoading else { return false }
+            Task { await reload() }; return true
+        }).buttonBorderShape(.roundedRectangle(radius: 6)).environment(\.locale, L10n.locale).task { await reload() }
             .onChange(of: ignoreWhitespace) { _, _ in Task { await reload() } }.onDisappear { version = UUID() }
     }
     private func reload() async {

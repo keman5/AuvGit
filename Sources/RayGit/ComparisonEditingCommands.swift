@@ -6,6 +6,8 @@ final class ComparisonEditingCommands: ObservableObject {
     @Published private(set) var canRedo = false
     @Published private(set) var searchCurrent = 0
     @Published private(set) var searchTotal = 0
+    var takeBlockAction: ((Bool) -> Bool)?
+    func takeBlock(fromLeft: Bool) -> Bool { takeBlockAction?(fromLeft) ?? false }
     var focusEditorAction: (() -> Void)?
     var selectReadOnlyRangeAction: ((String, NSRange) -> Void)?
     func revealRange(paneID: String, range: NSRange) { selectReadOnlyRangeAction?(paneID, range) }

@@ -172,10 +172,10 @@ struct CreateRepositorySheet: View {
     @State private var cloneDestination = CloneDestination()
     @State private var busy = false
     @State private var error = ""
-    init(store: RepositoryStore) {
+    init(store: RepositoryStore, initialClone: Bool? = nil) {
         self.store = store
         let draft = RepositoryCreationDraft.load()
-        _clone = State(initialValue: draft.clone)
+        _clone = State(initialValue: initialClone ?? draft.clone)
         _source = State(initialValue: draft.source)
         _destination = State(initialValue: draft.destination)
         _cloneDestination = State(initialValue: draft.cloneDestination)

@@ -1,9 +1,21 @@
 import AppKit
 import XCTest
+import GitCore
 @testable import RayGit
 
 @MainActor
 final class HistoryKeyboardShortcutsTests: XCTestCase {
+    func testGraphNavigationUsesRelationshipsRatherThanAdjacentRows() {
+        func commit(_ hash: String, _ parents: [String]) -> GitCommit {
+            GitCommit(hash: hash, parents: parents, author: "A", date: .distantPast, subject: hash, body: "", refs: [])
+        }
+        let commits = [commit("merge", ["main", "topic"]), commit("unrelated", ["other"]), commit("topic", ["base"]), commit("main", ["base"]), commit("base", [])]
+        XCTAssertEqual(HistoryCommitNavigation.target(commits: commits, selection: "merge", child: false), "main")
+        XCTAssertEqual(HistoryCommitNavigation.target(commits: commits, selection: "topic", child: true), "merge")
+        XCTAssertNil(HistoryCommitNavigation.target(commits: commits, selection: "base", child: false))
+        XCTAssertNil(HistoryCommitNavigation.target(commits: commits, selection: "unrelated", child: false))
+        XCTAssertNil(HistoryCommitNavigation.target(commits: commits, selection: nil, child: true))
+    }
     func testWindowCommandsPreserveNativeEditingAndModalScope() throws {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
         let content = try XCTUnwrap(window.contentView)
@@ -18,6 +30,9 @@ final class HistoryKeyboardShortcutsTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         region.shortcuts = KeyboardShortcuts(defaults: defaults)
         var actions: [HistoryAction] = []
+        var navigation: [Bool] = []
+        var changes = 0
+        region.navigate = { navigation.append($0) }; region.showChanges = { changes += 1 }
         var finds = 0
         region.action = { actions.append($0) }; region.find = { finds += 1 }
         func key(_ value: String, _ modifiers: NSEvent.ModifierFlags = .command) throws -> NSEvent {
@@ -28,6 +43,11 @@ final class HistoryKeyboardShortcutsTests: XCTestCase {
         XCTAssertTrue(window.makeFirstResponder(table))
         XCTAssertTrue(window.firstResponder === table)
         XCTAssertFalse(table.visibleRect.isEmpty)
+        XCTAssertNil(region.handle(try key(String(UnicodeScalar(NSUpArrowFunctionKey)!), .option)))
+        XCTAssertNil(region.handle(try key(String(UnicodeScalar(NSDownArrowFunctionKey)!), .option)))
+        XCTAssertEqual(navigation, [true, false])
+        XCTAssertNil(region.handle(try key(String(UnicodeScalar(NSF4FunctionKey)!), [])))
+        XCTAssertEqual(changes, 1)
         XCTAssertNil(region.handle(try key("r")))
         XCTAssertNil(region.handle(try key("r", [.command, .shift])))
         XCTAssertNil(region.handle(try key("c")))
@@ -40,6 +60,12 @@ final class HistoryKeyboardShortcutsTests: XCTestCase {
         XCTAssertNotNil(region.handle(try key("r", [.command, .option])))
         let editor = NSTextView(frame: region.frame); content.addSubview(editor)
         XCTAssertTrue(window.makeFirstResponder(editor))
+        XCTAssertNotNil(region.handle(try key(String(UnicodeScalar(NSUpArrowFunctionKey)!), .option)))
+        XCTAssertNotNil(region.handle(try key("g")))
+        XCTAssertNotNil(region.handle(try key("d")))
+        XCTAssertNotNil(region.handle(try key("k", [.command, .shift])))
+        XCTAssertNotNil(region.handle(try key(String(UnicodeScalar(NSF4FunctionKey)!), [])))
+        XCTAssertEqual(navigation, [true, false]); XCTAssertEqual(changes, 1)
         XCTAssertNil(region.handle(try key("r")))
         XCTAssertNil(region.handle(try key("f")))
         XCTAssertNotNil(region.handle(try key("c")))
@@ -88,5 +114,30 @@ final class HistoryKeyboardShortcutsTests: XCTestCase {
         XCTAssertNotNil(region.handle(try key(String(UnicodeScalar(NSF8FunctionKey)!), [.shift, .option])))
         XCTAssertEqual(actions.count, 14)
         window.endSheet(sheet)
+        let comparison = ReadOnlyDiffTextView(frame: region.frame)
+        content.addSubview(comparison)
+        XCTAssertTrue(window.makeFirstResponder(comparison))
+        XCTAssertNotNil(region.handle(try key("f")))
+        XCTAssertNotNil(region.handle(try key("g")))
+        XCTAssertNotNil(region.handle(try key(String(UnicodeScalar(NSF6FunctionKey)!), [])))
+        XCTAssertEqual(actions.count, 14)
+        region.requiresFocusedRegion = true
+        XCTAssertTrue(window.makeFirstResponder(other))
+        XCTAssertNotNil(region.handle(try key("f")))
+        XCTAssertTrue(window.makeFirstResponder(table))
+        XCTAssertNil(region.handle(try key("f")))
+        XCTAssertTrue(region.shortcuts.setEnabled(false, for: .copyHash))
+        let count = actions.count
+        XCTAssertNotNil(region.handle(try key("b", [.command, .option])))
+        XCTAssertEqual(actions.count, count)
+        XCTAssertTrue(region.shortcuts.setEnabled(true, for: .copyHash))
+        XCTAssertNil(region.handle(try key("b", [.command, .option])))
+        XCTAssertEqual(actions.last, .copyHash)
+        XCTAssertEqual(actions.count, count + 1)
+        XCTAssertTrue(region.shortcuts.set(.init(key: "c", modifiers: 1), for: .copyHash))
+        XCTAssertNil(region.handle(try key("c")))
+        XCTAssertTrue(window.makeFirstResponder(editor))
+        XCTAssertNotNil(region.handle(try key("c")))
+        XCTAssertEqual(actions.count, count + 2)
     }
 }

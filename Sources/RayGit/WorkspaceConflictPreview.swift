@@ -13,6 +13,7 @@ struct WorkspaceConflictPreview: View {
     @State private var replacement = ""
     @State private var showSearch = false
     @State private var navigation = 0
+    @State private var changeNavigation = 0
     @AppStorage("editor.wrapLines") private var wraps = false
     @AppStorage("editor.showLineNumbers") private var numbers = true
     @AppStorage("editor.synchronizeScroll") private var synchronized = true
@@ -35,6 +36,23 @@ struct WorkspaceConflictPreview: View {
     private func selectConflict(_ index: Int) {
         guard !blocks.isEmpty else { return }
         resolver.select?(min(max(0, index), blocks.count - 1))
+    }
+    private func performShortcut(_ command: ShortcutCommand) -> Bool {
+        switch command {
+        case .compareFind: showSearch = true
+        case .compareFindNext, .compareFindPrevious:
+            compact = false; navigation += command == .compareFindNext ? 1 : -1
+        case .compareNextChange, .comparePreviousChange:
+            guard !compact else { return false }; changeNavigation += command == .compareNextChange ? 1 : -1
+        case .compareNextConflict, .comparePreviousConflict:
+            guard !compact else { return false }; selectConflict(resolver.selectedBlock + (command == .compareNextConflict ? 1 : -1))
+        case .compareCompact: compact.toggle()
+        case .compareWrap: wraps.toggle()
+        case .compareLines: numbers.toggle()
+        case .compareSync: synchronized.toggle()
+        default: return false
+        }
+        return true
     }
     var body: some View {
         VStack(spacing: 0) {
@@ -67,7 +85,7 @@ struct WorkspaceConflictPreview: View {
             }.buttonStyle(ToolbarRowButtonStyle(minimumWidth: 22)).controlSize(.small).padding(.horizontal, 12).padding(.vertical, 6).rayGitChrome()
             Divider()
             ZStack {
-                ComparisonEditor(columns: columns, wrapLines: wraps, showLineNumbers: numbers, synchronizeScroll: synchronized, search: searchOptions.query, navigation: navigation, changeNavigation: 0, onEdit: { _, _ in }, languagePath: snapshot.path, resolver: resolver, editingCommands: navigationCommands, scrollsToFirstChangeOnOpen: true, searchOptions: searchOptions)
+                ComparisonEditor(columns: columns, wrapLines: wraps, showLineNumbers: numbers, synchronizeScroll: synchronized, search: searchOptions.query, navigation: navigation, changeNavigation: changeNavigation, onEdit: { _, _ in }, languagePath: snapshot.path, resolver: resolver, editingCommands: navigationCommands, scrollsToFirstChangeOnOpen: true, searchOptions: searchOptions)
                     .opacity(compact ? 0 : 1).allowsHitTesting(!compact).accessibilityHidden(compact)
                 if compact { CompactComparisonView(columns: columns, conflict: true, wraps: wraps, numbers: numbers, onReturnToEditor: { compact = false }, onRevealLine: { id, line in
                     if let onOpenEditorLine { onOpenEditorLine(id, line) }
@@ -78,6 +96,6 @@ struct WorkspaceConflictPreview: View {
                 Divider()
                 CompareBasePanel(column: column("base", "Base (Stage 1)", base), wraps: wraps, numbers: numbers, expanded: $showBase)
             }
-        }.onChange(of: snapshot.path) { _, _ in resolver.selectedBlock = 0 }
+        }.background(ComparisonKeyboardRegion(action: performShortcut)).onChange(of: snapshot.path) { _, _ in resolver.selectedBlock = 0 }
     }
 }

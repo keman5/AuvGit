@@ -5,6 +5,9 @@ struct RebaseWorkflowView: View {
     @ObservedObject var store: RepositoryStore
     var onClose: (() -> Void)? = nil
     @State private var base = "HEAD~1"
+    init(store: RepositoryStore, onClose: (() -> Void)? = nil, initialBase: String = "HEAD~1") {
+        self.store = store; self.onClose = onClose; _base = State(initialValue: initialBase)
+    }
     @State private var captured: RebasePlan?
     @State private var todo = ""
     @State private var messageSelection: String?

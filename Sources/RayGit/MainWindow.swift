@@ -6,11 +6,19 @@ import RayGitLocalization
 struct MainWindow: View {
     @ObservedObject private var shortcuts = KeyboardShortcuts.shared
     @State private var historySearchFocusRequest: UUID?
+    @State private var fileShortcutRequest: FilePaneShortcutRequest?
+    @State private var rebaseCommit: GitCommit?
+    @State private var shortcutWindow: NSWindow?
     @ObservedObject var store: RepositoryStore
     @State private var resetRequest: HistoryResetRequest?
     var usesBorderlessToolbar = false
     var shellToolbarModel: BorderlessToolbarModel? = nil
     @StateObject private var fileFocus = WorkspaceFileFocus()
+    @StateObject private var historyFocus = WorkspaceFileFocus()
+    @StateObject private var sidebarFocus = WorkspaceFileFocus()
+    @State private var repositoryFocusRequest: UUID?
+    @StateObject private var branchesFocus = WorkspaceFileFocus()
+    @StateObject private var changesFocus = WorkspaceFileFocus()
     @StateObject private var terminals = TerminalSessions()
     @AppStorage("preferences.filterCase") private var preferenceFilterCase = "insensitive"
     @AppStorage(L10n.preferenceKey) private var languageCode = "system"
@@ -29,6 +37,8 @@ struct MainWindow: View {
     @State private var showTools = false
     @State private var fileTree = false
     @State private var showCreate = false
+    @State private var createClone: Bool?
+    @State private var blamePath: String?
     @State private var showNetwork = false
     @State private var showTags = false
     @State private var confirmation: PendingAction?
@@ -90,14 +100,7 @@ struct MainWindow: View {
         .frame(minHeight: terminals.visible ? 750 : 680)
         .navigationTitle(store.repositoryURL?.lastPathComponent ?? "RayGit")
         .background(TerminalShortcutMonitor { terminals.toggle(for: store.repositoryURL, store: store) }.frame(width: 0, height: 0))
-        .background {
-            Button {
-                if let stash = store.stashes.first { sidebarAction(.stashApply, stash.ref) }
-            } label: { Text(interactionText("Apply Stash…")) }
-                .keyboardShortcut("s", modifiers: [.command, .shift])
-                .disabled(store.repository == nil || store.isBusy || store.stashes.isEmpty)
-                .hidden().frame(width: 0, height: 0)
-        }
+        .background(WorkspaceKeyboardRegion(action: { workspaceShortcut($0) }, onWindow: { shortcutWindow = $0 }, menuAction: { workspaceShortcut($0, fromMenu: true) }).allowsHitTesting(false).accessibilityHidden(true))
     }
     private var toolbarContent: some View {
         // Recreate localized descendants without recreating MainWindow's session owner.
@@ -292,7 +295,7 @@ struct MainWindow: View {
         case "stash": confirm(mainText("stashTitle"), mainText("stashMessage")) { store.operation("贮藏") { try await $0.stash(message: "RayGit stash") } }
         case "applyStash": if let stash = store.stashes.first { sidebarAction(.stashApply, stash.ref) }
         case "refresh": Task { await store.refresh() }
-        case "create": showCreate = true
+        case "create": createClone = nil; showCreate = true
         case "open": store.chooseRepository()
         case "fetch": store.operation("Fetch") { try await $0.fetch() }
         case "commit": store.mode = "workspace"; commitFocused = true
@@ -325,6 +328,14 @@ struct MainWindow: View {
         toolbarContent.onReceive(NotificationCenter.default.publisher(for: .rayGitWorktreeChanged)) { event in
             guard handlesStoreEvents else { return }
             if let url = event.object as? URL, url == store.repositoryURL { Task { await store.refresh() } }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .rayGitReuseCommitMessage)) { event in
+            guard handlesStoreEvents, let url = event.object as? URL, let message = event.userInfo?["message"] as? String, !store.isBusy else { return }
+            Task { @MainActor in
+                if store.repositoryURL != url { await store.open(url) }
+                guard store.repositoryURL == url, !store.isBusy else { return }
+                store.commitMessage = message; shortcutWindow?.makeKeyAndOrderFront(nil); commitFocused = true
+            }
         }
         .onChange(of: preferenceFilterCase) { _, _ in if handlesStoreEvents { store.objectWillChange.send() } }
         .onChange(of: store.amend) { _, value in if handlesStoreEvents { fillAmendMessage(value) } }
@@ -382,8 +393,16 @@ struct MainWindow: View {
         .sheet(isPresented: $showTags) { TagManagementView(store: store) }
         .sheet(isPresented: $showNetwork) { NetworkOperationsView(store: store) }
         .sheet(isPresented: $showTools) { RepositoryTools(store: store) }
-        .sheet(isPresented: $showCreate) { CreateRepositorySheet(store: store) }
+        .sheet(isPresented: $showCreate) { CreateRepositorySheet(store: store, initialClone: createClone) }
+        .sheet(isPresented: Binding(get: { blamePath != nil }, set: { if !$0 { blamePath = nil } })) {
+            if let repository = store.repository, let path = blamePath {
+                VStack { StructuredHistoryView(repository: repository, blamePath: path, revision: "HEAD"); Button(workflowText("Close")) { blamePath = nil }.keyboardShortcut(.cancelAction) }.padding().frame(width: 1000, height: 700)
+            }
+        }
         .sheet(item: $resetRequest) { HistoryResetSheet(store: store, request: $0) }
+        .sheet(item: $rebaseCommit) { commit in
+            RebaseWorkflowView(store: store, onClose: { rebaseCommit = nil }, initialBase: commit.hash).padding(20).frame(width: 1100, height: 850)
+        }
         .sheet(isPresented: $showActivity) { OperationLogView(store: store) }
         .sheet(item: $mergeAction) { prompt in
             VStack(alignment: .leading, spacing: 16) {
@@ -452,7 +471,7 @@ struct MainWindow: View {
             forcePushPrompt = ForcePushPrompt(repository: repository, preview: preview)
         }
     }
-    var sidebar: some View { RepositorySidebar(store: store, onAction: sidebarAction) }
+    var sidebar: some View { RepositorySidebar(store: store, onAction: sidebarAction, repositoryFocusRequest: repositoryFocusRequest, branchFocus: branchesFocus).background(WorkspaceFileFocusRegion(focus: sidebarFocus).allowsHitTesting(false).accessibilityHidden(true)) }
     var welcome: some View {
         VStack(spacing: 18) {
             Image(systemName: "arrow.triangle.branch").font(.system(size: 58, weight: .light)).foregroundStyle(Color.accentColor)
@@ -475,7 +494,7 @@ struct MainWindow: View {
             .frame(maxWidth: .infinity)
     }
     var filesPane: some View {
-        WorkspaceFilesPane(files: store.files, selection: $store.selectedPaths, filter: $store.fileFilter, treeMode: $fileTree, isBusy: store.isBusy, onAction: fileAction, treeContent: { paths in workspaceTreeContent(paths) }, repository: store.repository, fileFocus: fileFocus)
+        WorkspaceFilesPane(files: store.files, selection: $store.selectedPaths, filter: $store.fileFilter, treeMode: $fileTree, isBusy: store.isBusy, onAction: fileAction, treeContent: { paths in workspaceTreeContent(paths) }, repository: store.repository, fileFocus: fileFocus, shortcutRequest: fileShortcutRequest)
     }
     private func workspaceTreeContent(_ paths: Set<String>?) -> some View {
         Group {
@@ -511,7 +530,7 @@ struct MainWindow: View {
                     leftRevisionTitle: store.diffLeftRevisionTitle, rightRevisionTitle: store.diffRightRevisionTitle,
                     onOpenEditableComparison: editableDiffSearch)
             }
-        }
+        }.background(WorkspaceFileFocusRegion(focus: changesFocus).allowsHitTesting(false).accessibilityHidden(true))
     }
     private var editableDiffSearch: ((ComparisonSearchOptions, String) -> Void)? {
         guard store.mode == "workspace", let repository = store.repository, let file = store.selectedFile,
@@ -566,7 +585,7 @@ struct MainWindow: View {
                 else {
                     Button { if AICommitConfiguration.isConfigured { aiCommit.generate(store: store) } else { showAISettings = true } } label: { Image(systemName: "sparkles").foregroundStyle(RayGitStyle.blue).frame(width: 24, height: 24).contentShape(Rectangle()) }
                         .buttonStyle(.plain).help(aiCommitText("Generate commit message")).accessibilityLabel(aiCommitText("Generate commit message"))
-                        .disabled(store.isBusy || store.stagedCount == 0)
+                        .disabled(store.isBusy || store.repository == nil)
                 }
                 Menu {
                     Button("Signed-off-by", action: addSignoff)
@@ -629,17 +648,85 @@ struct MainWindow: View {
         }
     }
     func statusName(_ status: String) -> String { [" ": "—", "?": mainText("untracked"), "M": mainText("modified"), "A": mainText("added"), "D": mainText("deleted"), "R": mainText("renamed"), "C": mainText("copied"), "U": mainText("conflict"), "T": mainText("type") ][status] ?? status }
-    func statusColor(_ status: String) -> Color { switch status { case "A", "?": return .green; case "D": return .red; case "M", "R", "U": return .orange; default: return .secondary } }
+    func statusColor(_ status: String) -> Color { switch status { case "?": return .blue; case "A": return .green; case "D": return .red; case "M", "R", "U": return .orange; default: return .secondary } }
 }
 
 extension MainWindow {
     private func historyPane(compact: Bool) -> some View {
         VStack(spacing: 0) {
             if compact { HStack { Label(interactionText("Log"), systemImage: "clock.arrow.circlepath").font(.system(size: 12, weight: .semibold)); HistorySearchControl(search: $store.historySearch, focusRequest: historySearchFocusRequest).frame(maxWidth: .infinity); HistoryDisplayMenu(showMergedCommits: Binding(get: { store.showMergedCommits }, set: { store.setShowMergedCommits($0) })); Button { if let repo = store.repository { LogPresenter.show(repository: repo) } } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(.plain).help(interactionText("Expand History")) }.padding(.horizontal, 12).frame(height: 36).rayGitChrome() }
-            HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch, isLoading: store.loadingHistory, hasMore: store.hasMore, onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy, onAction: historyAction, compact: compact, showsSearch: !compact, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), navigationGeneration: store.historyNavigationGeneration, onJump: jumpToCommit, firstParentGraph: store.followsCurrentBranch && !store.showMergedCommits, onFind: { historySearchFocusRequest = UUID() }, authorFilter: $store.historyAuthor)
+            HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch, isLoading: store.loadingHistory, hasMore: store.hasMore, onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy, onAction: historyAction, onShowChanges: { if let path = store.selectedCommitPath { compareCommitFile(path) } }, keyboardRequiresFocus: true, compact: compact, showsSearch: !compact, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), navigationGeneration: store.historyNavigationGeneration, onJump: jumpToCommit, firstParentGraph: store.followsCurrentBranch && !store.showMergedCommits, onFind: { historySearchFocusRequest = UUID() }, authorFilter: $store.historyAuthor)
+                .background(WorkspaceFileFocusRegion(focus: historyFocus).allowsHitTesting(false).accessibilityHidden(true))
         }
     }
     private func copyText(_ text: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
+    @discardableResult private func workspaceShortcut(_ command: ShortcutCommand, fromMenu: Bool = false) -> Bool {
+        guard handlesStoreEvents else { return false }
+        if fromMenu, command == .stage || command == .unstage {
+            performToolbarCommand(command.rawValue); return true
+        }
+        if historyFocus.hasFileFocus, let action = command.historyAction, let commit = store.commits.first(where: { $0.hash == store.selectedCommit }) {
+            historyAction(action, commit); return true
+        }
+        if command.scopes.contains(.files) {
+            guard fileFocus.hasFileFocus, store.repository != nil else { return false }
+            if store.isBusy { return true }
+            let selection = store.selectedPaths
+            switch command {
+            case .filterFiles, .showUnversionedFiles, .showIgnoredFiles: fileShortcutRequest = FilePaneShortcutRequest(command: command)
+            case .selectCommittable: store.selectedPaths = WorkspaceFileActionTargets.paths(for: .stage, files: store.files, selection: [])
+            case .copyPath: fileAction(.copyPath, selection)
+            case .copyRelativePath: fileAction(.copyRelativePath, selection)
+            case .stage: fileAction(.stage, selection)
+            case .unstage: fileAction(.unstage, selection)
+            case .discard: fileAction(.discard, selection)
+            case .deleteFile: fileAction(.trash, selection)
+            case .renameFile: fileAction(.rename, selection)
+            case .ignore: fileAction(.ignore, selection)
+            case .editFile: fileAction(.open, selection)
+            case .showChanges: fileAction(.compare, selection)
+            case .blame:
+                guard selection.count == 1, let file = store.selectedFile, !file.isUntracked else { return true }
+                blamePath = file.path
+            default: return false
+            }
+            return true
+        }
+        switch command {
+        case .activateRepositories: repositoryFocusRequest = UUID()
+        case .activateBranches: if let shortcutWindow { branchesFocus.focus(in: shortcutWindow) }
+        case .activateFiles: if let shortcutWindow { fileFocus.focus(in: shortcutWindow) }
+        case .activateChanges: if let shortcutWindow { changesFocus.focus(in: shortcutWindow, text: true) }
+        case .activateHistory: if let shortcutWindow { historyFocus.focus(in: shortcutWindow) }
+        case .activateCommit: commitFocused = true
+        case .activateOutput: showActivity = true
+        case .findObject: showWorkspaceSearch = true
+        case .applyStash:
+            if sidebarFocus.hasFileFocus && !fromMenu { return false }
+            guard store.repository != nil, !store.isBusy else { return true }
+            performToolbarCommand("applyStash")
+        case .refresh, .refreshAlternate: Task { await store.refresh() }
+        case .showLogWindow:
+            if let repository = store.repository { LogPresenter.show(repository: repository) }
+        case .viewLog:
+            if sidebarFocus.hasFileFocus && !fromMenu { return false }
+            if fileFocus.hasFileFocus, let path = store.selectedPaths.sorted().first { fileAction(.history, [path]) }
+            else if let repository = store.repository { LogPresenter.show(repository: repository) }
+        case .clone: guard !store.isBusy else { return true }; createClone = true; showCreate = true
+        case .commit: guard store.repository != nil, !store.isBusy else { return true }; commitFocused = true
+        case .pull, .fetch, .push, .stash:
+            guard store.repository != nil, !store.isBusy else { return true }
+            performToolbarCommand(command.rawValue)
+        case .createBranch:
+            guard store.repository != nil, !store.isBusy else { return true }
+            performToolbarCommand("newBranch")
+        case .createTag:
+            guard store.repository != nil, !store.isBusy else { return true }
+            askName(interactionText("Create Tag")) { name in store.operation(interactionText("Create Tag")) { try await $0.createTag(name: name, commit: "HEAD") } }
+        default: return false
+        }
+        return true
+    }
     private func askName(_ title: String, initial: String = "", action: @escaping (String) -> Void) {
         let root = store.repositoryURL
         promptValue = initial
@@ -725,6 +812,8 @@ extension MainWindow {
             return
         }
         switch action {
+        case .rebase: rebaseCommit = commit
+        case .useCommitMessage: store.commitMessage = commit.body.isEmpty ? commit.subject : commit.body; commitFocused = true
         case .reset, .resetAdvanced:
             guard !store.isBusy else { return }
             resetRequest = HistoryResetRequest(commit: commit, repositoryURL: repository.url, advanced: action == .resetAdvanced)

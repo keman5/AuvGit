@@ -81,7 +81,7 @@ final class AICommitController: ObservableObject {
         return head + "\0" + index
     }
     func generate(store: RepositoryStore, summaryOnly: Bool = false) {
-        guard !isLoading, let repository = store.repository, store.stagedCount > 0, !store.isBusy else { return }
+        guard !isLoading, let repository = store.repository, !store.isBusy else { return }
         let configuration = AICommitConfiguration(), original = store.commitMessage, token = UUID(), root = repository.url
         requestID = token; isLoading = true; error = nil; canGenerateSummary = false
         task = Task { [weak self, weak store] in

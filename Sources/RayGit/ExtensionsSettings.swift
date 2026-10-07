@@ -19,16 +19,13 @@ struct ExtensionsSettings: View {
     @State private var updateGeneration = 0
     @State private var updateTask: Task<Void, Never>?
     @State private var checkedSource: URL?
-    @State private var shortcutError: String?
+    @State private var shortcutDrafts: [ShortcutCommand: ShortcutBinding] = [:]
     var body: some View {
         Form {
             if page == .all || page == .shortcuts {
             Section(compareText("Keyboard Shortcuts")) {
                 ForEach(ShortcutCommand.allCases, id: \.self) { command in shortcut(command) }
-                Text(shortcutText("Letter shortcuts require Command or Control. Copy and Return keep native text editing."))
-                    .font(.caption).foregroundStyle(.secondary)
-                if let shortcutError { Text(shortcutError).font(.caption).foregroundStyle(.orange) }
-                Button(shortcutText("Restore Defaults")) { shortcuts.restoreDefaults(); shortcutError = nil }
+                Button(shortcutText("Restore Defaults")) { shortcuts.restoreDefaults(); shortcutDrafts = [:] }
             }
             }
             if page == .all || page == .workflow {
@@ -88,25 +85,37 @@ struct ExtensionsSettings: View {
         }
     }
     private func shortcut(_ command: ShortcutCommand) -> some View {
-        LabeledContent(shortcutText(command.title)) {
-            HStack(spacing: 6) {
-                ForEach([(1, "⌘"), (2, "⇧"), (4, "⌥"), (8, "⌃")], id: \.0) { bit, symbol in
-                    Toggle(symbol, isOn: Binding(get: { shortcuts.binding(command).modifiers & bit != 0 }, set: { enabled in
-                        var value = shortcuts.binding(command)
-                        if enabled { value.modifiers |= bit } else { value.modifiers &= ~bit }
-                        saveShortcut(value, command)
-                    })).toggleStyle(.button).accessibilityLabel(shortcutText(command.title) + ": " + shortcutText([1: "Command", 2: "Shift", 4: "Option", 8: "Control"][bit]!)).help(shortcutText([1: "Command", 2: "Shift", 4: "Option", 8: "Control"][bit]!))
+        let value = shortcutDrafts[command] ?? shortcuts.binding(command)
+        let draft = Binding(get: { shortcutDrafts[command] ?? shortcuts.binding(command) }, set: { saveShortcut($0, command) })
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center, spacing: 6) {
+                Text(shortcutText(command.title)).font(.system(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 3) {
+                    ShortcutModifiers(modifiers: Binding(get: { draft.wrappedValue.modifiers }, set: { draft.wrappedValue.modifiers = $0 }))
+                        .fixedSize(horizontal: true, vertical: false).frame(height: 24)
+                    ShortcutRecorder(value: value, label: shortcutText(command.title) + ": " + shortcutText("Key")) { saveShortcut($0, command) }
+                        .frame(width: 88, height: 24)
+                        .overlay(alignment: .trailing) {
+                            Button { var cleared = draft.wrappedValue; cleared.key = ""; cleared.modifiers = 0; draft.wrappedValue = cleared } label: {
+                                Image(systemName: "xmark.circle")
+                            }.buttonStyle(.plain).frame(width: 20, height: 24).padding(.trailing, 2)
+                                .help(shortcutText("Clear Shortcut"))
+                                .accessibilityLabel(shortcutText(command.title) + ": " + shortcutText("Clear Shortcut"))
+                        }
                 }
-                Picker(shortcutText("Key"), selection: Binding(get: { shortcuts.binding(command).key }, set: { key in
-                    var value = shortcuts.binding(command); value.key = key; saveShortcut(value, command)
-                })) {
-                    ForEach(ShortcutBinding.keys, id: \.self) { key in Text(key == "Return" ? shortcutText("Return") : key.uppercased()).tag(key) }
-                }.labelsHidden().accessibilityLabel(shortcutText(command.title) + ": " + shortcutText("Key")).frame(width: 90)
+                Toggle(shortcutText("Enabled"), isOn: Binding(get: { draft.wrappedValue.enabled }, set: { draft.wrappedValue.enabled = $0 }))
+                    .labelsHidden().toggleStyle(.switch).controlSize(.mini).frame(width: 36).padding(.leading, 8)
+                    .accessibilityLabel(shortcutText(command.title) + ": " + shortcutText("Enabled"))
+            }
+            if !shortcuts.isValid(value, for: command) {
+                Text(shortcutText("Shortcut conflicts with another enabled action or needs Command/Control."))
+                    .font(.caption).foregroundStyle(.orange)
             }
         }
     }
     private func saveShortcut(_ value: ShortcutBinding, _ command: ShortcutCommand) {
-        shortcutError = shortcuts.set(value, for: command) ? nil : shortcutText("Shortcut conflicts with another action or a macOS command.")
+        shortcutDrafts[command] = value
+        if shortcuts.set(value, for: command) { shortcutDrafts.removeValue(forKey: command) }
     }
     private func checkUpdates() {
         guard let url = URL(string: manifestURL) else { message = compareText("Invalid update manifest."); return }

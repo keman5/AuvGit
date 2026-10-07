@@ -54,12 +54,12 @@ struct PreferencesWindow: View {
          "Appearance": ["Theme", "Language", "Light", "Dark"], "History": ["Commits per page", "Commit dates", "Relative"],
          "Editor": ["Editor", "Font", "Font size", "Wrap lines", "Difference colors", "Syntax colors", "Character differences", "Highlight current line", "Synchronized scrolling", "Comparison layout", "Whitespace", "Tab", "Line numbers"], "Commands and Git": ["Git", "Commit", "Trim", "Executable", "Timeout", "Signing", "Email", "Identity", "Commit message cleanup"],
          "Network and Authentication": ["Proxy", "Authentication", "SSH", "Credentials", "Fetch", "Prune"], "External Tools": ["Compare", "Merge", "Tools", "Executable", "Arguments"],
-         "Keyboard Shortcuts": ["Open Repository", "Stage", "Unstage", "Refresh", "Commit", "Log", "Reset", "Branch", "Tag", "Filter", "Hash", "Details"], "Git Flow and Hosting": ["Feature", "Release", "Hotfix", "Review"],
+         "Keyboard Shortcuts": ShortcutCommand.allCases.map(\.title), "Git Flow and Hosting": ["Feature", "Release", "Hotfix", "Review"],
          "Updates": ["Manifest", "Download"], "Privacy": ["Clear recent repositories…", "Clear session drafts…", "Telemetry"],
          "Advanced": ["Background refresh", "Polling interval (seconds)"]]
     }
     private var filtered: [String] { categories.filter { category in
-        query.isEmpty || ([category] + (searchTerms[category] ?? [])).contains { prefsText($0).localizedCaseInsensitiveContains(query) || $0.localizedCaseInsensitiveContains(query) }
+        query.isEmpty || ([category] + (searchTerms[category] ?? [])).contains { prefsText($0).localizedCaseInsensitiveContains(query) || (category == "Keyboard Shortcuts" && shortcutText($0).localizedCaseInsensitiveContains(query)) || $0.localizedCaseInsensitiveContains(query) }
     } }
     private func categoryIcon(_ category: String) -> String {
         switch category {
@@ -107,7 +107,7 @@ struct PreferencesWindow: View {
             }.frame(width: 240).background(RayGitStyle.sidebar)
             Divider()
             VStack(alignment: .leading, spacing: 0) {
-                DesignPageHeading(title: prefsText(filtered.isEmpty ? "Search preferences" : selected), subtitle: designText(selected == "Editor" ? "Configure code and difference display" : "Customize your RayGit workspace"))
+                DesignPageHeading(title: prefsText(filtered.isEmpty ? "Search preferences" : selected), subtitle: selected == "Keyboard Shortcuts" ? shortcutText("Shortcuts apply to the current view; the same key can serve different views.") + "\n" + shortcutText("Letter shortcuts require Command or Control. Native text editing remains available in text fields.") : designText(selected == "Editor" ? "Configure code and difference display" : "Customize your RayGit workspace"))
                     .padding(.horizontal, 24).padding(.vertical, 14).rayGitChrome()
                 Divider()
                 if filtered.isEmpty {

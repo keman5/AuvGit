@@ -8,8 +8,8 @@ private func historyText(_ key: String, _ arguments: CVarArg...) -> String {
 }
 
 enum HistoryAction: String, CaseIterable {
-    case viewLog, show, copyHash, copyMessage, createBranch, createTag, checkout, cherryPick, revert, reset, resetAdvanced
-    var isMutation: Bool { ![Self.viewLog, .show, .copyHash, .copyMessage].contains(self) }
+    case viewLog, show, copyHash, copyMessage, createBranch, createTag, checkout, cherryPick, revert, reset, resetAdvanced, rebase, useCommitMessage
+    var isMutation: Bool { ![Self.viewLog, .show, .copyHash, .copyMessage, .useCommitMessage].contains(self) }
 }
 
 func historyActionText(_ key: String) -> String { L10n.text(key, table: "HistoryActions") }
@@ -24,6 +24,8 @@ struct HistoryPane: View {
 
     var isBusy: Bool = false
     var onAction: (HistoryAction, GitCommit) -> Void = { _, _ in }
+    var onShowChanges: () -> Void = {}
+    var keyboardRequiresFocus = false
     var compact: Bool = false
     var showsSearch: Bool = true
     var showsDetails: Bool = true
@@ -151,12 +153,15 @@ struct HistoryPane: View {
                             Button(historyActionText("resetAdvanced")) { onAction(.resetAdvanced, commit) }.configuredShortcut(.resetAdvanced, using: shortcuts).disabled(isBusy)
                             Button(historyActionText("createBranch")) { onAction(.createBranch, commit) }.configuredShortcut(.createBranch, using: shortcuts).disabled(isBusy)
                             Button(historyActionText("createTag")) { onAction(.createTag, commit) }.configuredShortcut(.createTag, using: shortcuts).disabled(isBusy)
-                            ForEach([HistoryAction.cherryPick, .revert, .checkout], id: \.self) { action in
+                            Button(historyActionText("checkout")) { onAction(.checkout, commit) }.configuredShortcut(.checkout, using: shortcuts).disabled(isBusy)
+                            Button(designText("Interactive Rebase")) { onAction(.rebase, commit) }.configuredShortcut(.rebase, using: shortcuts).disabled(isBusy)
+                            ForEach([HistoryAction.cherryPick, .revert], id: \.self) { action in
                                 Button(historyActionText(action.rawValue)) { onAction(action, commit) }.disabled(isBusy)
                             }
                             Divider()
                             Button(historyActionText("copyHash")) { onAction(.copyHash, commit) }.configuredShortcut(.copyHash, using: shortcuts)
                             Button(historyActionText("copyMessage")) { onAction(.copyMessage, commit) }
+                            Button(shortcutText("Use Message for Commit")) { onAction(.useCommitMessage, commit) }.configuredShortcut(.useCommitMessage, using: shortcuts)
                         }
                     } primaryAction: { hashes in
                         if let hash = hashes.first, let commit = commits.first(where: { $0.hash == hash }) { onAction(.show, commit) }
@@ -199,7 +204,11 @@ struct HistoryPane: View {
                 onAction(action, commit)
             }, find: {
                 if showsSearch { searchFocusRequest = UUID() } else { onFind() }
-            }))
+            }, navigate: { child in
+                guard let target = HistoryCommitNavigation.target(commits: commits, selection: selection, child: child) else { return }
+                pendingNavigationScroll = true
+                selection = target
+            }, showChanges: onShowChanges, requiresFocusedRegion: keyboardRequiresFocus))
         }
     }
     private func scrollAfterNavigation(_ proxy: ScrollViewProxy) {
@@ -224,6 +233,14 @@ struct HistoryPane: View {
     private func graphWidth(_ graph: CommitGraph) -> CGFloat { compact ? min(80, CGFloat(max(0, graph.laneCount - 1)) * 14 + 14) : graphColumnWidth }
     private func columnHeader(_ title: String, column: HistoryColumn, width: Binding<CGFloat>) -> some View {
         HistoryColumnHeader(title: title, column: column, width: width)
+    }
+}
+
+enum HistoryCommitNavigation {
+    static func target(commits: [GitCommit], selection: String?, child: Bool) -> String? {
+        guard let selected = commits.first(where: { $0.hash == selection }) else { return nil }
+        if child { return commits.first { $0.parents.contains(selected.hash) }?.hash }
+        return selected.parents.first { parent in commits.contains { $0.hash == parent } }
     }
 }
 

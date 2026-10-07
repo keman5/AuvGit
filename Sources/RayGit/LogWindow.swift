@@ -5,6 +5,7 @@ import GitCore
 import RayGitLocalization
 
 func logText(_ key: String) -> String { L10n.text(key, table: "LogWindow") }
+extension Notification.Name { static let rayGitReuseCommitMessage = Notification.Name("RayGitReuseCommitMessage") }
 
 @MainActor
 enum LogPresenter {
@@ -112,6 +113,7 @@ private final class LogWindowController: NSWindowController, NSWindowDelegate {
 
 private struct LogWindowContent: View {
     @ObservedObject var store: RepositoryStore
+    @ObservedObject private var shortcuts = KeyboardShortcuts.shared
     @State private var resetRequest: HistoryResetRequest?
     @AppStorage(L10n.preferenceKey) private var language = "system"
     @State private var refSearch = ""
@@ -119,6 +121,7 @@ private struct LogWindowContent: View {
     @State private var tags: [ManagedTag] = []
     @State private var showOperationLog = false
     @State private var mutation: Mutation?
+    @State private var rebaseCommit: GitCommit?
     @State private var name = ""
     @State private var parent = 1
     private struct Mutation: Identifiable {
@@ -136,7 +139,7 @@ private struct LogWindowContent: View {
                         HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch,
                             isLoading: store.loadingHistory, hasMore: store.hasMore,
                             onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy,
-                            onAction: historyAction, showsDetails: false, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), navigationGeneration: store.historyNavigationGeneration, onJump: jump, authorFilter: $store.historyAuthor)
+                            onAction: historyAction, onShowChanges: { if let path = store.selectedCommitPath { compare(path) } }, showsDetails: false, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), navigationGeneration: store.historyNavigationGeneration, onJump: jump, authorFilter: $store.historyAuthor)
                             .frame(minWidth: 520, minHeight: 270, idealHeight: 470)
                         VSplitView {
                             commitMetadata.frame(minWidth: 270, minHeight: 145, idealHeight: 230)
@@ -179,6 +182,10 @@ private struct LogWindowContent: View {
             .sheet(item: $resetRequest) { HistoryResetSheet(store: store, request: $0) }
         .sheet(isPresented: $showOperationLog) { OperationLogView(store: store) }
             .sheet(item: $mutation) { request in mutationSheet(request) }
+            .sheet(item: $rebaseCommit) { commit in
+                RebaseWorkflowView(store: store, onClose: { rebaseCommit = nil }, initialBase: commit.hash)
+                    .padding(20).frame(width: 1100, height: 850)
+            }
     }
     private var referenceSidebar: some View {
         VStack(spacing: 0) {
@@ -261,7 +268,7 @@ private struct LogWindowContent: View {
                 }.listStyle(.plain).scrollContentBackground(.hidden)
                     .contextMenu(forSelectionType: String.self) { paths in
                         if let path = paths.first {
-                            Button(interactionText("Show Changes")) { compare(path) }
+                            Button(interactionText("Show Changes")) { compare(path) }.configuredShortcut(.showChanges, using: shortcuts)
                             if let root = store.repositoryURL {
                                 let fileURL = root.appendingPathComponent(path)
                                 let exists = FileManager.default.fileExists(atPath: fileURL.path)
@@ -300,6 +307,9 @@ private struct LogWindowContent: View {
     private func historyAction(_ action: HistoryAction, _ commit: GitCommit) {
         guard let repository = store.repository else { return }
         switch action {
+        case .rebase: guard !store.isBusy else { return }; rebaseCommit = commit
+        case .useCommitMessage:
+            NotificationCenter.default.post(name: .rayGitReuseCommitMessage, object: repository.url, userInfo: ["message": commit.body.isEmpty ? commit.subject : commit.body])
         case .reset, .resetAdvanced:
             guard !store.isBusy else { return }
             resetRequest = HistoryResetRequest(commit: commit, repositoryURL: repository.url, advanced: action == .resetAdvanced)

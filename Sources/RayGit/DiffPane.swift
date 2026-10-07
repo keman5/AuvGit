@@ -22,6 +22,7 @@ struct DiffPane: View {
     var rightRevisionTitle: String? = nil
     var onOpenEditableComparison: ((ComparisonSearchOptions, String) -> Void)? = nil
     var forceCompact = false
+    var standaloneShortcuts = false
     var initialSearchOptions = ComparisonSearchOptions()
     var initialReplacement = ""
     @State private var hunk = 0
@@ -79,11 +80,31 @@ struct DiffPane: View {
                 }
                 DiffTextSurface(diff: diff, sourceText: text, languagePath: title, documentIdentity: documentIdentity, sideBySide: sideBySide, selectedHunk: hunk, dark: colorScheme == .dark, wraps: wraps, lineNumbers: lineNumbers, synchronized: synchronized, fontSize: CGFloat(fontSize), compact: forceCompact || compact, searchOptions: searchOptions, searchStep: searchStep, matchCount: $matchCount, matchIndex: $matchIndex, searchError: $searchError, scrollsToFirstChange: openedDocumentIdentity != documentIdentity, onFirstScroll: { openedDocumentIdentity = documentIdentity })
             }
-        }.background(RayGitStyle.canvas).onChange(of: documentIdentity) { _, _ in hunk = 0 }
+        }.background(ComparisonKeyboardRegion(standalone: standaloneShortcuts, action: performShortcut))
+            .background(RayGitStyle.canvas).onChange(of: documentIdentity) { _, _ in hunk = 0 }
             .onExitCommand { closeSearch() }
             .onAppear { searchOptions = initialSearchOptions; replacement = initialReplacement }
             .onChange(of: initialSearchOptions) { _, value in searchOptions = value }
             .onChange(of: initialReplacement) { _, value in replacement = value }
+    }
+    private func performShortcut(_ command: ShortcutCommand) -> Bool {
+        guard !isLoading, preview == nil else { return false }
+        switch command {
+        case .compareFind: showSearch = true
+        case .compareFindNext, .compareFindPrevious:
+            guard !searchOptions.query.isEmpty else { return false }
+            searchStep += command == .compareFindNext ? 1 : -1
+        case .comparePreviousChange:
+            guard !parsed.hunks.isEmpty else { return false }; hunk = max(0, hunk - 1)
+        case .compareNextChange:
+            guard !parsed.hunks.isEmpty else { return false }; hunk = min(parsed.hunks.count - 1, hunk + 1)
+        case .compareWrap: wraps.toggle()
+        case .compareCompact: compact.toggle()
+        case .compareLines: lineNumbers.toggle()
+        case .compareSync: synchronized.toggle()
+        default: return false
+        }
+        return true
     }
     private var documentIdentity: String { title + "|" + (leftRevisionTitle ?? "") + "|" + (rightRevisionTitle ?? "") }
     private var titleLabel: some View {

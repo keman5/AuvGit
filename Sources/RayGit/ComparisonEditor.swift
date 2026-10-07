@@ -154,6 +154,7 @@ struct ComparisonEditor: NSViewRepresentable {
             model = value
             value.resolver?.select = { [weak self] index in self?.selectConflict(index) }
             value.resolver?.accept = { [weak self] side, index in self?.acceptConflict(side, index: index) }
+            value.editingCommands?.takeBlockAction = { [weak self] fromLeft in self?.takeBlock(fromLeft: fromLeft) ?? false }
             value.editingCommands?.focusEditorAction = { [weak self] in
                 guard let self, let pane = self.historyTarget() ?? self.panes.first(where: { $0.id == "worktree" }) ?? self.panes.first else { return }
                 pane.text.window?.makeFirstResponder(pane.text); self.active = pane.text
@@ -613,6 +614,23 @@ struct ComparisonEditor: NSViewRepresentable {
                 target.scroll(to: NSPoint(x: x, y: min(y, max(0, pane.text.bounds.height - target.bounds.height))))
                 pane.scroll.reflectScrolledClipView(target)
             }
+        }
+        func takeBlock(fromLeft: Bool) -> Bool {
+            guard let target = historyTarget(), target.text.isEditable,
+                  let targetIndex = panes.firstIndex(where: { $0 === target }) else { return false }
+            let candidates = panes.enumerated().filter { $0.offset != targetIndex && !$0.element.scroll.isHidden }
+            let source = fromLeft ? candidates.last(where: { $0.offset < targetIndex })?.element : candidates.first(where: { $0.offset > targetIndex })?.element
+            guard let source else { return false }
+            if model.resolver != nil {
+                guard let index = model.resolver?.selectedBlock,
+                      ConflictDraft.blocks(in: target.text.string).indices.contains(index), ["ours", "theirs"].contains(source.id) else { return false }
+                acceptConflict(source.id == "ours" ? .ours : .theirs, index: index)
+                return true
+            }
+            let line = target.line(atUTF16: target.text.selectedRange().location)
+            let title = L10n.text("acceptBlock", table: "AdvancedDiff", arguments: [source.title.stringValue])
+            guard let action = acceptActions(for: target, line: line).first(where: { $0.0 == title }) else { return false }
+            action.1(); return true
         }
         fileprivate func acceptActions(for target: Pane, line: Int) -> [(String, () -> Void)] {
             guard target.text.isEditable else { return [] }
