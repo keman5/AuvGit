@@ -92,6 +92,7 @@ final class RepositoryStore: ObservableObject {
         self.persistsSession = persistsSession
         self.followsCurrentBranch = followsCurrentBranch ?? persistsSession
         self.usesCheckedHistoryScope = usesCheckedHistoryScope
+        Self.stores.add(self)
         if persistsSession { showMergedCommits = UserDefaults.standard.bool(forKey: "history.workspaceShowMergedCommits") }
         failureObserver = NotificationCenter.default.publisher(for: OperationFailure.notification)
             .receive(on: RunLoop.main).sink { [weak self] notification in
@@ -340,6 +341,8 @@ final class RepositoryStore: ObservableObject {
     var canOpenRepository: Bool { !isBusy || openingRepositoryPath != nil }
     private var recentSyncTask: Task<Void, Never>?
     private var recentSyncDate = Date.distantPast
+    var nextRemoteSync: [String: Date] = [:]
+    private static let stores = NSHashTable<RepositoryStore>.weakObjects()
     private var refreshingRepository: URL?
     private var refreshReadVersion = UUID()
     private var displayedDiffIdentity: String?
@@ -505,6 +508,7 @@ final class RepositoryStore: ObservableObject {
     }
     private var lastPoll = Date.distantPast
     func pollForChanges() async {
+        refreshRecentRepositoryStates()
         guard RayGitPreferences.backgroundRefresh, Date().timeIntervalSince(lastPoll) >= RayGitPreferences.pollInterval else { return }
         lastPoll = Date(); await refreshIfChanged()
     }
@@ -617,22 +621,43 @@ final class RepositoryStore: ObservableObject {
             if version == repoVersion, refreshReadVersion == refreshVersion, state.history == lastHistoryState { lastObservedState = state }
         } catch { if !Task.isCancelled, !(error is CancellationError), version == repoVersion, refreshReadVersion == refreshVersion { report(error) } }
     }
-    private func refreshRecentRepositoryStates() {
-        guard persistsSession, recentSyncTask == nil, Date().timeIntervalSince(recentSyncDate) > 30 else { return }
-        recentSyncDate = Date()
-        let paths = Array(recentPaths.filter { $0 != repositoryURL?.path }.prefix(20))
+    func stopBackgroundRepositorySync() {
+        Self.stores.allObjects.forEach { $0.recentSyncTask?.cancel() }
+    }
+    func cancelBackgroundRepositorySync() async {
+        let tasks = Self.stores.allObjects.compactMap(\.recentSyncTask)
+        tasks.forEach { $0.cancel() }
+        for task in tasks { await task.value }
+    }
+    func refreshRecentRepositoryStates(now: Date = Date()) {
+        guard persistsSession, RayGitPreferences.backgroundRefresh, recentSyncTask == nil,
+              !Self.stores.allObjects.contains(where: { $0.isBusy }), now.timeIntervalSince(recentSyncDate) > 30 else { return }
+        recentSyncDate = now
+        var seen = Set<String>()
+        let paths = (recentPaths + openRepositories + [repositoryURL?.path].compactMap { $0 }).filter { seen.insert($0).inserted }
+        nextRemoteSync = nextRemoteSync.filter { paths.contains($0.key) }
         recentSyncTask = Task {
-            await GitCommandLog.$suppressRoutineReads.withValue(true) {
-                for path in paths {
-                    guard !Task.isCancelled else { break }
-                    let repo = GitRepository(url: URL(fileURLWithPath: path))
-                    guard let files = try? await repo.status() else { continue }
-                    let text = try? await repo.workflowRead(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
-                    let counts = text?.split(whereSeparator: { $0.isWhitespace }).compactMap { Int($0) } ?? []
-                    if repositoryChangeCounts[path] != files.count { repositoryChangeCounts[path] = files.count }
-                    let state = RepositorySyncState(ahead: counts.count == 2 ? counts[0] : nil, behind: counts.count == 2 ? counts[1] : nil, conflicts: files.filter(\.isConflict).count)
-                    if repositorySyncStates[path] != state { repositorySyncStates[path] = state }
+            for path in paths {
+                guard !Task.isCancelled, RayGitPreferences.backgroundRefresh, !Self.stores.allObjects.contains(where: { $0.isBusy }) else { break }
+                guard (recentPaths + openRepositories + [repositoryURL?.path].compactMap { $0 }).contains(path) else { continue }
+                let repo = GitRepository(url: URL(fileURLWithPath: path))
+                if now >= (nextRemoteSync[path] ?? .distantPast) {
+                    do {
+                        try await repo.backgroundFetch()
+                        nextRemoteSync[path] = Date().addingTimeInterval(Double.random(in: 90...150))
+                    } catch {
+                        if Task.isCancelled { break }
+                        nextRemoteSync[path] = Date().addingTimeInterval(300)
+                    }
                 }
+                guard !Task.isCancelled, let files = try? await GitCommandLog.$suppressRoutineReads.withValue(true, operation: { try await repo.status() }) else { continue }
+                let text = try? await GitCommandLog.$suppressRoutineReads.withValue(true) { try await repo.workflowRead(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"]) }
+                guard !Task.isCancelled, RayGitPreferences.backgroundRefresh,
+                      (recentPaths + openRepositories + [repositoryURL?.path].compactMap { $0 }).contains(path) else { continue }
+                let counts = text?.split(whereSeparator: { $0.isWhitespace }).compactMap { Int($0) } ?? []
+                if repositoryChangeCounts[path] != files.count { repositoryChangeCounts[path] = files.count }
+                let state = RepositorySyncState(ahead: counts.count == 2 ? counts[0] : nil, behind: counts.count == 2 ? counts[1] : nil, conflicts: files.filter(\.isConflict).count)
+                if repositorySyncStates[path] != state { repositorySyncStates[path] = state }
             }
             recentSyncTask = nil
         }
@@ -837,6 +862,7 @@ final class RepositoryStore: ObservableObject {
         guard let repository, !isBusy, pendingRepositoryPath == nil else { return }
         isBusy = true
         Task {
+            await cancelBackgroundRepositorySync()
             let hint = try? await GitCommandLog.$suppressRoutineReads.withValue(true) {
                 try await repository.localNetworkPreflight(operation)
             }
@@ -853,6 +879,7 @@ final class RepositoryStore: ObservableObject {
         let operationID = currentUserOperationID
         let progress = progressHandler(for: repository, operationID: operationID)
         Task {
+            await cancelBackgroundRepositorySync()
             var failure: Error?
             do { try await GitCommandLog.$progress.withValue(progress) { try await GitCommandLog.$operationID.withValue(operationID) { try await GitCommandLog.$userInitiated.withValue(true) { try await body(repository) } } }; if !persistsSession { NotificationCenter.default.post(name: .rayGitWorktreeChanged, object: repository.url) }; activityRecords.insert((Date(), name, nil), at: 0); setStatus("%@ completed", arguments: [name]) }
             catch { failure = error }
@@ -868,6 +895,7 @@ final class RepositoryStore: ObservableObject {
         let target = GitRepository(url: URL(fileURLWithPath: path))
         let label = name + " · " + target.url.lastPathComponent
         isBusy = true; beginUserOperation(label)
+        await cancelBackgroundRepositorySync()
         let operationID = currentUserOperationID
         let progress = progressHandler(for: target, operationID: operationID)
         var failure: Error?
@@ -923,7 +951,7 @@ final class RepositoryStore: ObservableObject {
 @MainActor
 final class RayGitApplicationDelegate: NSObject, NSApplicationDelegate {
     weak var store: RepositoryStore?
-    func applicationWillTerminate(_ notification: Notification) { store?.flushSession() }
+    func applicationWillTerminate(_ notification: Notification) { store?.stopBackgroundRepositorySync(); store?.flushSession() }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard ComparePresenter.hasUnsavedChanges else { store?.flushSession(); return .terminateNow }
         Task { let approved = await ComparePresenter.prepareToTerminate(); if approved { self.store?.flushSession() }; sender.reply(toApplicationShouldTerminate: approved) }

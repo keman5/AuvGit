@@ -54,7 +54,7 @@ private final class GitCancellation: @unchecked Sendable {
 }
 
 enum GitProcess {
-    static func run(at directory: URL, arguments: [String], allowedCodes: Set<Int32> = [0], timeout: TimeInterval? = nil, executable: String? = nil, progress: (@Sendable (String) -> Void)? = nil, outputFile: URL? = nil, outputPrefixBytes: Int? = nil, inputFile: URL? = nil, literalPathspecs: Bool = true) async throws -> GitOutput {
+    static func run(at directory: URL, arguments: [String], allowedCodes: Set<Int32> = [0], timeout: TimeInterval? = nil, executable: String? = nil, progress: (@Sendable (String) -> Void)? = nil, outputFile: URL? = nil, outputPrefixBytes: Int? = nil, inputFile: URL? = nil, literalPathspecs: Bool = true, noninteractive: Bool = false, sshCommand: String? = nil) async throws -> GitOutput {
         let cancellation = GitCancellation()
         let started = Date()
         let commandExecutable = executable ?? GitRuntimePreferences.shared.executablePath
@@ -79,7 +79,7 @@ enum GitProcess {
             do {
                 try Task.checkCancellation()
                 let result = try await Task.detached(priority: .userInitiated) {
-                    try runBlocking(at: directory, arguments: actualArguments, allowedCodes: allowedCodes, timeout: timeout ?? GitRuntimePreferences.shared.timeout, executable: commandExecutable, progress: streamedProgress, outputFile: outputFile, outputPrefixBytes: outputPrefixBytes, inputFile: inputFile, literalPathspecs: literalPathspecs, cancellation: cancellation)
+                    try runBlocking(at: directory, arguments: actualArguments, allowedCodes: allowedCodes, timeout: timeout ?? GitRuntimePreferences.shared.timeout, executable: commandExecutable, progress: streamedProgress, outputFile: outputFile, outputPrefixBytes: outputPrefixBytes, inputFile: inputFile, literalPathspecs: literalPathspecs, noninteractive: noninteractive, sshCommand: sshCommand, cancellation: cancellation)
                 }.value
                 if logCommand { GitCommandLog.record(directory: directory, executable: commandExecutable, arguments: actualArguments, output: result.text + "\n" + result.error, error: nil, exitCode: result.code, started: started) }
                 return result
@@ -97,7 +97,7 @@ enum GitProcess {
         do { _ = try await run(at: directory, arguments: arguments, outputFile: outputFile) }
         catch { try? FileManager.default.removeItem(at: outputFile); throw error }
     }
-    private static func runBlocking(at directory: URL, arguments: [String], allowedCodes: Set<Int32>, timeout: TimeInterval, executable: String, progress: (@Sendable (String) -> Void)?, outputFile: URL?, outputPrefixBytes: Int?, inputFile: URL?, literalPathspecs: Bool, cancellation: GitCancellation) throws -> GitOutput {
+    private static func runBlocking(at directory: URL, arguments: [String], allowedCodes: Set<Int32>, timeout: TimeInterval, executable: String, progress: (@Sendable (String) -> Void)?, outputFile: URL?, outputPrefixBytes: Int?, inputFile: URL?, literalPathspecs: Bool, noninteractive: Bool, sshCommand: String?, cancellation: GitCancellation) throws -> GitOutput {
         let prefixLimit = outputPrefixBytes.map { min(32 * 1024 * 1024, max(1, $0)) }
         if cancellation.isCancelled { throw CancellationError() }
         var environment = GitRuntimePreferences.shared.environment(ProcessInfo.processInfo.environment)
@@ -108,6 +108,14 @@ enum GitProcess {
         if environment["GIT_ASKPASS"] == nil { environment["GIT_ASKPASS"] = "/usr/bin/false" }
         if environment["SSH_ASKPASS"] == nil { environment["SSH_ASKPASS"] = "/usr/bin/false" }
         if environment["GIT_SSH_COMMAND"] == nil { environment["GIT_SSH_COMMAND"] = "ssh -oBatchMode=yes" }
+        if noninteractive {
+            environment["GIT_ASKPASS"] = "/usr/bin/false"
+            environment["SSH_ASKPASS"] = "/usr/bin/false"
+            environment["SSH_ASKPASS_REQUIRE"] = "never"
+            environment["GCM_INTERACTIVE"] = "Never"
+
+        }
+        if let sshCommand { environment["GIT_SSH_COMMAND"] = sshCommand }
         var searchPaths = (environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin").components(separatedBy: ":")
         for path in ["/opt/homebrew/bin", "/usr/local/bin"] where !searchPaths.contains(path) { searchPaths.append(path) }
         environment["PATH"] = searchPaths.joined(separator: ":"); environment["LC_ALL"] = "C"

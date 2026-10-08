@@ -255,7 +255,9 @@ struct RebaseWorkflowView: View {
     private func load() {
         guard let repo = store.repository, !store.isBusy else { return }; let revision = base; let token = UUID(); loadRequest = token
         store.isBusy = true; captured = nil; messages = [:]; originalMessages = [:]; messageSelection = nil
-        Task { do { let result = try await repo.generatedRebasePlan(onto: revision); if store.repositoryURL == repo.url, base == revision, loadRequest == token { captured = result; todo = result.todo; output = ""
+        Task {
+            await store.cancelBackgroundRepositorySync()
+            do { let result = try await repo.generatedRebasePlan(onto: revision); if store.repositoryURL == repo.url, base == revision, loadRequest == token { captured = result; todo = result.todo; output = ""
                     if let info = try? await repo.workflowRead(["log", "--format=%H%x00%an%x00%at", result.base + ".." + result.head]), store.repositoryURL == repo.url, loadRequest == token {
                         metadata = Dictionary(uniqueKeysWithValues: info.split(separator: "\n").compactMap { row in
                             let fields = row.split(separator: "\0").map(String.init)
@@ -274,6 +276,7 @@ struct RebaseWorkflowView: View {
         let edited = todo, saved = messages, sourceTargets = targets
         store.isBusy = true
         Task {
+            await store.cancelBackgroundRepositorySync()
             do {
                 let instructions = try await repo.validateRebasePlan(base: plan.base, plan: edited, allowExec: true)
                 var editedMessages: [Int: String] = [:]
@@ -286,6 +289,8 @@ struct RebaseWorkflowView: View {
     }
     private func run(_ request: PendingRebase) {
         guard store.repositoryURL == request.repository.url, !store.isBusy else { return }; store.isBusy = true
-        Task { do { output = try await request.repository.executeRebase(plan: request.plan, editedTodo: request.todo, messages: request.messages, allowExec: true); if output.isEmpty { output = sessionText("Rebase completed or paused") } } catch { output = OperationFailure.message(error, repository: store.repositoryURL) }; store.isBusy = false; await store.refresh() }
+        Task {
+            await store.cancelBackgroundRepositorySync()
+            do { output = try await request.repository.executeRebase(plan: request.plan, editedTodo: request.todo, messages: request.messages, allowExec: true); if output.isEmpty { output = sessionText("Rebase completed or paused") } } catch { output = OperationFailure.message(error, repository: store.repositoryURL) }; store.isBusy = false; await store.refresh() }
     }
 }
