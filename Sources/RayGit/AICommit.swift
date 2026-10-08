@@ -153,10 +153,52 @@ final class AICommitController: ObservableObject {
                     break
                 }
             } catch is CancellationError {} catch {
-                if let self, self.requestID == token { self.error = (error as? AICommitFailure)?.localizedDescription ?? aiCommitText("Generation failed; check AI settings") }
+                if let self, self.requestID == token {
+                    if error is AICommitFailure || error is AICommitAPIError { self.error = error.localizedDescription }
+                    else { self.error = aiCommitText("Generation failed; check AI settings") }
+                }
             }
             if let self, self.requestID == token { self.isLoading = false; self.task = nil }
         }
+    }
+}
+
+struct AICommitAPIError: LocalizedError {
+    let statusCode: Int
+    let message: String
+    var errorDescription: String? { "API request failed (\(statusCode)): \(message)" }
+}
+
+enum AICommitAPI {
+    static func endpointURL(from value: String) throws -> URL {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard var components = URLComponents(string: trimmed),
+              let host = components.host,
+              components.scheme == "https" || (components.scheme == "http" && ["localhost", "127.0.0.1", "::1"].contains(host)) else {
+            throw AICommitFailure("Invalid API endpoint")
+        }
+        let path = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
+        if !path.hasSuffix("/chat/completions") {
+            components.path = path + "/chat/completions"
+        }
+        guard let url = components.url else { throw AICommitFailure("Invalid API endpoint") }
+        return url
+    }
+
+    static func message(from data: Data, response: HTTPURLResponse) throws -> String {
+        guard data.count <= 256_000 else { throw AICommitFailure("AI returned an invalid commit message") }
+        guard (200..<300).contains(response.statusCode) else {
+            struct ErrorResponse: Decodable { struct APIError: Decodable { let message: String }; let error: APIError }
+            let detail = (try? JSONDecoder().decode(ErrorResponse.self, from: data).error.message)
+                ?? HTTPURLResponse.localizedString(forStatusCode: response.statusCode)
+            throw AICommitAPIError(statusCode: response.statusCode, message: detail)
+        }
+        struct Response: Decodable { struct Choice: Decodable { struct Message: Decodable { let content: String }; let message: Message }; let choices: [Choice] }
+        guard let value = try? JSONDecoder().decode(Response.self, from: data).choices.first?.message.content else {
+            let type = response.value(forHTTPHeaderField: "Content-Type") ?? "unknown content type"
+            throw AICommitAPIError(statusCode: response.statusCode, message: "Invalid response (\(type))")
+        }
+        return value
     }
 }
 
@@ -166,16 +208,15 @@ private enum AICommitService {
         if configuration.provider == "codex" {
             value = try await AICommitCLI.generate(prompt: prompt, configuration: configuration)
         } else if configuration.provider == "api" {
-            guard let endpoint = URL(string: configuration.endpoint), endpoint.scheme == "https" || (endpoint.scheme == "http" && ["localhost", "127.0.0.1", "::1"].contains(endpoint.host ?? "")) else { throw AICommitFailure("Invalid API endpoint") }
+            let endpoint = try AICommitAPI.endpointURL(from: configuration.endpoint)
             let key = AICommitSecret.read(); guard !key.isEmpty else { throw AICommitFailure("API key is required") }
             var request = URLRequest(url: endpoint, timeoutInterval: 90)
             request.httpMethod = "POST"; request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.setValue("Bearer " + key, forHTTPHeaderField: "Authorization")
             request.httpBody = try JSONSerialization.data(withJSONObject: ["model": configuration.model, "messages": [["role": "user", "content": prompt]]])
             let session = URLSession(configuration: .ephemeral); defer { session.invalidateAndCancel() }
             let (data, response) = try await session.data(for: request)
-            guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode), data.count <= 256_000 else { throw AICommitFailure("Generation failed; check AI settings") }
-            struct Response: Decodable { struct Choice: Decodable { struct Message: Decodable { let content: String }; let message: Message }; let choices: [Choice] }
-            value = try JSONDecoder().decode(Response.self, from: data).choices.first?.message.content ?? ""
+            guard let response = response as? HTTPURLResponse else { throw AICommitFailure("Generation failed; check AI settings") }
+            value = try AICommitAPI.message(from: data, response: response)
         } else { throw AICommitFailure("Choose an AI service first") }
         let message = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty, message.utf8.count <= 16_000 else { throw AICommitFailure("AI returned an invalid commit message") }
