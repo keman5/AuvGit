@@ -25,3 +25,14 @@
 "verifyRemote" = "Verify remote and continue";
 "knownPushBehind" = "The last fetched state of %@/%@ contains %d commits missing locally. A normal push may be rejected. Continue to verify the current remote state? No force push will be performed without a separate confirmation.";
 "knownPullDiverged" = "The last fetched state has diverged: %d local-only and %d remote-only commits. Fast-forward-only pull may fail. Continue to fetch and verify the current remote state?";
+"authenticationRequired" = "Authentication Required";
+"username" = "Username";
+"passwordOrToken" = "Password or personal access token";
+"privateKey" = "Private key";
+"noPrivateKeySelected" = "No private key selected";
+"choosePrivateKey" = "Choose Key…";
+"keyPassphraseOptional" = "Key passphrase (optional)";
+"saveCredential" = "Save after successful authentication";
+"httpsCredentialScope" = "Saved in macOS Keychain for this protocol, host, port, and username.";
+"sshCredentialScope" = "The key path and secure bookmark are saved for this host, port, and username. An entered passphrase is stored in macOS Keychain.";
+"retry" = "Retry";

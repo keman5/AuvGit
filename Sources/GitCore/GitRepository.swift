@@ -238,9 +238,9 @@ public actor GitRepository {
         return try await run(["stash", "show", "--patch", "--include-untracked", "--no-ext-diff", "--no-textconv", "--no-color", ref]).text
     }
 
-    public func fetch() async throws { _ = try await runNetwork(.fetch, progress: { _ in }) }
-    public func pull() async throws { _ = try await runNetwork(.pull, progress: { _ in }) }
-    public func push() async throws { _ = try await runNetwork(.push, progress: { _ in }) }
+    public func fetch(credential: NetworkCredential? = nil) async throws { _ = try await runNetwork(.fetch, credential: credential, progress: { _ in }) }
+    public func pull(credential: NetworkCredential? = nil) async throws { _ = try await runNetwork(.pull, credential: credential, progress: { _ in }) }
+    public func push(credential: NetworkCredential? = nil) async throws { _ = try await runNetwork(.push, credential: credential, progress: { _ in }) }
     public func stashes() async throws -> [GitStash] {
         let tokens = fields(try await run(["stash", "list", "-z", "--format=%gd%x00%gs%x00%H"]).data)
         return stride(from: 0, to: max(0,tokens.count - 2), by: 3).map { GitStash(ref: tokens[$0], subject: tokens[$0+1], hash: tokens[$0+2]) }

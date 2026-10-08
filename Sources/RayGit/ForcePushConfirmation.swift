@@ -8,8 +8,8 @@ func forcePushText(_ key: String, _ arguments: CVarArg...) -> String {
 
 func networkPreflightMessage(_ hint: LocalNetworkPreflight) -> String {
     switch hint {
-    case let .pushBehind(remote, branch, count):
-        return L10n.text("knownPushBehind", table: "Network", arguments: [remote, branch, count])
+    case let .pushBehind(preview):
+        return L10n.text("knownPushBehind", table: "Network", arguments: [preview.remote, String(preview.remoteBranch.dropFirst("refs/heads/".count)), preview.remoteOnlyCount ?? 0])
     case let .pullDiverged(remoteOnly, localOnly):
         return L10n.text("knownPullDiverged", table: "Network", arguments: [localOnly, remoteOnly])
     }
@@ -53,6 +53,16 @@ struct ForcePushPrompt: Identifiable {
     let id = UUID()
     let repository: GitRepository
     let preview: ForcePushPreview
+    let credential: NetworkCredential?
+    let saveCredential: Bool
+
+    init(repository: GitRepository, preview: ForcePushPreview,
+         credential: NetworkCredential? = nil, saveCredential: Bool = false) {
+        self.repository = repository
+        self.preview = preview
+        self.credential = credential
+        self.saveCredential = saveCredential
+    }
 }
 
 struct ForcePushConfirmation: View {

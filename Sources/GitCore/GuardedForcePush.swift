@@ -29,11 +29,11 @@ public enum ForcePushRejection {
     }
 }
 public enum LocalNetworkPreflight: Sendable {
-    case pushBehind(remote: String, branch: String, remoteOnlyCount: Int)
+    case pushBehind(ForcePushPreview)
     case pullDiverged(remoteOnlyCount: Int, localOnlyCount: Int)
 }
 public extension GitRepository {
-    /// Advisory only: tracking refs describe the last fetch, never a force-push lease.
+    /// Cached push snapshots pin an exact lease; stale snapshots are rejected by Git.
     func localNetworkPreflight(_ operation: NetworkOperation) async throws -> LocalNetworkPreflight? {
         if operation == .pull {
             let upstream = try await GitProcess.run(at: url, arguments: ["rev-parse", "--verify", "@{upstream}"], allowedCodes: [0, 128])
@@ -44,25 +44,57 @@ public extension GitRepository {
             return .pullDiverged(remoteOnlyCount: values[1], localOnlyCount: values[0])
         }
         guard operation == .push || operation == .pushPreview,
-              let target = try await localPushTarget() else { return nil }
-        let count = try await localRemoteOnlyCount(reference: target.tracking)
-        guard let count, count > 0 else { return nil }
-        return .pushBehind(remote: target.remote, branch: String(target.reference.dropFirst("refs/heads/".count)), remoteOnlyCount: count)
+              let preview = try await cachedForcePushPreview() else { return nil }
+        return .pushBehind(preview)
     }
-    /// A dry run lets Git resolve push.default, pushRemote, refspecs and destination names.
+    /// No network access: only an unambiguous fetch/push mapping can pin a cached lease.
+    func cachedForcePushPreview() async throws -> ForcePushPreview? {
+        try Task.checkCancellation()
+        let configuration = try await forcePushConfigurationIdentity()
+        let branch = try await GitProcess.run(at: url, arguments: ["symbolic-ref", "--quiet", "HEAD"], allowedCodes: [0, 1])
+        guard branch.code == 0 else { return nil }
+        let localCommit = try await workflowRevision("HEAD")
+        guard let target = try await localPushTarget() else { return nil }
+        let tracked = try await GitProcess.run(at: url, arguments: ["rev-parse", "--verify", target.tracking + "^{commit}"], allowedCodes: [0, 128])
+        guard tracked.code == 0 else { return nil }
+        let remoteCommit = tracked.text.trimmingCharacters(in: .newlines)
+        let counts = try await GitProcess.run(at: url, arguments: ["rev-list", "--count", localCommit + ".." + remoteCommit])
+        guard let count = Int(counts.text.trimmingCharacters(in: .newlines)), count > 0 else { return nil }
+        let currentBranch = try await GitProcess.run(at: url, arguments: ["symbolic-ref", "--quiet", "HEAD"], allowedCodes: [0, 1])
+        guard currentBranch.code == 0, branch.text == currentBranch.text,
+              configuration == (try await forcePushConfigurationIdentity()),
+              localCommit == (try await workflowRevision("HEAD")) else {
+            throw GitError("The branch or push configuration changed. Preview the push again.")
+        }
+        return ForcePushPreview(remote: target.remote, remoteBranch: target.reference,
+                                localCommit: localCommit, remoteCommit: remoteCommit, remoteOnlyCount: count,
+                                repository: url, localBranch: branch.text.trimmingCharacters(in: .newlines),
+                                endpoint: target.endpoint, configuration: configuration, trackingRef: target.tracking)
+    }
+    /// Uses a cached exact lease when mapping is known; otherwise Git resolves the push remotely.
     /// Only a single rejected current-branch update may become a confirmation preview.
-    func prepareForcePush() async throws -> ForcePushPreview {
-        guard let preview = try await preparePush() else { throw ForcePushPreparationError.notRequired }
-        return preview
-    }
-    /// Resolves and validates the destination with one dry run; nil means an ordinary push is ready.
-    func preparePush() async throws -> ForcePushPreview? {
-        do { return try await preparedForcePush() }
+    func prepareForcePush(credential: NetworkCredential? = nil) async throws -> ForcePushPreview {
+        do {
+            if let cached = try await cachedForcePushPreview() { return cached }
+            guard let preview = try await preparedForcePush(credential: credential) else { throw ForcePushPreparationError.notRequired }
+            return preview
+        }
         catch let error as ForcePushPreparationError { throw error }
         catch is CancellationError { throw CancellationError() }
         catch { throw ForcePushPreparationError.unsupportedForce(error.localizedDescription) }
     }
-    private func preparedForcePush() async throws -> ForcePushPreview? {
+    /// Validates a cached destination or performs a dry run; nil means an ordinary push is ready.
+    func preparePush(credential: NetworkCredential? = nil, verifyRemote: Bool = false) async throws -> ForcePushPreview? {
+        do {
+            if let cached = try await cachedForcePushPreview() { return cached }
+            if !verifyRemote, try await localPushTarget() != nil { return nil }
+            return try await preparedForcePush(credential: credential)
+        }
+        catch let error as ForcePushPreparationError { throw error }
+        catch is CancellationError { throw CancellationError() }
+        catch { throw ForcePushPreparationError.unsupportedForce(error.localizedDescription) }
+    }
+    private func preparedForcePush(credential: NetworkCredential?) async throws -> ForcePushPreview? {
         try Task.checkCancellation()
         let branch = try await GitProcess.run(at: url, arguments: ["symbolic-ref", "--quiet", "HEAD"], allowedCodes: [0, 1])
         guard branch.code == 0 else { throw GitError("Force push requires a checked-out local branch.") }
@@ -78,7 +110,7 @@ public extension GitRepository {
         var verifiedReference: String?
         if let target = try await localPushTarget(), target.remote == remote,
            let count = try await localRemoteOnlyCount(reference: target.tracking), count > 0 {
-            let advertised = try await advertisedBranch(endpoint: target.endpoint, reference: target.reference)
+            let advertised = try await advertisedBranch(endpoint: target.endpoint, reference: target.reference, credential: credential)
             if !advertised.isEmpty, let freshCount = try await localRemoteOnlyCount(reference: advertised), freshCount > 0 {
                 verifiedRemoteCommit = advertised
                 verifiedReference = target.reference
@@ -88,7 +120,7 @@ public extension GitRepository {
         // Complex mappings and unknown remote objects still let Git resolve the push.
         let dryRun: GitOutput
         if verifiedReference != nil { dryRun = GitOutput(data: Data(), error: "", code: 0) }
-        else { dryRun = try await GitProcess.run(at: url, arguments: NetworkAuthentication.arguments + ["push", "--dry-run", "--porcelain", "--progress"], allowedCodes: [0, 1, 128]) }
+        else { dryRun = try await authenticatedGit(arguments: ["push", "--dry-run", "--porcelain", "--progress"], operation: .pushPreview, credential: credential, allowedCodes: [0, 1, 128]) }
         let rows = verifiedReference.map { [["!", localBranch + ":" + $0, "[rejected] (non-fast-forward)"]] } ?? dryRun.text.split(separator: "\n").map { $0.split(separator: "\t", omittingEmptySubsequences: false).map(String.init) }.filter { $0.count == 3 && $0[0].count == 1 }
         let forcedIntent = configuredForce || rows.contains { $0[0] == "+" || $0[0] == "-" }
         let rejected = rows.contains { $0[0] == "!" && ForcePushRejection.matches($0[2]) }
@@ -110,7 +142,7 @@ public extension GitRepository {
         }
         let remoteCommit: String
         if let verifiedRemoteCommit { remoteCommit = verifiedRemoteCommit }
-        else { remoteCommit = try await advertisedBranch(endpoint: endpoint, reference: pair[1]) }
+        else { remoteCommit = try await advertisedBranch(endpoint: endpoint, reference: pair[1], credential: credential) }
         guard !remoteCommit.isEmpty else { throw GitError("The rejected remote branch no longer exists. Preview the push again.") }
         var count: Int?
         if (try await GitProcess.run(at: url, arguments: ["cat-file", "-e", remoteCommit + "^{commit}"], allowedCodes: [0, 1, 128])).code == 0 {
@@ -126,7 +158,7 @@ public extension GitRepository {
                                 remoteOnlyCount: count, repository: url, localBranch: localBranch, endpoint: endpoint, configuration: configuration, trackingRef: trackingName.hasPrefix("refs/remotes/") ? trackingName : nil)
     }
     /// Sends the pinned commit to one pinned endpoint/ref; the lease is checked atomically by Git.
-    func forcePush(_ preview: ForcePushPreview, progress: @escaping @Sendable (NetworkProgress) -> Void) async throws -> NetworkOperationResult {
+    func forcePush(_ preview: ForcePushPreview, credential: NetworkCredential? = nil, progress: @escaping @Sendable (NetworkProgress) -> Void) async throws -> NetworkOperationResult {
         try Task.checkCancellation()
         let branch = try await GitProcess.run(at: url, arguments: ["symbolic-ref", "--quiet", "HEAD"], allowedCodes: [0, 1])
         guard preview.repository == url, branch.text.trimmingCharacters(in: .newlines) == preview.localBranch,
@@ -139,11 +171,12 @@ public extension GitRepository {
             let value = try await GitProcess.run(at: url, arguments: ["rev-parse", "--verify", ref], allowedCodes: [0, 128])
             previousTracking = value.code == 0 ? value.text.trimmingCharacters(in: .newlines) : ""
         }
-        let result = try await GitProcess.run(at: url, arguments: NetworkAuthentication.arguments + [
+        let result = try await authenticatedGit(arguments: [
             "push", "--porcelain", "--progress", "--no-follow-tags", "--recurse-submodules=no",
             "--force-with-lease=" + preview.remoteBranch + ":" + preview.remoteCommit,
             preview.endpoint, preview.localCommit + ":" + preview.remoteBranch
-        ], progress: { chunk in if let value = GitProgressParser.parse(chunk) { progress(value) } })
+        ], endpoint: preview.endpoint, credential: credential,
+            progress: { chunk in if let value = GitProgressParser.parse(chunk) { progress(value) } })
         if let ref = preview.trackingRef, let previousTracking {
             // URL-pinned pushes do not update tracking refs themselves. Compare-and-swap
             // preserves any concurrent fetch update while reflecting this successful push.
@@ -203,8 +236,8 @@ private extension GitRepository {
         guard names.contains(remote), !remote.hasPrefix("-") else { throw GitError("Cannot resolve a single configured push remote.") }
         return remote
     }
-    func advertisedBranch(endpoint: String, reference: String) async throws -> String {
-        let output = try await GitProcess.run(at: url, arguments: NetworkAuthentication.arguments + ["ls-remote", "--heads", endpoint, reference])
+    func advertisedBranch(endpoint: String, reference: String, credential: NetworkCredential?) async throws -> String {
+        let output = try await authenticatedGit(arguments: ["ls-remote", "--heads", endpoint, reference], endpoint: endpoint, credential: credential)
         let rows = output.text.split(separator: "\n").compactMap { line -> String? in
             let fields = line.split(separator: "\t")
             guard fields.count == 2, fields[1] == reference else { return nil }
@@ -213,6 +246,23 @@ private extension GitRepository {
         }
         guard rows.count <= 1 else { throw GitError("The remote branch advertisement is ambiguous.") }
         return rows.first ?? ""
+    }
+
+    func authenticatedGit(arguments: [String], operation: NetworkOperation = .push, endpoint: String? = nil,
+                          credential: NetworkCredential?, allowedCodes: Set<Int32> = [0],
+                          progress: (@Sendable (String) -> Void)? = nil) async throws -> GitOutput {
+        let lease: NetworkCredentialLease?
+        if let credential {
+            let resolved: RemoteEndpoint
+            if let endpoint, let parsed = RemoteEndpoint.parse(endpoint) { resolved = parsed }
+            else { resolved = try await remoteAuthenticationTarget(for: operation).endpoint }
+            lease = try NetworkCredentialLease(endpoint: resolved, credential: credential)
+        } else { lease = nil }
+        defer { lease?.remove() }
+        return try await GitCommandLog.$privateCredentials.withValue(lease?.privateValues ?? []) {
+            try await GitProcess.run(at: url, arguments: (lease?.gitArguments ?? NetworkAuthentication.arguments) + arguments,
+                                     allowedCodes: allowedCodes, progress: progress, environmentOverrides: lease?.environment ?? [:])
+        }
     }
     func forcePushConfigurationIdentity() async throws -> String {
         let output = try await GitProcess.run(at: url, arguments: ["config", "--null", "--list"], allowedCodes: [0, 1])

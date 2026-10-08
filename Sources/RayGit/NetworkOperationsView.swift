@@ -2,11 +2,12 @@ import SwiftUI
 import GitCore
 import RayGitLocalization
 
-private func networkText(_ key: String) -> String { L10n.text(key, table: "Network") }
+func networkText(_ key: String) -> String { L10n.text(key, table: "Network") }
 
 struct NetworkOperationsView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: RepositoryStore
+    @StateObject private var authentication = RemoteAuthenticationCoordinator()
     @State private var operation = NetworkOperation.fetch
     @State private var events: [NetworkProgress] = []
     @State private var output = ""
@@ -164,7 +165,13 @@ struct NetworkOperationsView: View {
         .interactiveDismissDisabled(task != nil)
         .task { await loadCredentials(); await loadRepositoryContext() }
         .onChange(of: operation) { _, _ in previewReady = false; events = []; output = "" }
-        .onDisappear { task?.cancel() }
+        .onChange(of: store.repositoryURL) { _, _ in authentication.cancel() }
+        .onDisappear { task?.cancel(); authentication.cancel() }
+        .rayGitSheet(item: $authentication.request) { request in
+            RemoteAuthenticationSheet(request: request, submit: { credential, save in
+                authentication.submit(credential, save: save)
+            }, cancel: { authentication.cancel() })
+        }
         .rayGitAlert(item: $preflightPrompt) { prompt in
             RayGitAlert(title: networkText("knownStateTitle"), message: networkPreflightMessage(prompt.hint), buttons: [
                 RayGitAlertButton(networkText("cancel"), role: .cancel),
@@ -237,13 +244,14 @@ struct NetworkOperationsView: View {
         if operation == .fetch { runVerified(operation); return }
         store.checkNetworkPreflight(operation) { hint in
             if operation == .pull { pullPrompt = PullOperationPrompt(repository: repository, hint: hint) }
+            else if case let .pushBehind(preview) = hint { forcePushPrompt = ForcePushPrompt(repository: repository, preview: preview) }
             else if let hint { preflightPrompt = NetworkPreflightPrompt(operation: operation, repository: repository, hint: hint) }
             else { runVerified(operation) }
         }
     }
-    private func runVerified(_ operation: NetworkOperation) {
+    private func runVerified(_ operation: NetworkOperation, credential suppliedCredential: NetworkCredential? = nil, saveCredential: Bool = false) {
         guard let repository = store.repository, !store.isBusy, task == nil else { return }
-        let expected = previewIdentity, expectedRepository = previewRepository
+        let expected = previewReady ? previewIdentity : nil, expectedRepository = previewRepository
         let name = operation == .fetch ? "Fetch" : operation == .pull ? "Pull" : operation == .push ? "Push" : "Push preview"
         store.beginUserOperation(name)
         let operationID = store.currentUserOperationID
@@ -251,16 +259,21 @@ struct NetworkOperationsView: View {
         store.isBusy = true; events = []; output = ""; previewReady = false
         task = Task { @MainActor in
             await store.cancelBackgroundRepositorySync()
-            do { try await GitCommandLog.$operationID.withValue(operationID) { try await GitCommandLog.$userInitiated.withValue(true) { try await GitCommandLog.$progress.withValue(progress) {
+            let credential: NetworkCredential?
+            if let suppliedCredential { credential = suppliedCredential }
+            else { credential = await authentication.savedCredential(for: repository, operation: operation) }
+            do { try await authentication.perform(with: credential) { try await GitCommandLog.$operationID.withValue(operationID) { try await GitCommandLog.$userInitiated.withValue(true) { try await GitCommandLog.$progress.withValue(progress) {
                 let identity = try await repository.networkPreviewIdentity()
-                if operation == .push && (expected != identity || expectedRepository != repository.url) { throw GitError(networkText("previewExpired")) }
+                if operation == .push && expected != nil && (expected != identity || expectedRepository != repository.url) { throw GitError(networkText("previewExpired")) }
                 if operation == .push || operation == .pushPreview {
-                    let forcePreview = try await repository.preparePush()
+                    let forcePreview = try await repository.preparePush(credential: credential, verifyRemote: operation == .pushPreview)
                     if let forcePreview {
+                        await saveCredentialAfterSuccess(credential, requested: saveCredential, repository: repository, operation: operation)
                         store.finishUserOperation(name, repository: repository, failure: CancellationError())
                         store.isBusy = false; task = nil
                         if store.repository === repository {
-                            forcePushPrompt = ForcePushPrompt(repository: repository, preview: forcePreview)
+                            forcePushPrompt = ForcePushPrompt(repository: repository, preview: forcePreview,
+                                                              credential: credential, saveCredential: saveCredential)
                         }
                         return
                     }
@@ -270,21 +283,30 @@ struct NetworkOperationsView: View {
                     previewReady = after == identity
                     previewIdentity = previewReady ? identity : nil; previewRepository = repository.url
                     output = networkText(previewReady ? "completed" : "previewExpired")
+                    await saveCredentialAfterSuccess(credential, requested: saveCredential, repository: repository, operation: operation)
                     store.completeNetworkOperation(name, repository: repository)
                     return
                 }
-                let result = try await repository.runNetwork(operation, progress: { _ in })
+                let result = try await repository.runNetwork(operation, credential: credential, progress: { _ in })
                 output = result.output + "\n" + networkText("completed")
+                await saveCredentialAfterSuccess(credential, requested: saveCredential, repository: repository, operation: operation)
                 store.completeNetworkOperation(name, repository: repository)
-            } } } } catch is CancellationError {
+            } } } } } catch is CancellationError {
                 output = networkText("cancelled")
                 store.finishUserOperation(name, repository: repository, failure: CancellationError())
             }
             catch {
                 output = GitProgressParser.redact(OperationFailure.message(error, repository: repository.url))
                 if (operation == .push || operation == .pushPreview), ForcePushRejection.isNonFastForward(error),
-                   let preview = try? await GitCommandLog.$progress.withValue(progress, operation: { try await repository.prepareForcePush() }), store.repository === repository {
-                    forcePushPrompt = ForcePushPrompt(repository: repository, preview: preview)
+                   let preview = try? await GitCommandLog.$progress.withValue(progress, operation: { try await repository.prepareForcePush(credential: credential) }), store.repository === repository {
+                    await saveCredentialAfterSuccess(credential, requested: saveCredential, repository: repository, operation: operation)
+                    forcePushPrompt = ForcePushPrompt(repository: repository, preview: preview,
+                                                      credential: credential, saveCredential: saveCredential)
+                } else {
+                    _ = await authentication.presentIfNeeded(error: error, repository: repository, operation: operation) { credential, save in
+                        guard store.repository === repository else { return }
+                        runVerified(operation, credential: credential, saveCredential: save)
+                    }
                 }
                 store.finishUserOperation(name, repository: repository, failure: error)
             }
@@ -293,7 +315,8 @@ struct NetworkOperationsView: View {
             await loadRepositoryContext()
         }
     }
-    private func runForcePush(_ prompt: ForcePushPrompt) {
+    private func runForcePush(_ prompt: ForcePushPrompt, credential suppliedCredential: NetworkCredential? = nil, saveCredential: Bool = false) {
+        guard store.repository === prompt.repository, !store.isBusy, task == nil else { return }
         let name = forcePushText("action")
         store.beginUserOperation(name)
         let operationID = store.currentUserOperationID
@@ -301,10 +324,16 @@ struct NetworkOperationsView: View {
         store.isBusy = true; store.error = nil; events = []
         task = Task { @MainActor in
             await store.cancelBackgroundRepositorySync()
+            let credential: NetworkCredential?
+            if let suppliedCredential { credential = suppliedCredential }
+            else if let promptCredential = prompt.credential { credential = promptCredential }
+            else { credential = await authentication.savedCredential(for: prompt.repository, operation: .push) }
+            let shouldSaveCredential = suppliedCredential == nil ? prompt.saveCredential : saveCredential
             do {
-                let result = try await GitCommandLog.$operationID.withValue(operationID) { try await GitCommandLog.$userInitiated.withValue(true) { try await GitCommandLog.$progress.withValue(progress) { try await prompt.repository.forcePush(prompt.preview, progress: { _ in })
-                } } }
+                let result = try await authentication.perform(with: credential) { try await GitCommandLog.$operationID.withValue(operationID) { try await GitCommandLog.$userInitiated.withValue(true) { try await GitCommandLog.$progress.withValue(progress) { try await prompt.repository.forcePush(prompt.preview, credential: credential, progress: { _ in })
+                } } } }
                 output += "\n" + result.output + "\n" + networkText("completed")
+                await saveCredentialAfterSuccess(credential, requested: shouldSaveCredential, repository: prompt.repository, operation: .push)
                 store.completeNetworkOperation(forcePushText("action"), repository: prompt.repository)
             } catch is CancellationError {
                 output += "\n" + networkText("cancelled")
@@ -312,11 +341,20 @@ struct NetworkOperationsView: View {
             }
             catch {
                 output += "\n" + GitProgressParser.redact(OperationFailure.message(error, repository: prompt.repository.url))
+                _ = await authentication.presentIfNeeded(error: error, repository: prompt.repository, operation: .push) { credential, save in
+                    guard store.repository === prompt.repository else { return }
+                    runForcePush(prompt, credential: credential, saveCredential: save)
+                }
                 store.finishUserOperation(name, repository: prompt.repository, failure: error)
             }
             store.isBusy = false; task = nil
             await store.refresh(); await loadRepositoryContext()
         }
+    }
+    private func saveCredentialAfterSuccess(_ credential: NetworkCredential?, requested: Bool, repository: GitRepository, operation: NetworkOperation) async {
+        guard requested, let credential else { return }
+        do { try await authentication.save(credential, for: repository, operation: operation) }
+        catch { output += "\n" + OperationFailure.message(error, repository: repository.url) }
     }
     private func configureKeychain() {
         guard let repository = store.repository, !store.isBusy else { return }

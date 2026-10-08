@@ -35,8 +35,8 @@ final class HTTPSCloneCredentialTests: XCTestCase {
         let lease = try HTTPSCredentialLease(source: URL(string: "https://gitlab.example.invalid/group/project.git")!, credential: credential)
         defer { lease.remove() }
 
-        XCTAssertEqual(Array(lease.gitArguments.prefix(2)), ["-c", "credential.helper="])
-        XCTAssertTrue(lease.gitArguments[3].hasPrefix("credential.helper=!"))
+        XCTAssertEqual(Array(lease.gitArguments.prefix(2)), ["-c", "credential.https://gitlab.example.invalid.helper="])
+        XCTAssertTrue(lease.gitArguments[3].hasPrefix("credential.https://gitlab.example.invalid.helper=!"))
         // Persistence is inside the scoped helper, never an unscoped second helper.
         XCTAssertEqual(lease.gitArguments.count, 4)
         XCTAssertThrowsError(try HTTPSCredentialLease(source: URL(string: "https://gitlab.example.invalid/group/project.git")!, credential: .init(

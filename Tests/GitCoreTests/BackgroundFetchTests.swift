@@ -2,6 +2,52 @@ import XCTest
 @testable import GitCore
 
 final class BackgroundFetchTests: XCTestCase {
+    func testPollingFetchesOnlyChangedOrUnseenHeads() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let remote = root.appendingPathComponent("remote.git"), producer = root.appendingPathComponent("producer"), clone = root.appendingPathComponent("clone")
+        _ = try await GitProcess.run(at: root, arguments: ["init", "--bare", remote.path])
+        _ = try await GitProcess.run(at: root, arguments: ["clone", remote.path, producer.path])
+        _ = try await GitProcess.run(at: producer, arguments: ["config", "user.name", "Test"])
+        _ = try await GitProcess.run(at: producer, arguments: ["config", "user.email", "test@example.com"])
+        _ = try await GitProcess.run(at: producer, arguments: ["commit", "--allow-empty", "-m", "base"])
+        _ = try await GitProcess.run(at: producer, arguments: ["push", "origin", "HEAD"])
+        _ = try await GitProcess.run(at: root, arguments: ["clone", remote.path, clone.path])
+        let wrapper = root.appendingPathComponent("test-git"), count = clone.appendingPathComponent(".git/fetch-count")
+        try """
+        #!/bin/sh
+        for arg in "$@"; do
+            if [ "$arg" = "fetch" ]; then echo fetch >> .git/fetch-count; fi
+        done
+        exec /usr/bin/git "$@"
+        """.write(to: wrapper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
+        let key = "raygit.git.executablePath", previous = UserDefaults.standard.object(forKey: key)
+        UserDefaults.standard.set(wrapper.path, forKey: key)
+        defer { if let previous { UserDefaults.standard.set(previous, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) } }
+        let repo = GitRepository(url: clone)
+        let originalHead = try await GitProcess.run(at: clone, arguments: ["rev-parse", "HEAD"]).text
+        try await repo.backgroundFetch()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: count.path), "Unchanged heads only need ls-remote")
+        _ = try await GitProcess.run(at: producer, arguments: ["commit", "--allow-empty", "-m", "changed"])
+        _ = try await GitProcess.run(at: producer, arguments: ["push", "origin", "HEAD"])
+        try await repo.backgroundFetch()
+        XCTAssertEqual(try String(contentsOf: count, encoding: .utf8), "fetch\n")
+        try await repo.backgroundFetch()
+        XCTAssertEqual(try String(contentsOf: count, encoding: .utf8), "fetch\n")
+        _ = try await GitProcess.run(at: producer, arguments: ["push", "origin", "HEAD:refs/heads/new-branch"])
+        try await repo.backgroundFetch()
+        XCTAssertEqual(try String(contentsOf: count, encoding: .utf8), "fetch\nfetch\n")
+        _ = try await GitProcess.run(at: producer, arguments: ["push", "origin", "--delete", "new-branch"])
+        try await repo.backgroundFetch()
+        let retained = try await GitProcess.run(at: clone, arguments: ["rev-parse", "refs/remotes/origin/new-branch"]).text
+        XCTAssertFalse(retained.isEmpty, "Background polling must not prune deleted heads")
+        let finalHead = try await GitProcess.run(at: clone, arguments: ["rev-parse", "HEAD"]).text
+        XCTAssertEqual(originalHead, finalHead)
+        XCTAssertEqual(try String(contentsOf: count, encoding: .utf8), "fetch\nfetch\n")
+    }
+
     func testBackgroundSSHIsNoninteractiveAndCustomWrapperIsNotInvoked() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -13,7 +59,7 @@ final class BackgroundFetchTests: XCTestCase {
         try """
         #!/bin/sh
         for arg in "$@"; do
-            if [ "$arg" = "fetch" ]; then
+            if [ "$arg" = "ls-remote" ]; then
                 printf '%s\\n' "$GIT_SSH_COMMAND" "$GIT_ASKPASS" "$SSH_ASKPASS" "$SSH_ASKPASS_REQUIRE" "$GCM_INTERACTIVE" > .git/background-env
                 exit 0
             fi

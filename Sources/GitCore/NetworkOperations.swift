@@ -68,7 +68,7 @@ extension GitRepository {
         return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
     }
 
-    public func runNetwork(_ operation: NetworkOperation, progress: @escaping @Sendable (NetworkProgress) -> Void) async throws -> NetworkOperationResult {
+    public func runNetwork(_ operation: NetworkOperation, credential: NetworkCredential? = nil, progress: @escaping @Sendable (NetworkProgress) -> Void) async throws -> NetworkOperationResult {
         let args: [String]
         switch operation {
         case .fetch: args = ["fetch", "--all", "--progress"] + (GitRuntimePreferences.shared.fetchPrune ? ["--prune"] : ["--no-prune"])
@@ -76,12 +76,20 @@ extension GitRepository {
         case .pushPreview: args = ["push", "--dry-run", "--porcelain", "--progress"]
         case .push: args = ["push", "--porcelain", "--progress"]
         }
+        let lease: NetworkCredentialLease?
+        if let credential {
+            lease = try NetworkCredentialLease(endpoint: try await remoteAuthenticationTarget(for: operation).endpoint, credential: credential)
+        } else { lease = nil }
+        defer { lease?.remove() }
         let lines = ProgressLines(progress)
         defer { lines.finish() }
-        let result = try await GitProcess.run(at: url, arguments: NetworkAuthentication.arguments + args, progress: { lines.accept($0) })
+        let result = try await GitCommandLog.$privateCredentials.withValue(lease?.privateValues ?? []) {
+            try await GitProcess.run(at: url, arguments: (lease?.gitArguments ?? NetworkAuthentication.arguments) + args,
+                                     progress: { lines.accept($0) }, environmentOverrides: lease?.environment ?? [:])
+        }
         return NetworkOperationResult(output: GitProgressParser.redact(result.text + (result.error.isEmpty ? "" : "\n" + result.error)))
     }
-    /// Only remote-tracking heads are refreshed; the checked-out branch and worktree stay untouched.
+    /// Poll advertised heads first; fetch changed heads without touching the checked-out branch or worktree.
     public func backgroundFetch() async throws {
         let remotes = try await GitProcess.run(at: url, arguments: ["remote"], timeout: 30, noninteractive: true).text.split(separator: "\n").map(String.init)
         var failure: Error?
@@ -100,6 +108,16 @@ extension GitRepository {
                     }
                     sshCommand = executable + " -oBatchMode=yes" + ssh.dropFirst(executable.count)
                 }
+                let advertised = try await GitProcess.run(at: url, arguments: NetworkAuthentication.arguments + ["ls-remote", "--heads", "--", remote], timeout: 10, noninteractive: true, sshCommand: sshCommand).text
+                let tracking = try await GitProcess.run(at: url, arguments: ["for-each-ref", "--format=%(objectname) %(refname)", "refs/remotes/" + remote + "/"], timeout: 10).text
+                let localHeads = Set(tracking.split(separator: "\n").map { line in
+                    line.replacingOccurrences(of: " refs/remotes/" + remote + "/", with: " refs/heads/")
+                })
+                let changed = advertised.split(separator: "\n").contains { line in
+                    let fields = line.split(whereSeparator: { $0.isWhitespace })
+                    return fields.count == 2 && !localHeads.contains(String(fields[0]) + " " + fields[1])
+                }
+                guard changed else { continue }
                 _ = try await GitProcess.run(at: url, arguments: NetworkAuthentication.arguments + [
                     "fetch", "--quiet", "--no-prune", "--no-prune-tags", "--no-tags", "--no-recurse-submodules",
                     "--no-write-fetch-head", "--no-auto-maintenance", "--refmap=", "--", remote,

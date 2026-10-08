@@ -93,8 +93,9 @@ final class HTTPSCredentialLease {
         directoryURL = directory
         credentialURL = credentialFile
         helperURL = helperFile
-        var arguments = ["-c", "credential.helper="]
-        arguments += ["-c", "credential.helper=!" + Self.shellQuote(helperFile.path)]
+        let helperKey = "credential.https://" + expectedHost + ".helper="
+        var arguments = ["-c", helperKey]
+        arguments += ["-c", helperKey + "!" + Self.shellQuote(helperFile.path)]
         gitArguments = arguments
     }
 

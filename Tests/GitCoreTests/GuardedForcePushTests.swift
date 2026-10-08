@@ -116,16 +116,50 @@ final class GuardedForcePushTests: XCTestCase {
     func testOrdinarySuccessfulPushPreviewUsesOnlyNotRequiredFallback() async throws {
         let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
         _ = try await GitProcess.run(at: f.local.url, arguments: ["reset", "--hard", "origin/main"])
+        let capture = ForcePushCommandCapture()
+        let observer = NotificationCenter.default.addObserver(forName: GitCommandLog.notification, object: nil, queue: nil) { event in
+            if let record = event.object as? GitCommandRecord, record.directory == f.local.url.path { capture.append(record.command) }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
         let ordinary = try await f.local.preparePush()
         XCTAssertNil(ordinary)
+        XCTAssertFalse(capture.commands.contains { $0.contains("'ls-remote'") || $0.contains("'push'") })
+        let explicitPreview = try await f.local.preparePush(verifyRemote: true)
+        XCTAssertNil(explicitPreview)
+        XCTAssertTrue(capture.commands.contains { $0.contains("'push'") && $0.contains("'--dry-run'") })
         do { _ = try await f.local.prepareForcePush(); XCTFail("No force candidate expected") }
         catch ForcePushPreparationError.notRequired {} catch { XCTFail("Unexpected error: \(error)") }
+    }
+    func testRejectedOrdinaryPushStillPreparesFreshLeaseWithoutCachedRemoteAdvance() async throws {
+        let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
+        _ = try await GitProcess.run(at: f.local.url, arguments: ["reset", "--hard", "origin/main"])
+        _ = try await commit(f.local, "new-local-change")
+        let advanced = try await commit(f.other, "unfetched-remote-change")
+        try await f.other.push()
+        let ordinary = try await f.local.preparePush()
+        XCTAssertNil(ordinary)
+        do { try await f.local.push(); XCTFail("Remote advance must reject ordinary push") }
+        catch { XCTAssertTrue(ForcePushRejection.isNonFastForward(error)) }
+        let preview = try await f.local.prepareForcePush()
+        XCTAssertEqual(preview.remoteCommit, advanced)
+        XCTAssertEqual(preview.remoteBranch, "refs/heads/main")
+        _ = try await f.local.forcePush(preview, progress: { _ in })
+        let head = try await remoteHead(f); XCTAssertEqual(head, preview.localCommit)
     }
     func testRefspecDestinationAndNonFastForwardClassification() async throws {
         let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
         _ = try await GitProcess.run(at: f.bare, arguments: ["update-ref", "refs/heads/delivery", try await remoteHead(f)])
         _ = try await GitProcess.run(at: f.local.url, arguments: ["config", "remote.origin.push", "refs/heads/main:refs/heads/delivery"])
+        let cached = try await f.local.cachedForcePushPreview()
+        XCTAssertNil(cached)
+        let capture = ForcePushCommandCapture()
+        let observer = NotificationCenter.default.addObserver(forName: GitCommandLog.notification, object: nil, queue: nil) { event in
+            if let record = event.object as? GitCommandRecord, record.directory == f.local.url.path { capture.append(record.command) }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
         let preview = try await f.local.prepareForcePush()
+        XCTAssertTrue(capture.commands.contains { $0.contains("'--dry-run'") })
+        XCTAssertTrue(capture.commands.contains { $0.contains("'ls-remote'") })
         XCTAssertEqual(preview.remoteBranch, "refs/heads/delivery")
         _ = try await f.local.forcePush(preview, progress: { _ in })
         let delivery = try await GitRepository(url: f.bare).workflowRevision("refs/heads/delivery")
@@ -136,15 +170,15 @@ final class GuardedForcePushTests: XCTestCase {
         XCTAssertFalse(ForcePushRejection.isNonFastForward(GitError("[remote rejected] main -> main (protected branch)")))
         XCTAssertFalse(ForcePushRejection.isNonFastForward(GitError("Authentication failed")))
     }
-    func testLocalHintsAndKnownRejectionSkipDryRunButRefreshLease() async throws {
+    func testCachedPreviewUsesNoNetworkAndStaleLeaseRejectsNewRemote() async throws {
         let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
         let capture = ForcePushCommandCapture()
         let observer = NotificationCenter.default.addObserver(forName: GitCommandLog.notification, object: nil, queue: nil) { event in
             if let record = event.object as? GitCommandRecord, record.directory == f.local.url.path { capture.append(record.command) }
         }
         defer { NotificationCenter.default.removeObserver(observer) }
-        guard case let .pushBehind(remote, branch, count) = try await f.local.localNetworkPreflight(.push) else { return XCTFail("Expected cached push warning") }
-        XCTAssertEqual(remote, "origin"); XCTAssertEqual(branch, "main"); XCTAssertEqual(count, 1)
+        guard case let .pushBehind(cached) = try await f.local.localNetworkPreflight(.push) else { return XCTFail("Expected cached push warning") }
+        XCTAssertEqual(cached.remote, "origin"); XCTAssertEqual(cached.remoteBranch, "refs/heads/main"); XCTAssertEqual(cached.remoteOnlyCount, 1)
         guard case let .pullDiverged(remoteCount, localCount) = try await f.local.localNetworkPreflight(.pull) else { return XCTFail("Expected local divergence warning") }
         XCTAssertEqual(remoteCount, 1); XCTAssertEqual(localCount, 1)
         XCTAssertFalse(capture.commands.contains { $0.contains("'ls-remote'") || $0.contains("'push'") })
@@ -153,9 +187,12 @@ final class GuardedForcePushTests: XCTestCase {
         // Make the fresh object available without updating the branch tracking cache.
         _ = try await GitProcess.run(at: f.local.url, arguments: ["fetch", "origin", advanced])
         let preview = try await f.local.prepareForcePush()
-        XCTAssertEqual(preview.remoteCommit, advanced)
+        XCTAssertEqual(preview.remoteCommit, cached.remoteCommit)
         XCTAssertFalse(capture.commands.contains { $0.contains("'--dry-run'") })
-        XCTAssertTrue(capture.commands.contains { $0.contains("'ls-remote'") })
+        XCTAssertFalse(capture.commands.contains { $0.contains("'ls-remote'") || $0.contains("'push'") })
+        do { _ = try await f.local.forcePush(preview, progress: { _ in }); XCTFail("Stale cached lease must reject") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("stale info")) }
+        let head = try await remoteHead(f); XCTAssertEqual(head, advanced)
     }
     func testLocalPushHintRefusesDifferentPushURLAndCustomRefspec() async throws {
         let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
@@ -173,8 +210,8 @@ final class GuardedForcePushTests: XCTestCase {
         _ = try await GitProcess.run(at: f.local.url, arguments: ["fetch", "destination"])
         _ = try await GitProcess.run(at: f.local.url, arguments: ["config", "remote.pushDefault", "destination"])
         _ = try await GitProcess.run(at: f.local.url, arguments: ["config", "push.default", "current"])
-        guard case let .pushBehind(remote, _, _) = try await f.local.localNetworkPreflight(.push) else { return XCTFail("Expected destination hint") }
-        XCTAssertEqual(remote, "destination")
+        guard case let .pushBehind(destination) = try await f.local.localNetworkPreflight(.push) else { return XCTFail("Expected destination hint") }
+        XCTAssertEqual(destination.remote, "destination")
         _ = try await GitProcess.run(at: f.local.url, arguments: ["config", "branch.main.pushRemote", "origin"])
         let remoteCommit = try await remoteHead(f)
         _ = try await GitProcess.run(at: f.local.url, arguments: ["update-ref", "refs/remotes/origin/delivery", remoteCommit])
@@ -183,7 +220,7 @@ final class GuardedForcePushTests: XCTestCase {
         let mismatchedSimple = try await f.local.localNetworkPreflight(.push)
         XCTAssertNil(mismatchedSimple)
         _ = try await GitProcess.run(at: f.local.url, arguments: ["config", "push.default", "upstream"])
-        guard case let .pushBehind(upstreamRemote, branch, _) = try await f.local.localNetworkPreflight(.push) else { return XCTFail("Expected upstream destination") }
-        XCTAssertEqual(upstreamRemote, "origin"); XCTAssertEqual(branch, "delivery")
+        guard case let .pushBehind(upstream) = try await f.local.localNetworkPreflight(.push) else { return XCTFail("Expected upstream destination") }
+        XCTAssertEqual(upstream.remote, "origin"); XCTAssertEqual(upstream.remoteBranch, "refs/heads/delivery")
     }
 }

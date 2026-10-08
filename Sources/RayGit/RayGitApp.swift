@@ -631,10 +631,10 @@ final class RepositoryStore: ObservableObject {
     }
     func refreshRecentRepositoryStates(now: Date = Date()) {
         guard persistsSession, RayGitPreferences.backgroundRefresh, recentSyncTask == nil,
-              !Self.stores.allObjects.contains(where: { $0.isBusy }), now.timeIntervalSince(recentSyncDate) > 30 else { return }
+              !Self.stores.allObjects.contains(where: { $0.isBusy }), now.timeIntervalSince(recentSyncDate) >= 10 else { return }
         recentSyncDate = now
         var seen = Set<String>()
-        let paths = (recentPaths + openRepositories + [repositoryURL?.path].compactMap { $0 }).filter { seen.insert($0).inserted }
+        let paths = ([repositoryURL?.path].compactMap { $0 } + openRepositories + recentPaths).filter { seen.insert($0).inserted }
         nextRemoteSync = nextRemoteSync.filter { paths.contains($0.key) }
         recentSyncTask = Task {
             for path in paths {
@@ -861,8 +861,8 @@ final class RepositoryStore: ObservableObject {
     func checkNetworkPreflight(_ operation: NetworkOperation, completion: @escaping (LocalNetworkPreflight?) -> Void) {
         guard let repository, !isBusy, pendingRepositoryPath == nil else { return }
         isBusy = true
+        stopBackgroundRepositorySync()
         Task {
-            await cancelBackgroundRepositorySync()
             let hint = try? await GitCommandLog.$suppressRoutineReads.withValue(true) {
                 try await repository.localNetworkPreflight(operation)
             }

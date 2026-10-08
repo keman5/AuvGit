@@ -20,6 +20,7 @@ struct MainWindow: View {
     @StateObject private var branchesFocus = WorkspaceFileFocus()
     @StateObject private var changesFocus = WorkspaceFileFocus()
     @StateObject private var terminals = TerminalSessions()
+    @StateObject private var authentication = RemoteAuthenticationCoordinator()
     @AppStorage("preferences.filterCase") private var preferenceFilterCase = "insensitive"
     @AppStorage(L10n.preferenceKey) private var languageCode = "system"
     @State private var namePrompt: NamePrompt?
@@ -171,7 +172,7 @@ struct MainWindow: View {
                         .buttonStyle(ToolbarRowButtonStyle(height: 28, minimumWidth: 32)).controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).help(shortcutText(ShortcutCommand.open.title) + " " + shortcuts.binding(.open).displayString).disabled(store.isBusy)
                 }.compactMainToolbarItem().defaultCustomization(.hidden)
                 ToolbarItem(id: "fetch") {
-                    Button { store.operation("Fetch") { try await $0.fetch() } } label: { toolbarLabel(mainText("fetch"), systemImage: "arrow.down.to.line") }
+                    Button { runToolbarNetwork(.fetch) } label: { toolbarLabel(mainText("fetch"), systemImage: "arrow.down.to.line") }
                         .buttonStyle(ToolbarRowButtonStyle(height: 28, minimumWidth: 32))
                         .disabled(store.repository == nil || store.isBusy)
                 }.compactMainToolbarItem().defaultCustomization(.hidden)
@@ -309,7 +310,7 @@ struct MainWindow: View {
         case "refresh": Task { await store.refresh() }
         case "create": createClone = nil; showCreate = true
         case "open": store.chooseRepository()
-        case "fetch": store.operation("Fetch") { try await $0.fetch() }
+        case "fetch": runToolbarNetwork(.fetch)
         case "commit": store.mode = "workspace"; commitFocused = true
         case "newBranch": askName(mainText("createBranch")) { name in store.operation("创建分支") { try await $0.createBranch(name: name) } }
         case "network": showNetwork = true
@@ -368,6 +369,7 @@ struct MainWindow: View {
         .onChange(of: store.historyAuthor) { _, _ in guard handlesStoreEvents, !store.isRestoringViewState else { return }; store.scheduleSearch() }
         .onChange(of: store.repositoryURL) { _, directory in
             guard handlesStoreEvents else { return }
+            authentication.cancel()
             aiCommit.cancel()
             store.workspaceCommitRequest = nil
             aiScopeRepository = nil
@@ -389,21 +391,24 @@ struct MainWindow: View {
                 RayGitAlertButton(mainText("continue")) { confirmation = nil; action.action() }
             ])
         }
-        .onDisappear { confirmation?.cancelled?(); confirmation = nil }
+        .onDisappear { confirmation?.cancelled?(); confirmation = nil; authentication.cancel() }
+        .rayGitSheet(item: $authentication.request) { request in
+            RemoteAuthenticationSheet(request: request, submit: { credential, save in
+                authentication.submit(credential, save: save)
+            }, cancel: { authentication.cancel() })
+        }
         .rayGitSheet(item: $pullPrompt) { prompt in
             PullOperationConfirmation(hint: prompt.hint) { pullPrompt = nil } execute: { operation in
                 pullPrompt = nil
                 guard store.repository === prompt.repository, !store.isBusy else { return }
-                store.operation(operation == .pull ? "Pull" : "Fetch") {
-                    if operation == .pull { try await $0.pull() } else { try await $0.fetch() }
-                }
+                runToolbarNetwork(operation)
             }
         }
         .rayGitSheet(item: $forcePushPrompt) { prompt in
             ForcePushConfirmation(preview: prompt.preview) { forcePushPrompt = nil } execute: {
                 forcePushPrompt = nil
                 guard store.repository === prompt.repository else { return }
-                store.operation(forcePushText("action")) { _ = try await $0.forcePush(prompt.preview) { _ in } }
+                runToolbarForcePush(prompt)
             }
         }
         .rayGitSheet(isPresented: Binding(get: { trackingBranch != nil }, set: { if !$0 { trackingBranch = nil; trackingRepository = nil } }), onDismiss: { trackingRepository = nil }) {
@@ -487,34 +492,126 @@ struct MainWindow: View {
         let root = store.repositoryURL
         confirmation = PendingAction(title: title, message: message) { guard store.repositoryURL == root else { return }; action() }
     }
+    private func runToolbarNetwork(_ operation: NetworkOperation, credential suppliedCredential: NetworkCredential? = nil, saveCredential: Bool = false) {
+        guard let repository = store.repository, !store.isBusy else { return }
+        Task { @MainActor in
+            let credential: NetworkCredential?
+            if let suppliedCredential { credential = suppliedCredential }
+            else { credential = await authentication.savedCredential(for: repository, operation: operation) }
+            guard store.repository === repository, !store.isBusy else { return }
+            let name = operation == .pull ? "Pull" : "Fetch"
+            store.operation(name, onFailure: { error in
+                Task { @MainActor in
+                    _ = await authentication.presentIfNeeded(error: error, repository: repository, operation: operation) { credential, save in
+                        runToolbarNetwork(operation, credential: credential, saveCredential: save)
+                    }
+                }
+            }) { active in
+                try await authentication.perform(with: credential) {
+                    if operation == .pull { try await active.pull(credential: credential) }
+                    else { try await active.fetch(credential: credential) }
+                }
+                await saveToolbarCredentialAfterSuccess(credential, requested: saveCredential, repository: active, operation: operation)
+            }
+        }
+    }
     private func prepareToolbarPush() {
         guard let repository = store.repository, !store.isBusy else { return }
         store.checkNetworkPreflight(.push) { hint in
-            let execute = {
-                store.operation("Push", onFailure: { error in
-                    guard ForcePushRejection.isNonFastForward(error), store.repository === repository else { return }
-                    prepareRejectedPush(repository)
-                }) { repository in
-                    if let preview = try await repository.preparePush() {
-                        await MainActor.run {
-                            if store.repository === repository { forcePushPrompt = ForcePushPrompt(repository: repository, preview: preview) }
-                        }
-                        throw CancellationError()
-                    } else { try await repository.push() }
-                }
-            }
-            if let hint { confirm(mainText("pushTitle"), networkPreflightMessage(hint), action: execute) }
+            let execute = { executeToolbarPush(repository) }
+            if case let .pushBehind(preview) = hint { forcePushPrompt = ForcePushPrompt(repository: repository, preview: preview) }
+            else if let hint { confirm(mainText("pushTitle"), networkPreflightMessage(hint), action: execute) }
             else { execute() }
         }
     }
-    private func prepareRejectedPush(_ repository: GitRepository) {
+    private func executeToolbarPush(_ repository: GitRepository, credential suppliedCredential: NetworkCredential? = nil, saveCredential: Bool = false) {
         guard store.repository === repository, !store.isBusy else { return }
-        store.operation("Push preview") { repository in
-            let preview = try await repository.prepareForcePush()
-            await MainActor.run {
-                guard store.repository === repository else { return }
-                forcePushPrompt = ForcePushPrompt(repository: repository, preview: preview)
+        Task { @MainActor in
+            let credential: NetworkCredential?
+            if let suppliedCredential { credential = suppliedCredential }
+            else { credential = await authentication.savedCredential(for: repository, operation: .push) }
+            guard store.repository === repository, !store.isBusy else { return }
+            store.operation("Push", onFailure: { error in
+                if ForcePushRejection.isNonFastForward(error), store.repository === repository {
+                    prepareRejectedPush(repository, credential: credential, saveCredential: saveCredential)
+                } else {
+                    Task { @MainActor in
+                        _ = await authentication.presentIfNeeded(error: error, repository: repository, operation: .push) { credential, save in
+                            executeToolbarPush(repository, credential: credential, saveCredential: save)
+                        }
+                    }
+                }
+            }) { active in
+                try await authentication.perform(with: credential) {
+                    if let preview = try await active.preparePush(credential: credential) {
+                        await saveToolbarCredentialAfterSuccess(credential, requested: saveCredential, repository: active, operation: .push)
+                        await MainActor.run {
+                            if store.repository === active {
+                                forcePushPrompt = ForcePushPrompt(repository: active, preview: preview,
+                                                                  credential: credential, saveCredential: saveCredential)
+                            }
+                        }
+                        throw CancellationError()
+                    }
+                    try await active.push(credential: credential)
+                }
+                await saveToolbarCredentialAfterSuccess(credential, requested: saveCredential, repository: active, operation: .push)
             }
+        }
+    }
+    private func prepareRejectedPush(_ repository: GitRepository, credential suppliedCredential: NetworkCredential? = nil, saveCredential: Bool = false) {
+        guard store.repository === repository, !store.isBusy else { return }
+        Task { @MainActor in
+            let credential: NetworkCredential?
+            if let suppliedCredential { credential = suppliedCredential }
+            else { credential = await authentication.savedCredential(for: repository, operation: .push) }
+            guard store.repository === repository, !store.isBusy else { return }
+            store.operation("Push preview", onFailure: { error in
+                Task { @MainActor in
+                    _ = await authentication.presentIfNeeded(error: error, repository: repository, operation: .push) { credential, save in
+                        prepareRejectedPush(repository, credential: credential, saveCredential: save)
+                    }
+                }
+            }) { active in
+                let preview = try await authentication.perform(with: credential) { try await active.prepareForcePush(credential: credential) }
+                await saveToolbarCredentialAfterSuccess(credential, requested: saveCredential, repository: active, operation: .push)
+                await MainActor.run {
+                    guard store.repository === active else { return }
+                    forcePushPrompt = ForcePushPrompt(repository: active, preview: preview,
+                                                      credential: credential, saveCredential: saveCredential)
+                }
+            }
+        }
+    }
+    private func runToolbarForcePush(_ prompt: ForcePushPrompt, credential suppliedCredential: NetworkCredential? = nil, saveCredential: Bool = false) {
+        guard store.repository === prompt.repository, !store.isBusy else { return }
+        Task { @MainActor in
+            let credential: NetworkCredential?
+            if let suppliedCredential { credential = suppliedCredential }
+            else if let promptCredential = prompt.credential { credential = promptCredential }
+            else { credential = await authentication.savedCredential(for: prompt.repository, operation: .push) }
+            let shouldSaveCredential = suppliedCredential == nil ? prompt.saveCredential : saveCredential
+            guard store.repository === prompt.repository, !store.isBusy else { return }
+            store.operation(forcePushText("action"), onFailure: { error in
+                Task { @MainActor in
+                    _ = await authentication.presentIfNeeded(error: error, repository: prompt.repository, operation: .push) { credential, save in
+                        runToolbarForcePush(prompt, credential: credential, saveCredential: save)
+                    }
+                }
+            }) { active in
+                _ = try await authentication.perform(with: credential) {
+                    try await active.forcePush(prompt.preview, credential: credential) { _ in }
+                }
+                await saveToolbarCredentialAfterSuccess(credential, requested: shouldSaveCredential, repository: active, operation: .push)
+            }
+        }
+    }
+    private func saveToolbarCredentialAfterSuccess(_ credential: NetworkCredential?, requested: Bool, repository: GitRepository, operation: NetworkOperation) async {
+        guard requested, let credential else { return }
+        do { try await authentication.save(credential, for: repository, operation: operation) }
+        catch {
+            guard store.repository === repository else { return }
+            store.error = OperationFailure.message(error, repository: repository.url)
         }
     }
     var sidebar: some View { RepositorySidebar(store: store, onAction: sidebarAction, repositoryFocusRequest: repositoryFocusRequest, branchFocus: branchesFocus).background(WorkspaceFileFocusRegion(focus: sidebarFocus).allowsHitTesting(false).accessibilityHidden(true)) }

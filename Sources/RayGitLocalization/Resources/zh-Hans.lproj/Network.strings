@@ -25,3 +25,14 @@
 "verifyRemote" = "核实远端并继续";
 "knownPushBehind" = "上次获取的 %@/%@ 中有 %d 个本地尚未包含的提交，普通推送可能被拒绝。继续联网核实最新状态？强制推送仍需单独确认。";
 "knownPullDiverged" = "上次获取的状态显示分支已分叉：本地独有 %d 个提交，远端独有 %d 个提交，仅快进拉取可能失败。继续获取并核实最新远端状态？";
+"authenticationRequired" = "需要认证";
+"username" = "用户名";
+"passwordOrToken" = "密码或个人访问令牌";
+"privateKey" = "私钥";
+"noPrivateKeySelected" = "尚未选择私钥";
+"choosePrivateKey" = "选择密钥…";
+"keyPassphraseOptional" = "密钥口令（可选）";
+"saveCredential" = "认证成功后保存";
+"httpsCredentialScope" = "按协议、主机、端口和用户名保存到 macOS 钥匙串。";
+"sshCredentialScope" = "按主机、端口和用户名保存私钥路径及安全书签；填写的口令存入 macOS 钥匙串。";
+"retry" = "重试";

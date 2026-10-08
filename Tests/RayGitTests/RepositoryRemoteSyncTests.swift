@@ -81,7 +81,8 @@ final class RepositoryRemoteSyncTests: XCTestCase {
         try """
         #!/bin/sh
         for arg in "$@"; do
-            if [ "$arg" = "fetch" ]; then
+            if [ "$arg" = "ls-remote" ]; then
+                trap '' TERM
                 touch '\(started.path)'
                 sleep 30
             fi
@@ -100,9 +101,26 @@ final class RepositoryRemoteSyncTests: XCTestCase {
         }
         XCTAssertTrue(FileManager.default.fileExists(atPath: started.path))
         let cancellingWindow = RepositoryStore(persistsSession: false)
-        cancellingWindow.isBusy = true
+        cancellingWindow.repositoryURL = paths[0]
+        cancellingWindow.repository = GitRepository(url: paths[0])
+        var joined = false
+        let preflight = expectation(description: "Local preflight does not wait for background shutdown")
+        cancellingWindow.checkNetworkPreflight(.push) { hint in
+            XCTAssertNotNil(hint)
+            XCTAssertFalse(joined, "The local hint must arrive before the canceled network process finishes")
+            preflight.fulfill()
+        }
         let cancellationStart = Date()
-        await cancellingWindow.cancelBackgroundRepositorySync()
+        let joining = Task {
+            await cancellingWindow.cancelBackgroundRepositorySync()
+            joined = true
+        }
+        await fulfillment(of: [preflight], timeout: 3)
+        let wrote = await cancellingWindow.performRepositoryContextOperation("Test", path: paths[0].path) { _ in
+            XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(cancellationStart), 0.4, "Foreground writes must wait for the TERM-resistant background process")
+        }
+        XCTAssertTrue(wrote)
+        await joining.value
         XCTAssertLessThan(Date().timeIntervalSince(cancellationStart), 3)
         XCTAssertTrue(store.nextRemoteSync.isEmpty, "Cancellation must not mark the fetch fresh or failed")
         cancellingWindow.isBusy = false; cancellingWindow.closeTransientSession()
