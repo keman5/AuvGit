@@ -142,6 +142,7 @@ struct ExtensionsSettings: View {
         let selectedKind = kind, name = flowName, main = mainBranch, develop = developBranch
         store.isBusy = true
         Task {
+            await store.cancelBackgroundRepositorySync()
             do { if finish { try await repository.finishGitFlow(kind: selectedKind, name: name, main: main, develop: develop) } else { try await repository.startGitFlow(kind: selectedKind, name: name, main: main, develop: develop) }; message = compareText("Git Flow completed") }
             catch { message = compareText(OperationFailure.message(error, repository: store.repositoryURL)) }
             store.isBusy = false; await store.refresh()

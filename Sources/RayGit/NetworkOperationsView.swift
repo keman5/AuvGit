@@ -250,6 +250,7 @@ struct NetworkOperationsView: View {
         let progress: @Sendable (NetworkProgress) -> Void = progressHandler(for: repository, operationID: operationID)
         store.isBusy = true; events = []; output = ""; previewReady = false
         task = Task { @MainActor in
+            await store.cancelBackgroundRepositorySync()
             do { try await GitCommandLog.$operationID.withValue(operationID) { try await GitCommandLog.$userInitiated.withValue(true) { try await GitCommandLog.$progress.withValue(progress) {
                 let identity = try await repository.networkPreviewIdentity()
                 if operation == .push && (expected != identity || expectedRepository != repository.url) { throw GitError(networkText("previewExpired")) }
@@ -299,6 +300,7 @@ struct NetworkOperationsView: View {
         let progress: @Sendable (NetworkProgress) -> Void = progressHandler(for: prompt.repository, operationID: operationID)
         store.isBusy = true; store.error = nil; events = []
         task = Task { @MainActor in
+            await store.cancelBackgroundRepositorySync()
             do {
                 let result = try await GitCommandLog.$operationID.withValue(operationID) { try await GitCommandLog.$userInitiated.withValue(true) { try await GitCommandLog.$progress.withValue(progress) { try await prompt.repository.forcePush(prompt.preview, progress: { _ in })
                 } } }
@@ -320,6 +322,7 @@ struct NetworkOperationsView: View {
         guard let repository = store.repository, !store.isBusy else { return }
         store.isBusy = true
         task = Task { @MainActor in
+            await store.cancelBackgroundRepositorySync()
             do { try await repository.configureKeychainHelper(); await loadCredentials() }
             catch { output = OperationFailure.message(error, repository: store.repositoryURL) }
             store.isBusy = false; task = nil

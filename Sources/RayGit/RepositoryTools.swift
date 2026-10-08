@@ -115,6 +115,7 @@ struct RepositoryTools: View {
         guard let repo = store.repository, !store.isBusy else { return }; let base = first
         busy = true; store.isBusy = true
         Task {
+            await store.cancelBackgroundRepositorySync()
             do { let plan = try await repo.advancedOperation(.rebasePlan, first: base, second: ""); if operation == .interactiveRebase && first == base && store.repositoryURL == repo.url { second = plan } } catch { resultFailed = true; output = OperationFailure.message(error, repository: store.repositoryURL) }
             busy = false; store.isBusy = false
         }
@@ -155,6 +156,7 @@ struct RepositoryTools: View {
         guard !store.isBusy, store.repositoryURL == repository.url else { return }
         busy = true; store.isBusy = true; output = ""; resultFailed = false
         Task {
+            await store.cancelBackgroundRepositorySync()
             do { if op == .blame || op == .reflog { inspected = (op == .blame ? a : nil, b.isEmpty ? "HEAD" : b); output = "" } else { output = try await repository.advancedOperation(op, first: a, second: b) }; if op == .compare { compared = (a, b) }; if output.isEmpty { output = workflowText("Completed") };  }
             catch { resultFailed = true; output = OperationFailure.message(error, repository: store.repositoryURL) }
             busy = false; store.isBusy = false; if op.writes { await store.refresh() }
@@ -265,6 +267,7 @@ struct CreateRepositorySheet: View {
         ) : nil
         busy = true; store.isBusy = true
         Task {
+            await store.cancelBackgroundRepositorySync()
             do {
                 let repo = try await cloning ? GitRepository.clone(source: cloneSource, destination: target, credential: credential) : GitRepository.initialize(at: target)
                 if cloning { cloneDestination.rememberSuccessfulClone(target) }

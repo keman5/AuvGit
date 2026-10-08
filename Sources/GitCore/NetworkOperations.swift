@@ -81,6 +81,35 @@ extension GitRepository {
         let result = try await GitProcess.run(at: url, arguments: NetworkAuthentication.arguments + args, progress: { lines.accept($0) })
         return NetworkOperationResult(output: GitProgressParser.redact(result.text + (result.error.isEmpty ? "" : "\n" + result.error)))
     }
+    /// Only remote-tracking heads are refreshed; the checked-out branch and worktree stay untouched.
+    public func backgroundFetch() async throws {
+        let remotes = try await GitProcess.run(at: url, arguments: ["remote"], timeout: 30, noninteractive: true).text.split(separator: "\n").map(String.init)
+        var failure: Error?
+        for remote in remotes {
+            try Task.checkCancellation()
+            do {
+                let endpoint = try await GitProcess.run(at: url, arguments: ["remote", "get-url", remote], timeout: 30).text.trimmingCharacters(in: .newlines)
+                var sshCommand: String?
+                if ["ssh://", "git+ssh://", "ssh+git://"].contains(where: endpoint.hasPrefix) || (!endpoint.contains("://") && !endpoint.hasPrefix("/") && endpoint.contains(":")) {
+                    let configured = try await GitProcess.run(at: url, arguments: ["config", "--get", "core.sshCommand"], allowedCodes: [0, 1], timeout: 30).text.trimmingCharacters(in: .newlines)
+                    let environment = GitRuntimePreferences.shared.environment(ProcessInfo.processInfo.environment)
+                    let ssh = environment["GIT_SSH_COMMAND"] ?? (configured.isEmpty ? (environment["GIT_SSH"] ?? "ssh") : configured)
+                    guard let executable = ["ssh", "/usr/bin/ssh", "/opt/homebrew/bin/ssh", "/usr/local/bin/ssh"].first(where: { ssh == $0 || ssh.hasPrefix($0 + " ") }) else {
+                        // ponytail: custom SSH wrappers need a noninteractive contract before background use.
+                        throw GitError("Background refresh requires a noninteractive SSH command.")
+                    }
+                    sshCommand = executable + " -oBatchMode=yes" + ssh.dropFirst(executable.count)
+                }
+                _ = try await GitProcess.run(at: url, arguments: NetworkAuthentication.arguments + [
+                    "fetch", "--quiet", "--no-prune", "--no-prune-tags", "--no-tags", "--no-recurse-submodules",
+                    "--no-write-fetch-head", "--no-auto-maintenance", "--refmap=", "--", remote,
+                    "+refs/heads/*:refs/remotes/" + remote + "/*"
+                ], timeout: 30, noninteractive: true, sshCommand: sshCommand)
+            }
+            catch { if Task.isCancelled { throw CancellationError() }; failure = error }
+        }
+        if let failure { throw failure }
+    }
     public func credentialConfiguration() async throws -> CredentialConfiguration {
         let result = try await GitProcess.run(at: url, arguments: ["config", "--get-all", "credential.helper"], allowedCodes: [0, 1])
         let helpers = result.text.split(separator: "\n").map { helper -> String in
