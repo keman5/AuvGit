@@ -56,12 +56,11 @@ struct RepositoryContextEditor: View {
             if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             HStack {
                 Button(repositoryContextText("Reload")) { Task { await load() } }.disabled(store.isBusy || loading)
-                Spacer()
                 Button(repositoryContextText("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction).disabled(store.isBusy)
                 Button(repositoryContextText("Save")) { save() }.keyboardShortcut(.defaultAction)
                     .disabled(!loaded || store.isBusy || (target.editor == .remote && (selectedRemote == nil || fetchURL.isEmpty)))
-            }
-        }.padding(20).frame(width: 580).task { await load() }
+            }.frame(maxWidth: .infinity)
+        }.padding(20).frame(width: target.editor == .ignore ? 580 : 360).task { await load() }
     }
     private func selectRemote() {
         fetchIndex = 0; fetchURL = selectedRemote?.fetchURLs.first ?? ""; pushURL = selectedRemote?.pushURLs.first ?? ""; editPush = false

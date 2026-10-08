@@ -30,3 +30,20 @@
 "Generate from staged summary" = "根据暂存摘要生成";
 "Staged summary is too large; select fewer staged files" = "暂存摘要过大；请减少暂存文件";
 "Increase the staged patch limit in AI settings, or generate from staged file names and change counts. Summary mode cannot describe code details." = "可在 AI 设置中提高暂存补丁限制，或根据暂存文件名和变更数量生成。摘要模式无法描述代码细节。";
+
+"Choose which changes AI should describe." = "选择 AI 需要描述的改动范围。";
+"Generation scope" = "生成范围";
+"Generation scope…" = "AI 生成范围…";
+"Staged files only" = "仅已暂存文件";
+"All workspace changes" = "工作区所有改动文件";
+"Workspace scope includes staged, unstaged, and untracked changes. Unchanged and ignored files are excluded. No files are staged or committed." = "包含已暂存、未暂存和未跟踪的改动，不包含未修改及忽略文件。生成不会暂存或提交文件。";
+"Remember my choice" = "记住选择";
+"Generate" = "生成";
+"No workspace changes" = "工作区没有改动";
+"Workspace changes changed during generation" = "生成期间工作区改动发生变化，请重新生成";
+"Changes exceed the configured limit" = "改动差异超过配置的限制";
+"Change summary exceeds the configured limit" = "改动摘要超过配置的限制";
+"Generate from summary" = "根据改动摘要生成";
+"Only changes in the selected scope are sent to your service. Generated text fills the draft and never stages or commits." = "仅将所选范围的改动发送至所选服务。生成文本填入草稿，不会自动暂存或提交。";
+"Patch limit (KB)" = "差异补丁限制（KB）";
+"Increase the patch limit in AI settings, or generate from file names and change counts. Summary mode cannot describe code details." = "可在 AI 设置中提高补丁限制，或根据文件名和变更数量生成。摘要模式无法描述代码细节。";

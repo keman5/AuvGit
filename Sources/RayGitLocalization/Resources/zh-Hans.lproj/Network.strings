@@ -1,7 +1,7 @@
 "title" = "网络操作";
 "operation" = "操作";
-"fetch" = "抓取";
-"pull" = "拉取（仅快进）";
+"fetch" = "获取";
+"pull" = "拉取";
 "push" = "推送";
 "progressHint" = "显示 Git 实际进度；部分阶段不报告百分比。";
 "cancel" = "取消";
@@ -21,3 +21,7 @@
 "cancelled" = "已取消；Git 及其助手进程已终止。";
 "close" = "关闭";
 "previewExpired" = "仓库引用或远程配置已改变。请重新预览推送。";
+"knownStateTitle" = "已知远端状态";
+"verifyRemote" = "核实远端并继续";
+"knownPushBehind" = "上次获取的 %@/%@ 中有 %d 个本地尚未包含的提交，普通推送可能被拒绝。继续联网核实最新状态？强制推送仍需单独确认。";
+"knownPullDiverged" = "上次获取的状态显示分支已分叉：本地独有 %d 个提交，远端独有 %d 个提交，仅快进拉取可能失败。继续获取并核实最新远端状态？";

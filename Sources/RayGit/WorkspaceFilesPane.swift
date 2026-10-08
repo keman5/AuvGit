@@ -14,6 +14,8 @@ struct FilePaneShortcutRequest {
 
 struct WorkspaceFilesPane<TreeContent: View>: View {
     let files: [GitFile]
+    var automaticallySelectedPath: String? = nil
+    var initialSelectionReady = false
     @AppStorage("preferences.filterCase") private var filterCase = "insensitive"
     @Binding var selection: Set<String>
     @Binding var filter: String
@@ -56,6 +58,7 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
     }
     @State private var visibleFiles: [Row] = []
     @State private var statusCounts: [WorkspaceStatusFilter: Int] = [:]
+    @State private var initialSelectionRepository: String?
     private func rebuildVisibleFiles() {
         statusCounts = Dictionary(uniqueKeysWithValues: WorkspaceStatusFilter.allCases.map { item in
             (item, files.lazy.filter { item.includes($0) && (showHidden || !WorkspaceStatusFilter.isHiddenPath($0.path)) }.count)
@@ -75,6 +78,13 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
                 if comparison != .orderedSame { return comparison == .orderedAscending }
             }
             return lhs.path.localizedStandardCompare(rhs.path) == .orderedAscending
+        }
+        if let repositoryPath = repository?.url.path, initialSelectionRepository != repositoryPath, initialSelectionReady {
+            initialSelectionRepository = repositoryPath
+            if let first = visibleFiles.first,
+               selection == automaticallySelectedPath.map({ Set([$0]) }) || selection.isDisjoint(with: Set(visibleFiles.map(\.path))) {
+                selection = [first.path]
+            }
         }
     }
     private var treeVisiblePaths: Set<String>? {
@@ -132,6 +142,8 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
         .onAppear { rebuildVisibleFiles(); if treeMode && showIgnored { treeMode = false } }
         .onChange(of: shortcutRequest?.id) { _, _ in performShortcut() }
         .onChange(of: files) { _, _ in rebuildVisibleFiles(); if showIgnored { Task { await loadIgnored() } } }
+        .onChange(of: repository?.url.path) { _, _ in initialSelectionRepository = nil; rebuildVisibleFiles() }
+        .onChange(of: initialSelectionReady) { _, _ in rebuildVisibleFiles() }
         .onChange(of: filter) { _, _ in rebuildVisibleFiles() }
         .onChange(of: filterCase) { _, _ in rebuildVisibleFiles() }
         .onChange(of: category) { _, _ in rebuildVisibleFiles() }
@@ -273,22 +285,21 @@ private struct WorkspaceTableDensity: NSViewRepresentable {
     func updateNSView(_ view: Probe, context: Context) { view.configure() }
     final class Probe: NSView {
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
-        private weak var configuredTable: NSTableView?
         override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); configure() }
         override func layout() { super.layout(); configure() }
         func configure() {
-            if let table = configuredTable { apply(to: table); return }
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                var ancestor = self.superview
-                while let view = ancestor {
-                    if let table = Self.table(in: view) {
-                        self.configuredTable = table
-                        self.apply(to: table)
-                        return
-                    }
-                    ancestor = view.superview
+            configureTable()
+            // SwiftUI can replace the table or reset its metrics during this update.
+            DispatchQueue.main.async { [weak self] in self?.configureTable() }
+        }
+        private func configureTable() {
+            var ancestor = superview
+            while let view = ancestor {
+                if let table = Self.table(in: view) {
+                    apply(to: table)
+                    return
                 }
+                ancestor = view.superview
             }
         }
         private func apply(to table: NSTableView) {

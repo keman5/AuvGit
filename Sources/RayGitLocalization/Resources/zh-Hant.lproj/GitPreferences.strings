@@ -29,10 +29,10 @@
 "Disable default proxy" = "停用預設代理";
 "Manual HTTP(S) proxy" = "手動 HTTP(S) 代理";
 "Only RayGit Git processes are affected. This does not use macOS automatic proxy settings. Proxy URLs cannot contain passwords. Repository URL-specific or remote proxy settings may override this default; SSH proxy uses SSH config." = "僅影響 RayGit 的 Git 程序，不使用 macOS 自動代理設定。代理位址不得包含密碼。儲存庫的特定 URL 或遠端代理設定可能覆蓋此預設值；SSH 代理由 SSH 設定控制。";
-"SSH and Fetch" = "SSH 與擷取";
+"SSH and Fetch" = "SSH 與取得";
 "SSH command (optional)" = "SSH 指令（選填）";
 "An existing GIT_SSH_COMMAND environment variable takes priority. Git interprets this command; do not enter secrets. Default SSH uses BatchMode." = "現有 GIT_SSH_COMMAND 環境變數優先。Git 解析此指令，請勿輸入機密。預設 SSH 使用 BatchMode。";
-"Prune deleted remote branches when fetching" = "擷取時清理已刪除的遠端分支";
+"Prune deleted remote branches when fetching" = "取得時清理已刪除的遠端分支";
 "Credentials" = "認證資料";
 "RayGit uses configured Git credential helpers and your SSH agent. Passwords and tokens are never read by this preferences page. Manage repository helpers in Network Operations." = "RayGit 使用已設定的 Git 認證助手與 SSH agent。本頁面不讀取密碼或權杖；儲存庫認證助手可在網路操作中管理。";
 "Apply" = "套用";

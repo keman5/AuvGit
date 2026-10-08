@@ -28,16 +28,41 @@ public enum ForcePushRejection {
         return value.contains("[rejected]") && (value.contains("non-fast-forward") || value.contains("fetch first"))
     }
 }
+public enum LocalNetworkPreflight: Sendable {
+    case pushBehind(remote: String, branch: String, remoteOnlyCount: Int)
+    case pullDiverged(remoteOnlyCount: Int, localOnlyCount: Int)
+}
 public extension GitRepository {
+    /// Advisory only: tracking refs describe the last fetch, never a force-push lease.
+    func localNetworkPreflight(_ operation: NetworkOperation) async throws -> LocalNetworkPreflight? {
+        if operation == .pull {
+            let upstream = try await GitProcess.run(at: url, arguments: ["rev-parse", "--verify", "@{upstream}"], allowedCodes: [0, 128])
+            guard upstream.code == 0 else { return nil }
+            let counts = try await GitProcess.run(at: url, arguments: ["rev-list", "--left-right", "--count", "HEAD..." + upstream.text.trimmingCharacters(in: .newlines)])
+            let values = counts.text.split(whereSeparator: \.isWhitespace).compactMap { Int($0) }
+            guard values.count == 2, values[0] > 0, values[1] > 0 else { return nil }
+            return .pullDiverged(remoteOnlyCount: values[1], localOnlyCount: values[0])
+        }
+        guard operation == .push || operation == .pushPreview,
+              let target = try await localPushTarget() else { return nil }
+        let count = try await localRemoteOnlyCount(reference: target.tracking)
+        guard let count, count > 0 else { return nil }
+        return .pushBehind(remote: target.remote, branch: String(target.reference.dropFirst("refs/heads/".count)), remoteOnlyCount: count)
+    }
     /// A dry run lets Git resolve push.default, pushRemote, refspecs and destination names.
     /// Only a single rejected current-branch update may become a confirmation preview.
     func prepareForcePush() async throws -> ForcePushPreview {
+        guard let preview = try await preparePush() else { throw ForcePushPreparationError.notRequired }
+        return preview
+    }
+    /// Resolves and validates the destination with one dry run; nil means an ordinary push is ready.
+    func preparePush() async throws -> ForcePushPreview? {
         do { return try await preparedForcePush() }
         catch let error as ForcePushPreparationError { throw error }
         catch is CancellationError { throw CancellationError() }
         catch { throw ForcePushPreparationError.unsupportedForce(error.localizedDescription) }
     }
-    private func preparedForcePush() async throws -> ForcePushPreview {
+    private func preparedForcePush() async throws -> ForcePushPreview? {
         try Task.checkCancellation()
         let branch = try await GitProcess.run(at: url, arguments: ["symbolic-ref", "--quiet", "HEAD"], allowedCodes: [0, 1])
         guard branch.code == 0 else { throw GitError("Force push requires a checked-out local branch.") }
@@ -49,13 +74,27 @@ public extension GitRepository {
         let configuredSpecs = try await GitProcess.run(at: url, arguments: ["config", "--get-all", "remote." + remote + ".push"], allowedCodes: [0, 1])
         let mirror = try await configurationValue("remote." + remote + ".mirror")
         let configuredForce = configuredSpecs.text.split(separator: "\n").contains { $0.hasPrefix("+") } || mirror == "true"
-        let dryRun = try await GitProcess.run(at: url, arguments: NetworkAuthentication.arguments + ["push", "--dry-run", "--porcelain"], allowedCodes: [0, 1, 128])
-        let rows = dryRun.text.split(separator: "\n").map { $0.split(separator: "\t", omittingEmptySubsequences: false).map(String.init) }.filter { $0.count == 3 && $0[0].count == 1 }
+        var verifiedRemoteCommit: String?
+        var verifiedReference: String?
+        if let target = try await localPushTarget(), target.remote == remote,
+           let count = try await localRemoteOnlyCount(reference: target.tracking), count > 0 {
+            let advertised = try await advertisedBranch(endpoint: target.endpoint, reference: target.reference)
+            if !advertised.isEmpty, let freshCount = try await localRemoteOnlyCount(reference: advertised), freshCount > 0 {
+                verifiedRemoteCommit = advertised
+                verifiedReference = target.reference
+            }
+        }
+        // A known rejection only needs a fresh advertisement for its exact lease.
+        // Complex mappings and unknown remote objects still let Git resolve the push.
+        let dryRun: GitOutput
+        if verifiedReference != nil { dryRun = GitOutput(data: Data(), error: "", code: 0) }
+        else { dryRun = try await GitProcess.run(at: url, arguments: NetworkAuthentication.arguments + ["push", "--dry-run", "--porcelain", "--progress"], allowedCodes: [0, 1, 128]) }
+        let rows = verifiedReference.map { [["!", localBranch + ":" + $0, "[rejected] (non-fast-forward)"]] } ?? dryRun.text.split(separator: "\n").map { $0.split(separator: "\t", omittingEmptySubsequences: false).map(String.init) }.filter { $0.count == 3 && $0[0].count == 1 }
         let forcedIntent = configuredForce || rows.contains { $0[0] == "+" || $0[0] == "-" }
         let rejected = rows.contains { $0[0] == "!" && ForcePushRejection.matches($0[2]) }
         guard forcedIntent || rejected else {
             guard dryRun.code == 0 else { throw ForcePushPreparationError.unsupportedForce(GitProgressParser.redact(dryRun.error.isEmpty ? dryRun.text : dryRun.error)) }
-            throw ForcePushPreparationError.notRequired
+            return nil
         }
         guard rows.count == 1, rows[0][0] != "-", !rows[0][2].contains("[remote rejected]"),
               forcedIntent || (rows[0][0] == "!" && ForcePushRejection.matches(rows[0][2])) else {
@@ -69,7 +108,9 @@ public extension GitRepository {
         guard endpoints.count == 1, let endpoint = endpoints.first, !endpoint.hasPrefix("-") else {
             throw ForcePushPreparationError.unsupportedForce("Force push requires exactly one push endpoint.")
         }
-        let remoteCommit = try await advertisedBranch(endpoint: endpoint, reference: pair[1])
+        let remoteCommit: String
+        if let verifiedRemoteCommit { remoteCommit = verifiedRemoteCommit }
+        else { remoteCommit = try await advertisedBranch(endpoint: endpoint, reference: pair[1]) }
         guard !remoteCommit.isEmpty else { throw GitError("The rejected remote branch no longer exists. Preview the push again.") }
         var count: Int?
         if (try await GitProcess.run(at: url, arguments: ["cat-file", "-e", remoteCommit + "^{commit}"], allowedCodes: [0, 1, 128])).code == 0 {
@@ -112,6 +153,43 @@ public extension GitRepository {
     }
 }
 private extension GitRepository {
+    func localRemoteOnlyCount(reference: String) async throws -> Int? {
+        let count = try await GitProcess.run(at: url, arguments: ["rev-list", "--count", "HEAD.." + reference], allowedCodes: [0, 128])
+        return count.code == 0 ? Int(count.text.trimmingCharacters(in: .newlines)) : nil
+    }
+    func localPushTarget() async throws -> (remote: String, reference: String, tracking: String, endpoint: String)? {
+        let head = try await GitProcess.run(at: url, arguments: ["symbolic-ref", "--quiet", "HEAD"], allowedCodes: [0, 1])
+        guard head.code == 0 else { return nil }
+        let branch = String(head.text.trimmingCharacters(in: .newlines).dropFirst("refs/heads/".count))
+        guard let remote = try? await configuredPushRemote(branch: branch),
+              try await configurationValue("remote." + remote + ".push") == nil,
+              try await configurationValue("remote." + remote + ".mirror") == nil,
+              try await configurationValue("push.followTags") == nil else { return nil }
+        let mode = try await configurationValue("push.default") ?? "simple"
+        let upstreamRemote = try await configurationValue("branch." + branch + ".remote")
+        let merge = try await GitProcess.run(at: url, arguments: ["config", "--get-all", "branch." + branch + ".merge"], allowedCodes: [0, 1])
+        let upstreamRefs = merge.text.split(separator: "\n").map(String.init)
+        let reference: String
+        switch mode {
+        case "current": reference = "refs/heads/" + branch
+        case "simple":
+            guard upstreamRemote != nil else { return nil }
+            if remote == upstreamRemote {
+                guard upstreamRefs == ["refs/heads/" + branch] else { return nil }
+            }
+            reference = "refs/heads/" + branch
+        case "upstream", "tracking":
+            guard remote == upstreamRemote, upstreamRefs.count == 1, upstreamRefs[0].hasPrefix("refs/heads/") else { return nil }
+            reference = upstreamRefs[0]
+        default: return nil
+        }
+        let fetchSpecs = try await GitProcess.run(at: url, arguments: ["config", "--get-all", "remote." + remote + ".fetch"], allowedCodes: [0, 1])
+        guard fetchSpecs.text.split(separator: "\n").map(String.init) == ["+refs/heads/*:refs/remotes/" + remote + "/*"] else { return nil }
+        let fetchURLs = try await GitProcess.run(at: url, arguments: ["remote", "get-url", "--all", remote]).text.split(separator: "\n").map(String.init)
+        let pushURLs = try await GitProcess.run(at: url, arguments: ["remote", "get-url", "--push", "--all", remote]).text.split(separator: "\n").map(String.init)
+        guard pushURLs.count == 1, pushURLs == fetchURLs, let endpoint = pushURLs.first, !endpoint.hasPrefix("-") else { return nil }
+        return (remote, reference, "refs/remotes/" + remote + "/" + reference.dropFirst("refs/heads/".count), endpoint)
+    }
     func configurationValue(_ key: String) async throws -> String? {
         let value = try await GitProcess.run(at: url, arguments: ["config", "--get", key], allowedCodes: [0, 1])
         return value.code == 0 ? value.text.trimmingCharacters(in: .newlines) : nil

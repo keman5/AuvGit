@@ -242,6 +242,10 @@ public actor GitRepository {
         let tokens = fields(try await run(["stash", "list", "-z", "--format=%gd%x00%gs%x00%H"]).data)
         return stride(from: 0, to: max(0,tokens.count - 2), by: 3).map { GitStash(ref: tokens[$0], subject: tokens[$0+1], hash: tokens[$0+2]) }
     }
-    public func stash(message: String) async throws { _ = try await run(["stash", "push", "--include-untracked", "-m", message]) }
+    public func stash(message: String) async throws {
+        // Stash uses magic pathspecs internally to clean saved untracked files.
+        // No user pathspecs are passed here, so inherited literal mode is unnecessary.
+        _ = try await GitProcess.run(at: url, arguments: ["stash", "push", "--include-untracked", "-m", message], literalPathspecs: false)
+    }
     public func applyStash(ref: String) async throws { _ = try await run(["stash", "apply", ref]) }
 }

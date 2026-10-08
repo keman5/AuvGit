@@ -18,6 +18,11 @@ final class RepositoryChangeStateTests: XCTestCase {
         let indexURL = root.appendingPathComponent(".git/index")
         let originalIndex = try Data(contentsOf: indexURL)
         let clean = try await repo.changeState(files: repo.status())
+        let serialRefs = try await GitProcess.run(at: root, arguments: ["--no-optional-locks", "show-ref", "--head"], allowedCodes: [0, 1]).text
+        let serialHead = try await GitProcess.run(at: root, arguments: ["--no-optional-locks", "symbolic-ref", "--quiet", "HEAD"], allowedCodes: [0, 1]).text
+        let serialIndex = try await repo.workflowRead(["--no-optional-locks", "ls-files", "--stage", "-z"])
+        let serialFiles = try await repo.status()
+        XCTAssertEqual(clean, RepositoryChangeState(history: serialHead + serialRefs, index: serialIndex, files: serialFiles, root: root))
         try "log".write(to: root.appendingPathComponent("activity.log"), atomically: true, encoding: .utf8)
         try FileManager.default.createDirectory(at: root.appendingPathComponent("node_modules"), withIntermediateDirectories: true)
         try "dependency".write(to: root.appendingPathComponent("node_modules/package.js"), atomically: true, encoding: .utf8)

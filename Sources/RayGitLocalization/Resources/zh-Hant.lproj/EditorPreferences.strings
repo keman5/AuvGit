@@ -44,3 +44,9 @@
 "Unavailable version" = "外部工具範本引用了無法使用的版本：";
 
 "Automatic" = "自動";
+
+"Use defaults" = "使用預設值";
+
+"Merge arguments JSON" = "合併參數 JSON";
+
+"Beyond Compare help" = "Beyond Compare 關閉比較後才會返回。比較預設唯讀；合併參數依序為左側、右側、基準和輸出檔案。兩組參數均可修改。";

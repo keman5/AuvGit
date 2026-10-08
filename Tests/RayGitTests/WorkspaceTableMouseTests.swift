@@ -11,7 +11,7 @@ final class WorkspaceTableMouseTests: XCTestCase {
         @ObservedObject var selection: Selection
         @ObservedObject var focus: WorkspaceFileFocus
         let production: Bool
-        let files = [GitFile(path: "a", indexStatus: "M", worktreeStatus: " "), GitFile(path: "b", indexStatus: " ", worktreeStatus: "M"), GitFile(path: "c", indexStatus: "?", worktreeStatus: "?")]
+        var files = [GitFile(path: "a", indexStatus: "M", worktreeStatus: " "), GitFile(path: "b", indexStatus: " ", worktreeStatus: "M"), GitFile(path: "c", indexStatus: "?", worktreeStatus: "?")]
         var body: some View {
             if production {
                 WorkspaceFilesPane(files: files, selection: $selection.paths, filter: .constant(""), treeMode: .constant(false), isBusy: false, onAction: { _, _ in }, treeContent: { _ in EmptyView() }, fileFocus: focus)
@@ -58,6 +58,36 @@ final class WorkspaceTableMouseTests: XCTestCase {
         }
     }
     func testBaselineTableMouseSelection() async throws { try await exercise(production: false) }
+    func testWorkspaceRowHeightRemainsCompactAcrossFileListReplacement() async throws {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 400), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let selection = Selection()
+        let focus = WorkspaceFileFocus()
+        let host = NSHostingView(rootView: Fixture(selection: selection, focus: focus, production: true))
+        window.contentView = host
+        let projects: [[GitFile]] = [host.rootView.files, [GitFile(path: "next.txt", indexStatus: "?", worktreeStatus: "?")], [], host.rootView.files]
+        for files in projects {
+            host.rootView = Fixture(selection: selection, focus: focus, production: true, files: files)
+            for _ in 0..<20 {
+                host.layoutSubtreeIfNeeded()
+                if !files.isEmpty, let table = findTable(host), table.numberOfRows == files.count {
+                    for row in 0..<table.numberOfRows {
+                        XCTAssertEqual(table.rect(ofRow: row).height, 22, accuracy: 0.01, "The first populated layout must already use compact rows")
+                    }
+                }
+                try await Task.sleep(nanoseconds: 10_000_000)
+            }
+            if files.isEmpty { XCTAssertNil(findTable(host)); continue }
+            let table = try XCTUnwrap(findTable(host))
+            XCTAssertEqual(table.numberOfRows, files.count)
+            XCTAssertFalse(table.usesAutomaticRowHeights)
+            for row in 0..<table.numberOfRows {
+                XCTAssertEqual(table.rect(ofRow: row).height, 22, accuracy: 0.01)
+            }
+        }
+    }
     func testWorkspaceTableMouseSelection() async throws { try await exercise(production: true) }
     func testBorderlessShellWorkspaceTableMouseSelection() async throws { try await exercise(production: true, shell: true) }
 }

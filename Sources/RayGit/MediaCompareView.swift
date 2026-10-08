@@ -50,6 +50,7 @@ struct FileContentSummary: View {
 
 struct StaticComparisonView: View {
     let snapshot: FileComparisonSnapshot
+    var showsControls = true
     private var summaries: [(String, FileRevisionContent)] {
         if snapshot.isConflict {
             return [(compareText("Ours (HEAD)"), snapshot.ours ?? snapshot.head), (advancedText("worktree"), snapshot.worktree), (advancedText("theirs"), snapshot.theirs ?? snapshot.index)]
@@ -58,7 +59,7 @@ struct StaticComparisonView: View {
         return [(labels.0, snapshot.previewTarget != nil || snapshot.presentation.leftRevision == .head ? snapshot.head : snapshot.index), (labels.1, snapshot.worktree)]
     }
     var body: some View {
-        if MediaCompareView.supports(snapshot) { MediaCompareView(snapshot: snapshot) }
+        if MediaCompareView.supports(snapshot) { MediaCompareView(snapshot: snapshot, showsControls: showsControls) }
         else {
             HStack(spacing: 1) {
                 ForEach(Array(summaries.enumerated()), id: \.offset) { _, revision in
@@ -71,6 +72,7 @@ struct StaticComparisonView: View {
 
 struct MediaCompareView: View {
     let snapshot: FileComparisonSnapshot
+    var showsControls = true
     @State private var overlay = false
     @State private var opacity = 0.5
     @State private var left = "head"
@@ -97,6 +99,7 @@ struct MediaCompareView: View {
     }
     var body: some View {
         VStack(spacing: 0) {
+            if showsControls {
             HStack(spacing: 8) {
                 Toggle(compareExtra("imageOverlay"), isOn: $overlay).toggleStyle(.checkbox)
                 Picker(advancedText("leftRevision"), selection: $left) { ForEach(revisions, id: \.0) { Text($0.1).tag($0.0) } }.frame(width: 160)
@@ -106,6 +109,7 @@ struct MediaCompareView: View {
                 ExternalComparisonButton(snapshot: snapshot)
             }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8).background(.bar)
             Divider()
+            }
             if overlay {
                 ZStack {
                     if let data = revisions.first(where: { $0.0 == left })?.2.data, let image = StaticImagePreview.image(data) { Image(nsImage: image).resizable().scaledToFit() }
@@ -146,8 +150,9 @@ struct ExternalComparisonButton: View {
     @State private var right = "worktree"
     @State private var base = "base"
     @State private var settings = false
-    @AppStorage("externalComparisonArguments") private var argumentsJSON = "[\"{left}\", \"{right}\"]"
-    @AppStorage("externalComparisonExecutable") private var executablePath = ""
+    @AppStorage("externalComparisonArguments") private var argumentsJSON = ExternalComparisonConfiguration.compareArguments
+    @AppStorage("externalMergeArguments") private var mergeArgumentsJSON = ExternalComparisonConfiguration.mergeArguments
+    @AppStorage("externalComparisonExecutable") private var executablePath = ExternalComparisonConfiguration.defaultExecutable
     private var revisions: [(String, String, FileRevisionContent)] {
         var result = [("head", "HEAD", snapshot.head), ("index", advancedText("index"), snapshot.index), ("worktree", advancedText("worktree"), snapshot.worktree)]
         if let value = snapshot.base { result.append(("base", advancedText("base"), value)) }
@@ -161,7 +166,12 @@ struct ExternalComparisonButton: View {
             Picker(advancedText("rightRevision"), selection: $right) { ForEach(revisions, id: \.0) { revision in Text(revision.1).tag(revision.0) } }
             Picker(compareExtra("baseVersion"), selection: $base) { ForEach(revisions, id: \.0) { Text($0.1).tag($0.0) } }
             Button(compareExtra("toolArguments")) { settings = true }
-            if !executablePath.isEmpty { Button(advancedText("launchExternal")) { launch(URL(fileURLWithPath: executablePath)) } }
+            if !executablePath.isEmpty {
+                Button(advancedText("launchExternal")) { launch(URL(fileURLWithPath: executablePath)) }
+                if onResult != nil, snapshot.base != nil {
+                    Button(editorPrefsText("Merge result")) { launch(URL(fileURLWithPath: executablePath), merging: true) }
+                }
+            }
             Button(advancedText("chooseExternal")) {
                 let panel = NSOpenPanel()
                 panel.title = advancedText("chooseExternal"); panel.canChooseDirectories = false; panel.canChooseFiles = true; panel.allowsMultipleSelection = false
@@ -176,23 +186,23 @@ struct ExternalComparisonButton: View {
         }
         .menuStyle(.borderlessButton).menuIndicator(iconOnly ? .hidden : .visible).fixedSize()
         .help(advancedText("external")).accessibilityLabel(advancedText("external"))
-        .onAppear { if !revisions.contains(where: { $0.0 == base }) { base = revisions.first?.0 ?? "head" } }
-        .sheet(isPresented: $settings) {
+        .onAppear { if executablePath.isEmpty { executablePath = ExternalComparisonConfiguration.defaultExecutable }; if snapshot.isConflict { left = "ours"; right = "theirs" }; if !revisions.contains(where: { $0.0 == base }) { base = revisions.first?.0 ?? "head" } }
+        .rayGitSheet(isPresented: $settings) {
             VStack {
                 ExternalToolsPreferencesView()
-                HStack { Spacer(); Button(compareExtra("done")) { settings = false }.keyboardShortcut(.defaultAction) }.padding()
-            }.frame(width: 600, height: 440)
+                HStack { Button(compareExtra("done")) { settings = false }.keyboardShortcut(.defaultAction) }.frame(maxWidth: .infinity).padding()
+            }.frame(width: 600, height: 560)
         }
-        .alert(advancedText("external"), isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) { Button("OK") { error = nil } } message: { Text(error ?? "") }
+        .rayGitAlert(advancedText("external"), isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) { RayGitAlertButton("OK") { error = nil } } message: { Text(error ?? "") }
     }
-    private func launch(_ executable: URL) {
+    private func launch(_ executable: URL, merging: Bool = false) {
         guard let a = revisions.first(where: { $0.0 == left }), let b = revisions.first(where: { $0.0 == right }) else { return }
         do {
-            let template = try ExternalDiffArguments.parse(argumentsJSON)
+            let template = try ExternalDiffArguments.parse(merging ? mergeArgumentsJSON : argumentsJSON)
             var contents = ["left": a.2, "right": b.2]
             if let common = revisions.first(where: { $0.0 == base }) { contents["base"] = common.2 }
             contents["result"] = snapshot.worktree
-            try ExternalComparison.launch(executable: executable, path: snapshot.path, contents: contents, template: template, resultText: resultText, resultEncoding: resultEncoding, onResult: onResult)
+            try ExternalComparison.launch(executable: ExternalComparisonConfiguration.executable(executable.path), path: snapshot.path, contents: contents, template: template, resultText: resultText, resultEncoding: resultEncoding, onResult: onResult)
         } catch { self.error = compareExtra(OperationFailure.message(error)) }
     }
 }

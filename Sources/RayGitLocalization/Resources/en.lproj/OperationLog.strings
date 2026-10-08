@@ -45,3 +45,33 @@
 "Finish or abort the active Git operation before resetting" = "Finish or abort the active Git operation before resetting";
 
 "Repository or HEAD changed. Reopen the reset confirmation." = "Repository or HEAD changed. Reopen the reset confirmation.";
+
+"git fetch" = "Fetching";
+"git pull" = "Pulling";
+"git push" = "Pushing";
+"git ls-remote" = "Checking remote references";
+"git config" = "Checking configuration";
+"git show-ref" = "Checking local references";
+"git symbolic-ref" = "Checking branch";
+"git log" = "Reading history";
+"git status" = "Refreshing files";
+"git add" = "Staging";
+"git reset" = "Unstaging";
+"git commit" = "Committing";
+"git checkout" = "Checking out";
+"git merge" = "Merging";
+"git rebase" = "Rebasing";
+"git stash" = "Stashing";
+
+"remote" = "remote";
+"Enumerating objects" = "Enumerating objects";
+"Counting objects" = "Counting objects";
+"Compressing objects" = "Compressing objects";
+"Writing objects" = "Writing objects";
+"Receiving objects" = "Receiving objects";
+"Resolving deltas" = "Resolving deltas";
+"Checking connectivity" = "Checking connectivity";
+"Updating files" = "Updating files";
+"Filtering content" = "Filtering content";
+"Finding sources" = "Finding sources";
+"Reusing objects" = "Reusing objects";

@@ -16,8 +16,9 @@ struct NetworkOperationsView: View {
     @State private var previewRepository: URL?
     @State private var credentials: CredentialConfiguration?
     @State private var keychainConfirm = false
-    @State private var pushConfirm = false
+    @State private var pullPrompt: PullOperationPrompt?
     @State private var forcePushPrompt: ForcePushPrompt?
+    @State private var preflightPrompt: NetworkPreflightPrompt?
     @State private var remoteNames: [String] = []
     @State private var upstream = ""
     @State private var divergence: (ahead: Int, behind: Int)?
@@ -108,7 +109,7 @@ struct NetworkOperationsView: View {
                             HStack(spacing: 12) {
                                 if task != nil { ProgressView().controlSize(.small) }
                                 VStack(alignment: .leading, spacing: 5) {
-                                    Text(events.last?.message ?? networkText("progressHint")).font(.system(size: 12)).foregroundStyle(.secondary).textSelection(.enabled)
+                                    Text(events.last.map { RepositoryStore.progressDetail($0.message) } ?? networkText("progressHint")).font(.system(size: 12)).foregroundStyle(.secondary).textSelection(.enabled)
                                     if let fraction = events.last?.fraction {
                                         HStack { ProgressView(value: fraction); Text("\(Int(fraction * 100))%").monospacedDigit() }
                                     }
@@ -120,7 +121,7 @@ struct NetworkOperationsView: View {
                             ScrollView {
                                 VStack(alignment: .leading, spacing: 8) {
                                     if events.isEmpty && output.isEmpty { Text(panelText("Run an operation to view its result.")).foregroundStyle(.secondary) }
-                                    ForEach(Array(events.enumerated()), id: \.offset) { _, event in Text(event.message) }
+                                    ForEach(Array(events.enumerated()), id: \.offset) { _, event in Text(RepositoryStore.progressDetail(event.message)) }
                                     if !output.isEmpty { Text(output) }
                                 }.font(.system(size: 11, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                             }.frame(minHeight: 115, maxHeight: 220)
@@ -146,7 +147,6 @@ struct NetworkOperationsView: View {
             Divider()
             HStack(spacing: 10) {
                 if previewReady { Label(designText("Push preview is ready"), systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green) }
-                Spacer()
                 if task != nil {
                     Button(networkText("cancel")) { task?.cancel() }.keyboardShortcut(.cancelAction)
                 } else {
@@ -154,31 +154,43 @@ struct NetworkOperationsView: View {
                 }
                 if operation == .pushPreview && previewReady {
                     Button(networkText("preview")) { run(operation) }.disabled(task != nil || store.isBusy || store.repository == nil)
-                    Button(networkText("executePush")) { pushConfirm = true }.buttonStyle(.borderedProminent).disabled(task != nil || store.isBusy)
+                    Button(networkText("executePush")) { run(.push) }.buttonStyle(.borderedProminent).disabled(task != nil || store.isBusy)
                 } else {
                     Button(networkText(operation == .pushPreview ? "preview" : "run")) { run(operation) }
                         .buttonStyle(.borderedProminent).disabled(task != nil || store.isBusy || store.repository == nil)
                 }
-            }.padding(.horizontal, 24).padding(.vertical, 16)
+            }.frame(maxWidth: .infinity).padding(.horizontal, 24).padding(.vertical, 16)
         }.tint(.blue).background(Color(nsColor: .windowBackgroundColor)).frame(width: 800, height: 720)
         .interactiveDismissDisabled(task != nil)
         .task { await loadCredentials(); await loadRepositoryContext() }
         .onChange(of: operation) { _, _ in previewReady = false; events = []; output = "" }
         .onDisappear { task?.cancel() }
-        .sheet(item: $forcePushPrompt) { prompt in
+        .rayGitAlert(item: $preflightPrompt) { prompt in
+            RayGitAlert(title: networkText("knownStateTitle"), message: networkPreflightMessage(prompt.hint), buttons: [
+                RayGitAlertButton(networkText("cancel"), role: .cancel),
+                RayGitAlertButton(networkText("verifyRemote")) {
+                    guard store.repository === prompt.repository else { return }
+                    runVerified(prompt.operation)
+                }
+            ])
+        }
+        .rayGitSheet(item: $pullPrompt) { prompt in
+            PullOperationConfirmation(hint: prompt.hint) { pullPrompt = nil } execute: { operation in
+                pullPrompt = nil
+                guard store.repository === prompt.repository else { return }
+                runVerified(operation)
+            }
+        }
+        .rayGitSheet(item: $forcePushPrompt) { prompt in
             ForcePushConfirmation(preview: prompt.preview) { forcePushPrompt = nil } execute: {
                 forcePushPrompt = nil
                 guard store.repository === prompt.repository, !store.isBusy, task == nil else { return }
                 runForcePush(prompt)
             }
         }
-        .alert(networkText("executePush"), isPresented: $pushConfirm) {
-            Button(networkText("cancel"), role: .cancel) {}
-            Button(networkText("executePush")) { run(.push) }
-        } message: { Text(networkText("pushConfirm")) }
-        .alert(networkText("configureKeychain"), isPresented: $keychainConfirm) {
-            Button(networkText("cancel"), role: .cancel) {}
-            Button(networkText("run")) { configureKeychain() }
+        .rayGitAlert(networkText("configureKeychain"), isPresented: $keychainConfirm) {
+            RayGitAlertButton(networkText("cancel"), role: .cancel) {}
+            RayGitAlertButton(networkText("run")) { configureKeychain() }
         } message: { Text(networkText("keychainConfirm")) }
     }
     private func loadCredentials() async {
@@ -209,22 +221,40 @@ struct NetworkOperationsView: View {
             }
         } catch { output = GitProgressParser.redact(OperationFailure.message(error, repository: store.repositoryURL)) }
     }
+    private func progressHandler(for repository: GitRepository, operationID: UUID) -> @Sendable (NetworkProgress) -> Void {
+        let footerProgress = store.progressHandler(for: repository, operationID: operationID)
+        return { event in
+            footerProgress(event)
+            Task { @MainActor in
+                guard store.repository === repository, store.currentUserOperationID == operationID, store.isBusy else { return }
+                events.append(event)
+                if events.count > 300 { events.removeFirst(events.count - 300) }
+            }
+        }
+    }
     private func run(_ operation: NetworkOperation) {
+        guard let repository = store.repository, !store.isBusy, task == nil else { return }
+        if operation == .fetch { runVerified(operation); return }
+        store.checkNetworkPreflight(operation) { hint in
+            if operation == .pull { pullPrompt = PullOperationPrompt(repository: repository, hint: hint) }
+            else if let hint { preflightPrompt = NetworkPreflightPrompt(operation: operation, repository: repository, hint: hint) }
+            else { runVerified(operation) }
+        }
+    }
+    private func runVerified(_ operation: NetworkOperation) {
         guard let repository = store.repository, !store.isBusy, task == nil else { return }
         let expected = previewIdentity, expectedRepository = previewRepository
         let name = operation == .fetch ? "Fetch" : operation == .pull ? "Pull" : operation == .push ? "Push" : "Push preview"
         store.beginUserOperation(name)
         let operationID = store.currentUserOperationID
+        let progress: @Sendable (NetworkProgress) -> Void = progressHandler(for: repository, operationID: operationID)
         store.isBusy = true; events = []; output = ""; previewReady = false
         task = Task { @MainActor in
-            do {
+            do { try await GitCommandLog.$operationID.withValue(operationID) { try await GitCommandLog.$userInitiated.withValue(true) { try await GitCommandLog.$progress.withValue(progress) {
                 let identity = try await repository.networkPreviewIdentity()
                 if operation == .push && (expected != identity || expectedRepository != repository.url) { throw GitError(networkText("previewExpired")) }
                 if operation == .push || operation == .pushPreview {
-                    let forcePreview: ForcePushPreview?
-                    do { forcePreview = try await repository.prepareForcePush() }
-                    catch ForcePushPreparationError.notRequired { forcePreview = nil }
-                    catch { throw error }
+                    let forcePreview = try await repository.preparePush()
                     if let forcePreview {
                         store.finishUserOperation(name, repository: repository, failure: CancellationError())
                         store.isBusy = false; task = nil
@@ -234,32 +264,28 @@ struct NetworkOperationsView: View {
                         return
                     }
                 }
-                let result = try await GitCommandLog.$operationID.withValue(operationID) { try await GitCommandLog.$userInitiated.withValue(true) { try await repository.runNetwork(operation) { event in
-                    Task { @MainActor in
-                        events.append(event)
-                        if events.count > 300 { events.removeFirst(events.count - 300) }
-                    }
-                }
-                } }
-                output = result.output + "\n" + networkText("completed")
                 if operation == .pushPreview {
                     let after = try await repository.networkPreviewIdentity()
                     previewReady = after == identity
                     previewIdentity = previewReady ? identity : nil; previewRepository = repository.url
-                    if !previewReady { output += "\n" + networkText("previewExpired") }
+                    output = networkText(previewReady ? "completed" : "previewExpired")
+                    store.completeNetworkOperation(name, repository: repository)
+                    return
                 }
+                let result = try await repository.runNetwork(operation, progress: { _ in })
+                output = result.output + "\n" + networkText("completed")
                 store.completeNetworkOperation(name, repository: repository)
-            } catch is CancellationError {
+            } } } } catch is CancellationError {
                 output = networkText("cancelled")
                 store.finishUserOperation(name, repository: repository, failure: CancellationError())
             }
             catch {
                 output = GitProgressParser.redact(OperationFailure.message(error, repository: repository.url))
-                store.finishUserOperation(name, repository: repository, failure: error)
                 if (operation == .push || operation == .pushPreview), ForcePushRejection.isNonFastForward(error),
-                   let preview = try? await repository.prepareForcePush(), store.repository === repository {
+                   let preview = try? await GitCommandLog.$progress.withValue(progress, operation: { try await repository.prepareForcePush() }), store.repository === repository {
                     forcePushPrompt = ForcePushPrompt(repository: repository, preview: preview)
                 }
+                store.finishUserOperation(name, repository: repository, failure: error)
             }
             store.isBusy = false; task = nil
             if operation != .pushPreview { await store.refresh() }
@@ -270,16 +296,12 @@ struct NetworkOperationsView: View {
         let name = forcePushText("action")
         store.beginUserOperation(name)
         let operationID = store.currentUserOperationID
+        let progress: @Sendable (NetworkProgress) -> Void = progressHandler(for: prompt.repository, operationID: operationID)
         store.isBusy = true; store.error = nil; events = []
         task = Task { @MainActor in
             do {
-                let result = try await GitCommandLog.$operationID.withValue(operationID) { try await GitCommandLog.$userInitiated.withValue(true) { try await prompt.repository.forcePush(prompt.preview) { event in
-                    Task { @MainActor in
-                        events.append(event)
-                        if events.count > 300 { events.removeFirst(events.count - 300) }
-                    }
-                }
-                } }
+                let result = try await GitCommandLog.$operationID.withValue(operationID) { try await GitCommandLog.$userInitiated.withValue(true) { try await GitCommandLog.$progress.withValue(progress) { try await prompt.repository.forcePush(prompt.preview, progress: { _ in })
+                } } }
                 output += "\n" + result.output + "\n" + networkText("completed")
                 store.completeNetworkOperation(forcePushText("action"), repository: prompt.repository)
             } catch is CancellationError {

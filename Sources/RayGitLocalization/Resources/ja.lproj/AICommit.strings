@@ -30,3 +30,20 @@
 "Generate from staged summary" = "ステージ済みの概要から生成";
 "Staged summary is too large; select fewer staged files" = "ステージ済みの概要が大きすぎます。ファイル数を減らしてください";
 "Increase the staged patch limit in AI settings, or generate from staged file names and change counts. Summary mode cannot describe code details." = "AI 設定でパッチの上限を増やすか、ステージ済みのファイル名と変更数から生成できます。概要モードではコードの詳細を説明できません。";
+
+"Choose which changes AI should describe." = "AI が説明する変更の範囲を選択してください。";
+"Generation scope" = "生成範囲";
+"Generation scope…" = "AI の生成範囲…";
+"Staged files only" = "ステージ済みファイルのみ";
+"All workspace changes" = "作業ツリー内のすべての変更";
+"Workspace scope includes staged, unstaged, and untracked changes. Unchanged and ignored files are excluded. No files are staged or committed." = "ステージ済み・未ステージ・未追跡の変更を含みます。変更のないファイルと無視対象は除外します。ステージやコミットは行いません。";
+"Remember my choice" = "選択を記憶する";
+"Generate" = "生成";
+"No workspace changes" = "作業ツリーに変更はありません";
+"Workspace changes changed during generation" = "生成中に作業ツリーが変更されました。再生成してください";
+"Changes exceed the configured limit" = "差分が設定された上限を超えています";
+"Change summary exceeds the configured limit" = "変更の概要が設定された上限を超えています";
+"Generate from summary" = "変更の概要から生成";
+"Only changes in the selected scope are sent to your service. Generated text fills the draft and never stages or commits." = "選択した範囲の変更のみをサービスに送信します。生成結果は下書きに入力され、自動的なステージやコミットは行いません。";
+"Patch limit (KB)" = "差分の上限（KB）";
+"Increase the patch limit in AI settings, or generate from file names and change counts. Summary mode cannot describe code details." = "AI 設定で差分の上限を増やすか、ファイル名と変更数から生成してください。概要モードではコードの詳細を説明できません。";

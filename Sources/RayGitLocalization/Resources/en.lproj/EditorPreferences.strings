@@ -44,3 +44,9 @@
 "Unavailable version" = "External tool template references an unavailable version:";
 
 "Automatic" = "Automatic";
+
+"Use defaults" = "Use defaults";
+
+"Merge arguments JSON" = "Merge arguments JSON";
+
+"Beyond Compare help" = "Beyond Compare waits until the comparison closes. Compare arguments default to read-only; merge arguments use left, right, base, and output in that order. You can edit both templates.";

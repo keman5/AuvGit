@@ -23,7 +23,7 @@ private final class Capture: @unchecked Sendable {
     func read(_ handle: FileHandle, onChunk: (@Sendable (String) -> Void)? = nil, prefixBytes: Int? = nil, onPrefix: (() -> Void)? = nil) {
         defer { try? handle.close() }
         while true {
-            let chunk = handle.readData(ofLength: prefixBytes.map { max(1, $0 - bytes.count) } ?? 65536)
+            let chunk = prefixBytes.map { handle.readData(ofLength: max(1, $0 - bytes.count)) } ?? handle.availableData
             if chunk.isEmpty { break }
             lock.lock()
             let remaining = max(0, 32 * 1024 * 1024 - bytes.count)
@@ -54,7 +54,7 @@ private final class GitCancellation: @unchecked Sendable {
 }
 
 enum GitProcess {
-    static func run(at directory: URL, arguments: [String], allowedCodes: Set<Int32> = [0], timeout: TimeInterval? = nil, executable: String? = nil, progress: (@Sendable (String) -> Void)? = nil, outputFile: URL? = nil, outputPrefixBytes: Int? = nil, inputFile: URL? = nil) async throws -> GitOutput {
+    static func run(at directory: URL, arguments: [String], allowedCodes: Set<Int32> = [0], timeout: TimeInterval? = nil, executable: String? = nil, progress: (@Sendable (String) -> Void)? = nil, outputFile: URL? = nil, outputPrefixBytes: Int? = nil, inputFile: URL? = nil, literalPathspecs: Bool = true) async throws -> GitOutput {
         let cancellation = GitCancellation()
         let started = Date()
         let commandExecutable = executable ?? GitRuntimePreferences.shared.executablePath
@@ -62,11 +62,22 @@ enum GitProcess {
         let proxyArguments = preferences.proxyMode == "inherit" ? [] : ["-c", "http.proxy=" + (preferences.proxyMode == "manual" ? preferences.proxyURL : "")]
         let actualArguments = ["--no-pager"] + proxyArguments + arguments
         let logCommand = !GitCommandLog.suppressRoutineReads
+        let operationProgress = logCommand ? GitCommandLog.progress : nil
+        let lines = operationProgress.map(ProgressLines.init)
+        defer { lines?.finish() }
+        let command = arguments.enumerated().first { index, argument in
+            !argument.hasPrefix("-") && (index == 0 || arguments[index - 1] != "-c")
+        }?.element ?? "git"
+        operationProgress?(NetworkProgress(message: "git " + GitCommandLog.redact(command), fraction: nil))
+        let streamedProgress: @Sendable (String) -> Void = { chunk in
+            progress?(chunk)
+            if !["config", "credential", "diff", "show", "log"].contains(command) { lines?.accept(chunk) }
+        }
         return try await withTaskCancellationHandler {
             do {
                 try Task.checkCancellation()
                 let result = try await Task.detached(priority: .userInitiated) {
-                    try runBlocking(at: directory, arguments: actualArguments, allowedCodes: allowedCodes, timeout: timeout ?? GitRuntimePreferences.shared.timeout, executable: commandExecutable, progress: progress, outputFile: outputFile, outputPrefixBytes: outputPrefixBytes, inputFile: inputFile, cancellation: cancellation)
+                    try runBlocking(at: directory, arguments: actualArguments, allowedCodes: allowedCodes, timeout: timeout ?? GitRuntimePreferences.shared.timeout, executable: commandExecutable, progress: streamedProgress, outputFile: outputFile, outputPrefixBytes: outputPrefixBytes, inputFile: inputFile, literalPathspecs: literalPathspecs, cancellation: cancellation)
                 }.value
                 if logCommand { GitCommandLog.record(directory: directory, executable: commandExecutable, arguments: actualArguments, output: result.text + "\n" + result.error, error: nil, exitCode: result.code, started: started) }
                 return result
@@ -81,11 +92,12 @@ enum GitProcess {
         do { _ = try await run(at: directory, arguments: arguments, outputFile: outputFile) }
         catch { try? FileManager.default.removeItem(at: outputFile); throw error }
     }
-    private static func runBlocking(at directory: URL, arguments: [String], allowedCodes: Set<Int32>, timeout: TimeInterval, executable: String, progress: (@Sendable (String) -> Void)?, outputFile: URL?, outputPrefixBytes: Int?, inputFile: URL?, cancellation: GitCancellation) throws -> GitOutput {
+    private static func runBlocking(at directory: URL, arguments: [String], allowedCodes: Set<Int32>, timeout: TimeInterval, executable: String, progress: (@Sendable (String) -> Void)?, outputFile: URL?, outputPrefixBytes: Int?, inputFile: URL?, literalPathspecs: Bool, cancellation: GitCancellation) throws -> GitOutput {
         let prefixLimit = outputPrefixBytes.map { min(32 * 1024 * 1024, max(1, $0)) }
         if cancellation.isCancelled { throw CancellationError() }
         var environment = GitRuntimePreferences.shared.environment(ProcessInfo.processInfo.environment)
-        environment["GIT_TERMINAL_PROMPT"] = "0"; environment["GIT_LITERAL_PATHSPECS"] = "1"
+        environment["GIT_TERMINAL_PROMPT"] = "0"
+        environment["GIT_LITERAL_PATHSPECS"] = literalPathspecs ? "1" : nil
         // Reuse explicitly configured GUI authentication providers when inherited.
         // The fallback keeps unattended commands from opening an interactive prompt.
         if environment["GIT_ASKPASS"] == nil { environment["GIT_ASKPASS"] = "/usr/bin/false" }
@@ -127,6 +139,11 @@ enum GitProcess {
         guard spawnCode == 0 else { close(stdoutFD[0]); close(stderrFD[0]); throw GitError("Cannot start Git: \(String(cString: strerror(spawnCode))).") }
         cancellation.install(pid)
         defer { cancellation.clear() }
+        let exited = DispatchSemaphore(value: 0)
+        let exitSource = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .global())
+        exitSource.setEventHandler { exited.signal() }
+        exitSource.resume()
+        defer { exitSource.cancel() }
         let out = Capture(), err = Capture(), readers = DispatchGroup()
         let stdoutHandle = FileHandle(fileDescriptor: stdoutFD[0], closeOnDealloc: true), stderrHandle = FileHandle(fileDescriptor: stderrFD[0], closeOnDealloc: true)
         let spawnedPID = pid
@@ -156,7 +173,7 @@ enum GitProcess {
                 if stopped == nil { stopped = Date(); kill(-pid, SIGTERM) }
                 if let stopped, Date().timeIntervalSince(stopped) >= 0.5 { kill(-pid, SIGKILL) }
             }
-            Thread.sleep(forTimeInterval: 0.02)
+            _ = exited.wait(timeout: .now() + 0.02)
         }
         wasCancelled = wasCancelled || cancellation.isCancelled
         // Keep the exited leader unreaped until all group signalling is complete, avoiding PID reuse.

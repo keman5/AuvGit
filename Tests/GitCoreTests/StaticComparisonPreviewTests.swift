@@ -8,6 +8,36 @@ final class StaticComparisonPreviewTests: XCTestCase {
         for args in [["init", "-b", "main"], ["config", "user.name", "Test"], ["config", "user.email", "test@example.invalid"], ["config", "commit.gpgsign", "false"]] { _ = try await GitProcess.run(at: root, arguments: args) }
         return (root, GitRepository(url: root))
     }
+    func testWorkingTextDisplayRunsOnlyDiffAndKeepsBinaryFallback() async throws {
+        let (root, repository) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("text.swift")
+        try Data("before\n".utf8).write(to: file)
+        try await repository.stage(paths: ["text.swift"]); try await repository.commit(message: "before")
+        try Data("after\n".utf8).write(to: file)
+        let commands = PreviewCommands()
+        let observer = NotificationCenter.default.addObserver(forName: GitCommandLog.notification, object: nil, queue: nil) { note in
+            if let record = note.object as? GitCommandRecord, record.directory == root.path { commands.append(record.command) }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        let result = try await repository.displayDiff(target: .worktree(path: "text.swift", untracked: false))
+        XCTAssertNil(result.preview)
+        XCTAssertTrue(result.text.contains("-before")); XCTAssertTrue(result.text.contains("+after"))
+        XCTAssertEqual(commands.values.count, 1)
+        XCTAssertTrue(commands.values.first?.contains("'diff'") == true)
+        let format = ComparisonTextFormat(encoding: .utf16LE, lineEnding: .lf)
+        try ComparisonTextDecoder.encode("decoded\n", format: format).write(to: file)
+        let decoded = try await repository.displayDiff(target: .worktree(path: "text.swift", untracked: false))
+        XCTAssertNil(decoded.preview); XCTAssertTrue(decoded.text.contains("+decoded"))
+        try Data([0, 1, 2]).write(to: file)
+        let binary = try await repository.displayDiff(target: .worktree(path: "text.swift", untracked: false))
+        XCTAssertNotNil(binary.preview); XCTAssertEqual(binary.preview?.worktree.data, Data([0, 1, 2]))
+        let invalidUTF8 = Data([0x89, 0x50, 0x4e, 0x47, 0xff])
+        try invalidUTF8.write(to: file)
+        let undecodable = try await repository.displayDiff(target: .worktree(path: "text.swift", untracked: false))
+        XCTAssertNotNil(undecodable.preview); XCTAssertEqual(undecodable.preview?.worktree.data, invalidUTF8)
+        XCTAssertTrue(undecodable.text.isEmpty)
+    }
     func testUTF16BinaryGitPatchUsesDecodedDisplayOnlyForRealRevisions() async throws {
         let (root, repository) = try await fixture()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -94,6 +124,9 @@ final class StaticComparisonPreviewTests: XCTestCase {
         XCTAssertNil(binary.worktree.data); XCTAssertNil(binary.worktree.characterCount)
         XCTAssertEqual(binary.worktree.byteCount, FileComparisonLimits.previewBytes + 1)
         XCTAssertTrue(binary.worktree.isBinary); XCTAssertFalse(binary.worktree.canStreamText)
+        let display = try await repository.displayDiff(target: .worktree(path: "large", untracked: true))
+        XCTAssertEqual(display.preview?.worktree.byteCount, FileComparisonLimits.previewBytes + 1)
+        XCTAssertTrue(display.text.isEmpty)
         try await repository.stage(paths: ["large"])
         let stagedBinary = try await repository.comparisonPreview(target: .staged(path: "large"))
         XCTAssertNil(stagedBinary.worktree.data)
@@ -135,4 +168,11 @@ final class StaticComparisonPreviewTests: XCTestCase {
         let preview = try await repository.fileComparison(path: "text")
         XCTAssertEqual(preview.worktree.byteCount, 6); XCTAssertEqual(preview.worktree.characterCount, 2)
     }
+}
+
+private final class PreviewCommands: @unchecked Sendable {
+    private let lock = NSLock()
+    private var commands: [String] = []
+    func append(_ command: String) { lock.lock(); defer { lock.unlock() }; commands.append(command) }
+    var values: [String] { lock.lock(); defer { lock.unlock() }; return commands }
 }

@@ -45,3 +45,33 @@
 "Finish or abort the active Git operation before resetting" = "リセットする前に、実行中の Git 操作を完了または中止してください";
 
 "Repository or HEAD changed. Reopen the reset confirmation." = "リポジトリまたは HEAD が変更されました。リセットの確認を開き直してください。";
+
+"git fetch" = "取得中";
+"git pull" = "プル中";
+"git push" = "プッシュ中";
+"git ls-remote" = "リモート参照を確認中";
+"git config" = "設定を確認中";
+"git show-ref" = "ローカル参照を確認中";
+"git symbolic-ref" = "ブランチを確認中";
+"git log" = "履歴を読み込み中";
+"git status" = "ファイルを更新中";
+"git add" = "ステージ中";
+"git reset" = "ステージ解除中";
+"git commit" = "コミット中";
+"git checkout" = "チェックアウト中";
+"git merge" = "マージ中";
+"git rebase" = "リベース中";
+"git stash" = "スタッシュ中";
+
+"remote" = "リモート";
+"Enumerating objects" = "オブジェクトを列挙中";
+"Counting objects" = "オブジェクトを計数中";
+"Compressing objects" = "オブジェクトを圧縮中";
+"Writing objects" = "オブジェクトを書き込み中";
+"Receiving objects" = "オブジェクトを受信中";
+"Resolving deltas" = "差分を解決中";
+"Checking connectivity" = "接続を確認中";
+"Updating files" = "ファイルを更新中";
+"Filtering content" = "内容をフィルタ中";
+"Finding sources" = "ソースを検索中";
+"Reusing objects" = "オブジェクトを再利用中";

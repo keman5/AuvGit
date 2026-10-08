@@ -79,6 +79,7 @@ public enum GitCommandLog {
     @TaskLocal public static var suppressRoutineReads = false
     @TaskLocal public static var userInitiated = false
     @TaskLocal public static var operationID: UUID?
+    @TaskLocal public static var progress: (@Sendable (NetworkProgress) -> Void)?
     public static let notification = Notification.Name("RayGitCommandCompleted")
     public static func userOperation(directory: URL, name: String, started: Date, error: String? = nil, cancelled: Bool = false, operationID: UUID? = nil) -> GitCommandRecord {
         GitCommandRecord(date: started, directory: directory.path, command: "",

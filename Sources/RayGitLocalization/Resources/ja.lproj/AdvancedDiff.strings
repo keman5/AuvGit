@@ -7,7 +7,7 @@
 "previousPage" = "前のページ";
 "nextPage" = "次のページ";
 "page" = "ページ %d · 行 %d から";
-"external" = "外部比較…";
+"external" = "外部比較";
 "chooseExternal" = "比較用の実行ファイルまたはアプリを選択";
 "leftRevision" = "左のリビジョン";
 "rightRevision" = "右のリビジョン";

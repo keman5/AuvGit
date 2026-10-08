@@ -8,3 +8,11 @@
 
 "Expanded" = "已展开";
 "Collapsed" = "已折叠";
+
+"Merge into Current Branch" = "合并到当前分支";
+"Stop Tracking Remote Branch" = "停止跟踪远程分支";
+"Set Tracking Branch…" = "设置跟踪分支…";
+"Remote Branch" = "远程分支";
+"Changes Saved in Stash" = "更改已保存到贮藏";
+"Auto Stash Retained" = "本地更改已自动保存到贮藏 %@。贮藏已保留，可在需要时应用。";
+"Merge Branch Message" = "将 %@ 合并到当前分支 %@？";

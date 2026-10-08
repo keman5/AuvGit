@@ -44,3 +44,9 @@
 "Unavailable version" = "外部ツールのテンプレートに使用できないバージョンが指定されています：";
 
 "Automatic" = "自動";
+
+"Use defaults" = "既定値を使用";
+
+"Merge arguments JSON" = "マージ引数 JSON";
+
+"Beyond Compare help" = "Beyond Compare は比較を閉じるまで待機します。比較の既定値は読み取り専用です。マージ引数は左、右、ベース、出力の順で、両テンプレートを編集できます。";

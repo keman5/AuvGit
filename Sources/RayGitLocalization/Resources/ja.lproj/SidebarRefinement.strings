@@ -8,3 +8,11 @@
 
 "Expanded" = "展開済み";
 "Collapsed" = "折りたたみ";
+
+"Merge into Current Branch" = "現在のブランチにマージ";
+"Stop Tracking Remote Branch" = "リモートブランチの追跡を解除";
+"Set Tracking Branch…" = "追跡ブランチを設定…";
+"Remote Branch" = "リモートブランチ";
+"Changes Saved in Stash" = "変更をスタッシュに保存しました";
+"Auto Stash Retained" = "ローカル変更をスタッシュ %@ に自動保存しました。スタッシュは保持されています。必要なときに適用してください。";
+"Merge Branch Message" = "%@ を現在のブランチ %@ にマージしますか？";

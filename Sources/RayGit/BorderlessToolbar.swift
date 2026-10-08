@@ -81,10 +81,10 @@ struct BorderlessToolbarView<CommandContent: View>: View {
             }
             }
             Button { customizing = true } label: { Image(systemName: "slider.horizontal.3").frame(width: 32, height: 28).contentShape(Rectangle()) }.buttonStyle(ToolbarRowButtonStyle(height: 28, minimumWidth: 32)).help(shellToolbarText("customize"))
-        }.padding(.horizontal, 10).frame(minHeight: 36).background(.bar)
+        }.padding(.horizontal, 10).frame(minHeight: 36).background(RayGitStyle.toolbar)
             .frame(height: 36)
             .contextMenu { Button(shellToolbarText("customize")) { customizing = true }; Toggle(shellToolbarText("iconAndText"), isOn: $model.showsText) }
-            .sheet(isPresented: $customizing) { palette }
+            .rayGitSheet(isPresented: $customizing) { palette }
             .onAppear { model.setCommands(commands) }
     }
     private var palette: some View {
@@ -109,7 +109,7 @@ struct BorderlessToolbarView<CommandContent: View>: View {
                 Button(shellToolbarText("space")) { model.insert("space") }
                 Button(shellToolbarText("flexibleSpace")) { model.insert("flexibleSpace") }
             }
-            HStack { Button(shellToolbarText("restoreDefaults")) { model.reset() }; Spacer(); Button(shellToolbarText("done")) { customizing = false }.keyboardShortcut(.defaultAction) }
-        }.padding(20).frame(width: 460)
+            HStack { Button(shellToolbarText("restoreDefaults")) { model.reset() }; Button(shellToolbarText("done")) { customizing = false }.keyboardShortcut(.defaultAction) }.frame(maxWidth: .infinity)
+        }.padding(20).frame(width: 360)
     }
 }

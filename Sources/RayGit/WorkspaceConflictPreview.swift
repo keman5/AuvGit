@@ -82,7 +82,7 @@ struct WorkspaceConflictPreview: View {
                     Toggle(L10n.text("lineNumbers", table: "DiffControls"), isOn: $numbers)
                     Toggle(L10n.text("syncScroll", table: "DiffControls"), isOn: $synchronized)
                 } label: { ComparisonToolbarIcon(name: "slider.horizontal.3") }.buttonStyle(ComparisonToolbarButtonStyle())
-            }.buttonStyle(ToolbarRowButtonStyle(minimumWidth: 22)).controlSize(.small).padding(.horizontal, 12).padding(.vertical, 6).rayGitChrome()
+            }.buttonStyle(ToolbarRowButtonStyle(minimumWidth: 22)).controlSize(.small).padding(.horizontal, 12).padding(.vertical, 4).rayGitChrome()
             Divider()
             ZStack {
                 ComparisonEditor(columns: columns, wrapLines: wraps, showLineNumbers: numbers, synchronizeScroll: synchronized, search: searchOptions.query, navigation: navigation, changeNavigation: changeNavigation, onEdit: { _, _ in }, languagePath: snapshot.path, resolver: resolver, editingCommands: navigationCommands, scrollsToFirstChangeOnOpen: true, searchOptions: searchOptions)

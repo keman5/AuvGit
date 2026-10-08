@@ -31,19 +31,19 @@ struct ComparisonExtrasMenu: View {
             Button(compareExtra(session.snapshot?.isConflict == true ? "deleteResolve" : "deleteFile"), role: .destructive) { confirmDelete = true }.disabled(session.isDirty)
         } label: { ComparisonToolbarIcon(name: "ellipsis") }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().frame(width: 22, height: 24).help(compareExtra("more")).disabled(session.isBusy || session.snapshot == nil)
-        .sheet(isPresented: $showEncoding) { EncodingConversionSheet(session: session) }
-        .sheet(isPresented: $showRename) { RenameIdentitySheet(session: session) }
-        .alert(compareExtra("applyExternalResult"), isPresented: $confirmExternal) {
-            Button(compareExtra("cancel"), role: .cancel) {}
-            Button(compareExtra("apply")) { if let result = session.pendingExternalResult { session.draft = result; session.pendingExternalResult = nil } }
+        .rayGitSheet(isPresented: $showEncoding) { EncodingConversionSheet(session: session) }
+        .rayGitSheet(isPresented: $showRename) { RenameIdentitySheet(session: session) }
+        .rayGitAlert(compareExtra("applyExternalResult"), isPresented: $confirmExternal) {
+            RayGitAlertButton(compareExtra("cancel"), role: .cancel) {}
+            RayGitAlertButton(compareExtra("apply")) { if let result = session.pendingExternalResult { session.draft = result; session.pendingExternalResult = nil } }
         } message: { Text(compareExtra("externalResultHelp")) }
-        .alert(compareExtra("restoreVersion"), isPresented: $confirmRestore) {
-            Button(compareExtra("cancel"), role: .cancel) {}
-            Button(compareExtra("apply")) { if let restore { mutate { snapshot in try await session.repository.restoreComparedVersion(path: session.path, source: restore, expected: snapshot, resolve: session.snapshot?.isConflict == true) } } }
+        .rayGitAlert(compareExtra("restoreVersion"), isPresented: $confirmRestore) {
+            RayGitAlertButton(compareExtra("cancel"), role: .cancel) {}
+            RayGitAlertButton(compareExtra("apply")) { if let restore { mutate { snapshot in try await session.repository.restoreComparedVersion(path: session.path, source: restore, expected: snapshot, resolve: session.snapshot?.isConflict == true) } } }
         } message: { Text(restoreName + "\n" + compareExtra("restoreHelp")) }
-        .alert(compareExtra("deleteFile"), isPresented: $confirmDelete) {
-            Button(compareExtra("cancel"), role: .cancel) {}
-            Button(compareExtra("apply"), role: .destructive) { mutate { snapshot in try await session.repository.deleteComparedFile(path: session.path, expected: snapshot, resolve: session.snapshot?.isConflict == true) } }
+        .rayGitAlert(compareExtra("deleteFile"), isPresented: $confirmDelete) {
+            RayGitAlertButton(compareExtra("cancel"), role: .cancel) {}
+            RayGitAlertButton(compareExtra("apply"), role: .destructive) { mutate { snapshot in try await session.repository.deleteComparedFile(path: session.path, expected: snapshot, resolve: session.snapshot?.isConflict == true) } }
         } message: { Text(compareExtra("deleteHelp")) }
     }
     private func mutate(_ body: @escaping (FileComparisonSnapshot) async throws -> Void) {
@@ -80,10 +80,9 @@ private struct EncodingConversionSheet: View {
             HStack {
                 Button(compareExtra("cancel")) { dismiss() }
                 Button(compareExtra("viewEncoding")) { session.reinterpret(as: source); dismiss() }.disabled(decoded == nil || session.isDirty)
-                Spacer()
                 Button(compareExtra("convertSave")) { convert() }.buttonStyle(.borderedProminent).disabled(decoded == nil || session.isBusy || session.isDirty)
-            }
-        }.controlSize(.small).padding(20).frame(width: 620)
+            }.frame(maxWidth: .infinity)
+        }.controlSize(.small).padding(20).frame(width: 440)
         .onAppear {
             guard !initialized else { return }; initialized = true
             let format = ComparisonTextDecoder.format(of: session.savedWorktree?.data ?? Data())
@@ -118,8 +117,8 @@ private struct RenameIdentitySheet: View {
             Picker(compareExtra("originalPath"), selection: $original) { Text(compareExtra("chooseOriginal")).tag(""); ForEach(candidates, id: \.self) { Text($0).tag($0) } }
             Text(session.path).font(.system(.caption, design: .monospaced))
             if let error { Text(error).foregroundStyle(.orange) }
-            HStack { Button(compareExtra("cancel")) { dismiss() }; Spacer(); Button(compareExtra("apply")) { apply() }.buttonStyle(.borderedProminent).disabled(original.isEmpty || session.isBusy) }
-        }.controlSize(.small).padding(20).frame(width: 620)
+            HStack { Button(compareExtra("cancel")) { dismiss() }; Button(compareExtra("apply")) { apply() }.buttonStyle(.borderedProminent).disabled(original.isEmpty || session.isBusy) }.frame(maxWidth: .infinity)
+        }.controlSize(.small).padding(20).frame(width: 360)
         .task { do { candidates = try await session.repository.status().filter { $0.worktreeStatus == "D" && $0.indexStatus != "D" && !$0.isConflict }.map(\.path) } catch { self.error = compareExtra(OperationFailure.message(error, repository: session.repository.url)) } }
     }
     private func apply() {

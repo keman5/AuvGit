@@ -12,7 +12,7 @@ struct OperationLogView: View {
     private func text(_ key: String) -> String { L10n.text(key, table: "OperationLog") }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack { Text(text("Operation log")).font(.headline); Spacer(); Button(text("Close")) { dismiss() }.keyboardShortcut(.cancelAction) }
+            HStack { Text(text("Operation log")).font(.headline); Button(text("Close")) { dismiss() }.keyboardShortcut(.cancelAction) }.frame(maxWidth: .infinity)
             if let error = store.error { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red).textSelection(.enabled) }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
@@ -49,9 +49,9 @@ struct OperationLogView: View {
                 }
             }
             if let exportError { Text(exportError).foregroundStyle(.red).textSelection(.enabled) }
-        }.sheet(item: $fullRecord) { record in
+        }.rayGitSheet(item: $fullRecord) { record in
             VStack(alignment: .leading, spacing: 12) {
-                HStack { Text(text("Full sanitized output")).font(.headline); Spacer(); Button(text("Close")) { fullRecord = nil } }
+                HStack { Text(text("Full sanitized output")).font(.headline); Button(text("Close")) { fullRecord = nil } }.frame(maxWidth: .infinity)
                 OperationLogTextView(content: detailText(record, full: true), focused: true, onFocus: {})
             }.padding(20).frame(width: 900, height: 600)
         }.buttonBorderShape(.roundedRectangle(radius: 6)).padding(20).frame(width: 760, height: 510)

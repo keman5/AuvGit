@@ -30,3 +30,20 @@
 "Generate from staged summary" = "Generate from staged summary";
 "Staged summary is too large; select fewer staged files" = "Staged summary is too large; select fewer staged files";
 "Increase the staged patch limit in AI settings, or generate from staged file names and change counts. Summary mode cannot describe code details." = "Increase the staged patch limit in AI settings, or generate from staged file names and change counts. Summary mode cannot describe code details.";
+
+"Choose which changes AI should describe." = "Choose which changes AI should describe.";
+"Generation scope" = "Generation scope";
+"Generation scope…" = "Generation scope…";
+"Staged files only" = "Staged files only";
+"All workspace changes" = "All workspace changes";
+"Workspace scope includes staged, unstaged, and untracked changes. Unchanged and ignored files are excluded. No files are staged or committed." = "Workspace scope includes staged, unstaged, and untracked changes. Unchanged and ignored files are excluded. No files are staged or committed.";
+"Remember my choice" = "Remember my choice";
+"Generate" = "Generate";
+"No workspace changes" = "No workspace changes";
+"Workspace changes changed during generation" = "Workspace changes changed during generation";
+"Changes exceed the configured limit" = "Changes exceed the configured limit";
+"Change summary exceeds the configured limit" = "Change summary exceeds the configured limit";
+"Generate from summary" = "Generate from summary";
+"Only changes in the selected scope are sent to your service. Generated text fills the draft and never stages or commits." = "Only changes in the selected scope are sent to your service. Generated text fills the draft and never stages or commits.";
+"Patch limit (KB)" = "Patch limit (KB)";
+"Increase the patch limit in AI settings, or generate from file names and change counts. Summary mode cannot describe code details." = "Increase the patch limit in AI settings, or generate from file names and change counts. Summary mode cannot describe code details.";

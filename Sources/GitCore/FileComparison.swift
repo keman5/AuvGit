@@ -171,6 +171,38 @@ extension GitRepository {
         return FileComparisonSnapshot(path: path, head: revision(-1) ?? missingContent(), index: revision(0) ?? missingContent(), worktree: try diskContent(file), base: revision(1), ours: revision(2), theirs: revision(3), status: fileStatus)
     }
 
+    /// Ordinary working-tree text needs only Git's patch; decoded/media previews retain their revisions.
+    public func displayDiff(target: DiffTarget, ignoreWhitespace: Bool = false) async throws -> (text: String, preview: FileComparisonSnapshot?) {
+        let path: String
+        switch target {
+        case let .worktree(value, _), let .staged(value), let .commit(_, value): path = value
+        }
+        let file = try comparisonURL(path)
+        var raw: String?
+        if case .worktree = target,
+           !["svg", "pdf"].contains(file.pathExtension.lowercased()),
+           let attributes = try? FileManager.default.attributesOfItem(atPath: file.path),
+           attributes[.type] as? FileAttributeType == .typeRegular,
+           let size = attributes[.size] as? NSNumber, size.intValue <= FileComparisonLimits.previewBytes {
+            do {
+                let patch = try await diff(target: target, ignoreWhitespace: ignoreWhitespace)
+                if !patch.contains("Binary files ") && !patch.contains("GIT binary patch") && !patch.contains("\u{FFFD}") { return (patch, nil) }
+                raw = patch
+            } catch let error as GitError where error.message == "Git output exceeds the 32 MB display limit." {
+                return ("", try await comparisonPreview(target: target))
+            }
+        }
+        let snapshot = try await comparisonPreview(target: target)
+        if snapshot.requiresStaticPreview { return ("", snapshot) }
+        let patch: String
+        if let raw { patch = raw }
+        else {
+            do { patch = try await diff(target: target, ignoreWhitespace: ignoreWhitespace) }
+            catch let error as GitError where error.message == "Git output exceeds the 32 MB display limit." { return ("", snapshot) }
+        }
+        return (try await snapshot.displayPatch(fallingBackFrom: patch, ignoreWhitespace: ignoreWhitespace), nil)
+    }
+
     public func comparisonPreview(target: DiffTarget) async throws -> FileComparisonSnapshot {
         switch target {
         case let .worktree(path, _):

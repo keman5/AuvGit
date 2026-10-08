@@ -179,10 +179,10 @@ private struct LogWindowContent: View {
                 if let url = event.object as? URL, url == store.repositoryURL { Task { await store.refresh(); await loadTags() } }
             }
             .onReceive(Timer.publish(every: 3, on: .main, in: .common).autoconnect()) { _ in Task { await store.pollForChanges() } }
-            .sheet(item: $resetRequest) { HistoryResetSheet(store: store, request: $0) }
-        .sheet(isPresented: $showOperationLog) { OperationLogView(store: store) }
-            .sheet(item: $mutation) { request in mutationSheet(request) }
-            .sheet(item: $rebaseCommit) { commit in
+            .rayGitSheet(item: $resetRequest) { HistoryResetSheet(store: store, request: $0) }
+        .rayGitSheet(isPresented: $showOperationLog) { OperationLogView(store: store) }
+            .rayGitSheet(item: $mutation) { request in mutationSheet(request) }
+            .rayGitSheet(item: $rebaseCommit) { commit in
                 RebaseWorkflowView(store: store, onClose: { rebaseCommit = nil }, initialBase: commit.hash)
                     .padding(20).frame(width: 1100, height: 850)
             }
@@ -339,12 +339,11 @@ private struct LogWindowContent: View {
                 }
             }
             HStack {
-                Spacer()
                 Button(workflowText("Cancel")) { mutation = nil }.keyboardShortcut(.cancelAction)
                 Button(workflowText("Continue")) { perform(request) }.buttonStyle(.borderedProminent)
                     .disabled(store.isBusy || ([.createBranch, .createTag].contains(request.action) && name.trimmingCharacters(in: .whitespaces).isEmpty))
-            }
-        }.padding(22).frame(width: 480)
+            }.frame(maxWidth: .infinity)
+        }.padding(22).frame(width: 360)
     }
     private func perform(_ request: Mutation) {
         let name = name.trimmingCharacters(in: .whitespaces), mainline = request.commit.parents.count > 1 ? parent : nil

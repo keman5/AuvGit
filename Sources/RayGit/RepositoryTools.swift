@@ -58,7 +58,6 @@ struct RepositoryTools: View {
                 Divider()
                 HStack(spacing: 8) {
                     if busy || store.isBusy { ProgressView().controlSize(.small) }
-                    Spacer()
                     Button(workflowText("Close")) { dismiss() }
                         .keyboardShortcut(.cancelAction).disabled(busy || store.isBusy)
                     Button(workflowText(operation.writes ? "Run change…" : "Read")) {
@@ -67,15 +66,15 @@ struct RepositoryTools: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(busy || store.isBusy || store.repository == nil || (!firstLabel.isEmpty && first.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) || (operation == .partialStash && first.isEmpty))
-                }
+                }.frame(maxWidth: .infinity)
             }
         }
         .controlSize(.small)
         .onChange(of: confirm) { _, value in if !value { pending = nil } }
         .interactiveDismissDisabled(busy || store.isBusy).padding(20).frame(width: operation == .interactiveRebase ? 1100 : 850, height: operation == .interactiveRebase ? 850 : 640)
-        .alert(workflowText("Confirm repository change"), isPresented: $confirm) {
-            Button(workflowText("Cancel"), role: .cancel) { pending = nil }
-            Button(workflowText("Continue"), role: operation == .resetHard ? .destructive : nil) {
+        .rayGitAlert(workflowText("Confirm repository change"), isPresented: $confirm) {
+            RayGitAlertButton(workflowText("Cancel"), role: .cancel) { pending = nil }
+            RayGitAlertButton(workflowText("Continue"), role: operation == .resetHard ? .destructive : nil) {
                 if let request = pending { pending = nil; run(request.0, request.1, request.2, request.3) }
             }
         } message: { Text(workflowText(operation.rawValue) + "\n" + first + "\n" + second + "\n" + workflowText(operation.rawValue + ".help")) }
@@ -219,12 +218,11 @@ struct CreateRepositorySheet: View {
             Divider()
             HStack(spacing: 8) {
                 if busy { ProgressView().controlSize(.small) }
-                Spacer()
                 Button(workflowText("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
                 Button(workflowText("Create")) { create() }.buttonStyle(.borderedProminent)
                     .disabled(busy || CloneDestination.targetURL(destination) == nil || (clone && source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
-            }
-        }.controlSize(.small).interactiveDismissDisabled(busy).padding(20).frame(width: 600)
+            }.frame(maxWidth: .infinity)
+        }.controlSize(.small).interactiveDismissDisabled(busy).padding(20).frame(width: 400)
             .onChange(of: clone) { _, _ in saveDraft() }
             .onChange(of: source) { _, _ in saveDraft() }
             .onChange(of: destination) { _, _ in saveDraft() }

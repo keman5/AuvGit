@@ -3,6 +3,21 @@ import GitCore
 @testable import RayGit
 
 final class AICommitInputPolicyTests: XCTestCase {
+    func testRememberedScopeCanBeChangedAndForgotten() throws {
+        let name = "AICommitScopeTests." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        XCTAssertNil(AICommitScopeChoice.remembered(defaults: defaults))
+        AICommitScopeChoice.save(.workspace, remember: true, defaults: defaults)
+        XCTAssertEqual(AICommitScopeChoice.remembered(defaults: defaults), .workspace)
+        AICommitScopeChoice.save(.staged, remember: true, defaults: defaults)
+        XCTAssertEqual(AICommitScopeChoice.remembered(defaults: defaults), .staged)
+        AICommitScopeChoice.save(.workspace, remember: false, defaults: defaults)
+        XCTAssertNil(AICommitScopeChoice.remembered(defaults: defaults))
+        XCTAssertTrue(AICommitInputPolicy.patchPrompt("patch", scope: .workspace).contains("unstaged, and untracked"))
+        XCTAssertFalse(AICommitInputPolicy.patchPrompt("patch", scope: .workspace).contains("based only on the staged patch"))
+    }
+
     @MainActor
     func testGenerateWithEmptyIndexReportsStagingRequirement() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

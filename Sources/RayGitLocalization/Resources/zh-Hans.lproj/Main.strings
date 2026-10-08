@@ -4,7 +4,7 @@
 "refresh" = "刷新";
 "refreshHelp" = "刷新 ⌥⌘R";
 "pullTitle" = "拉取远程变更";
-"pullMessage" = "将以 fast-forward-only 方式拉取当前分支；分叉时会停止并显示错误。";
+"pullMessage" = "拉取：获取远程提交并以快进方式更新当前分支。获取：只更新远程记录，不改变本地代码。分支已分叉时，拉取会停止。";
 "pushTitle" = "推送当前分支";
 "pushMessage" = "将当前分支提交推送到已配置的远程上游。";
 "newBranch" = "新建分支";
@@ -70,8 +70,8 @@
 "type" = "类型";
 "language" = "语言";
 "systemLanguage" = "跟随系统";
-"fetch" = "Fetch";
-"pull" = "Pull";
+"fetch" = "获取";
+"pull" = "拉取";
 "push" = "Push";
 "dismissError" = "关闭错误提示";
 

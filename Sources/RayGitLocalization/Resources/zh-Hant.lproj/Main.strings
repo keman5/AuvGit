@@ -4,7 +4,7 @@
 "refresh" = "重新整理";
 "refreshHelp" = "重新整理 ⌥⌘R";
 "pullTitle" = "拉取遠端變更";
-"pullMessage" = "將以 fast-forward-only 方式拉取目前分支；分歧時會停止並顯示錯誤。";
+"pullMessage" = "拉取：取得遠端提交並以快轉方式更新目前分支。取得：只更新遠端記錄，不變更本機程式碼。分支已分岔時，拉取會停止。";
 "pushTitle" = "推送目前分支";
 "pushMessage" = "將目前分支的提交推送至已設定的遠端上游。";
 "newBranch" = "新增分支";
@@ -70,8 +70,8 @@
 "type" = "類型";
 "language" = "語言";
 "systemLanguage" = "跟隨系統";
-"fetch" = "Fetch";
-"pull" = "Pull";
+"fetch" = "取得";
+"pull" = "拉取";
 "push" = "Push";
 "dismissError" = "關閉錯誤提示";
 

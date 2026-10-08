@@ -23,9 +23,9 @@ public extension GitRepository {
     func changeState(files: [GitFile]) async throws -> RepositoryChangeState {
         // show-ref exits 1 for an unborn repository. Other failures must not look
         // like a ref deletion, so retain the allowed exit code explicitly.
-        let refs = try await GitProcess.run(at: url, arguments: ["--no-optional-locks", "show-ref", "--head"], allowedCodes: [0, 1]).text
-        let head = try await GitProcess.run(at: url, arguments: ["--no-optional-locks", "symbolic-ref", "--quiet", "HEAD"], allowedCodes: [0, 1]).text
-        let index = try await workflowRead(["--no-optional-locks", "ls-files", "--stage", "-z"])
-        return RepositoryChangeState(history: head + refs, index: index, files: files, root: url)
+        async let refs = GitProcess.run(at: url, arguments: ["--no-optional-locks", "show-ref", "--head"], allowedCodes: [0, 1]).text
+        async let head = GitProcess.run(at: url, arguments: ["--no-optional-locks", "symbolic-ref", "--quiet", "HEAD"], allowedCodes: [0, 1]).text
+        async let index = workflowRead(["--no-optional-locks", "ls-files", "--stage", "-z"])
+        return try await RepositoryChangeState(history: head + refs, index: index, files: files, root: url)
     }
 }

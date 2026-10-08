@@ -1,7 +1,7 @@
 "title" = "Network Operations";
 "operation" = "Operation";
 "fetch" = "Fetch";
-"pull" = "Pull (fast-forward only)";
+"pull" = "Pull";
 "push" = "Push";
 "progressHint" = "Progress updates come from Git; some phases do not report a percentage.";
 "cancel" = "Cancel";
@@ -21,3 +21,7 @@
 "cancelled" = "Cancelled; Git and its helper processes were terminated.";
 "close" = "Close";
 "previewExpired" = "Repository refs or remote configuration changed. Preview the push again.";
+"knownStateTitle" = "Known remote state";
+"verifyRemote" = "Verify remote and continue";
+"knownPushBehind" = "The last fetched state of %@/%@ contains %d commits missing locally. A normal push may be rejected. Continue to verify the current remote state? No force push will be performed without a separate confirmation.";
+"knownPullDiverged" = "The last fetched state has diverged: %d local-only and %d remote-only commits. Fast-forward-only pull may fail. Continue to fetch and verify the current remote state?";

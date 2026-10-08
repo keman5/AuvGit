@@ -63,10 +63,9 @@ struct DiffPane: View {
                         Spacer(minLength: 0)
                     }
                 }
-            }.controlSize(.small).padding(.horizontal, 14).padding(.vertical, 10).rayGitChrome()
+            }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 4).rayGitChrome()
             Divider()
-            if isLoading && text.isEmpty && preview == nil { Spacer(); ProgressView(diffText("diff.loading")); Spacer() }
-            else if let preview { StaticComparisonView(snapshot: preview) }
+            if let preview { StaticComparisonView(snapshot: preview, showsControls: false) }
             else if text.isEmpty { RayGitEmptyState(title: diffText("diff.empty"), systemImage: "checkmark.circle") }
             else {
                 if diff.isBinary { Label(diffText("diff.binary"), systemImage: "doc.zipper").font(.caption).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(Color.orange.opacity(0.1)) }
@@ -75,7 +74,7 @@ struct DiffPane: View {
                     HStack(spacing: 1) {
                         Text(leftRevisionTitle ?? diffText("diff.original")).frame(maxWidth: .infinity, alignment: .leading)
                         Text(rightRevisionTitle ?? diffText("diff.modified")).frame(maxWidth: .infinity, alignment: .leading)
-                    }.font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 16).frame(height: 32).rayGitChrome()
+                    }.font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 16).frame(height: 26).rayGitChrome()
                     Divider()
                 }
                 DiffTextSurface(diff: diff, sourceText: text, languagePath: title, documentIdentity: documentIdentity, sideBySide: sideBySide, selectedHunk: hunk, dark: colorScheme == .dark, wraps: wraps, lineNumbers: lineNumbers, synchronized: synchronized, fontSize: CGFloat(fontSize), compact: forceCompact || compact, searchOptions: searchOptions, searchStep: searchStep, matchCount: $matchCount, matchIndex: $matchIndex, searchError: $searchError, scrollsToFirstChange: openedDocumentIdentity != documentIdentity, onFirstScroll: { openedDocumentIdentity = documentIdentity })
@@ -135,7 +134,7 @@ struct DiffPane: View {
                 Button(diffControlText("larger")) { fontSize = min(24, fontSize + 1) }
                 Button(diffControlText("smaller")) { fontSize = max(9, fontSize - 1) }
                 Button(diffControlText("resetFont")) { fontSize = 12 }
-                if let extraMenuItems { Divider(); extraMenuItems }
+                if let extraMenuItems { Divider(); extraMenuItems.disabled(isLoading) }
             } label: { ComparisonToolbarIcon(name: "ellipsis") }.buttonStyle(ComparisonToolbarButtonStyle())
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help(diffControlText("display"))
             Button { showSearch.toggle() } label: { ComparisonToolbarIcon(name: "magnifyingglass") }.buttonStyle(ComparisonToolbarButtonStyle())
@@ -143,7 +142,7 @@ struct DiffPane: View {
                 .popover(isPresented: $showSearch) {
                     ComparisonSearchPopover(options: $searchOptions, replacement: $replacement, matchCount: matchCount, matchIndex: matchIndex, canReplace: false,
                         onNavigate: { searchStep += $0 ? 1 : -1 }, onReplace: { _ in },
-                        onOpenEditor: onOpenEditableComparison.map { action in { action(searchOptions, replacement); showSearch = false } }, error: searchError, onClose: { showSearch = false })
+                        onOpenEditor: (isLoading ? nil : onOpenEditableComparison).map { action in { action(searchOptions, replacement); showSearch = false } }, error: searchError, onClose: { showSearch = false })
                 }
         }.buttonStyle(ToolbarRowButtonStyle(minimumWidth: 22))
     }
@@ -457,12 +456,13 @@ struct DiffTextSurface: NSViewRepresentable {
                       let layout = view.layoutManager, let container = view.textContainer else { continue }
                 layout.ensureLayout(for: container)
                 let height = max(1, view.bounds.height)
+                let textLength = view.textStorage?.length ?? 0
                 scroll.overview.markers = hunkRanges.enumerated().map { index, ranges in
                     let range = ranges[column]
-                    let location = min(range.location, max(0, view.string.utf16.count - 1))
+                    let location = min(range.location, max(0, textLength - 1))
                     let glyph = layout.numberOfGlyphs > 0 ? layout.glyphIndexForCharacter(at: location) : 0
                     let rect = layout.numberOfGlyphs > 0 ? layout.lineFragmentRect(forGlyphAt: min(glyph, layout.numberOfGlyphs - 1), effectiveRange: nil) : .zero
-                    let end = min(max(location, NSMaxRange(range) - 1), max(0, view.string.utf16.count - 1))
+                    let end = min(max(location, NSMaxRange(range) - 1), max(0, textLength - 1))
                     let last = layout.numberOfGlyphs > 0 ? layout.glyphIndexForCharacter(at: end) : 0
                     let bottom = layout.numberOfGlyphs > 0 ? layout.lineFragmentRect(forGlyphAt: min(last, layout.numberOfGlyphs - 1), effectiveRange: nil).maxY : rect.maxY
                     return ComparisonOverviewMarker(lower: min(1, Double((rect.minY + view.textContainerInset.height) / height)), upper: min(1, Double((bottom + view.textContainerInset.height) / height)), kind: self.hunkKinds.indices.contains(index) ? self.hunkKinds[index] : .modification, index: index)
@@ -471,7 +471,7 @@ struct DiffTextSurface: NSViewRepresentable {
                     guard let self else { return }
                     let point = NSPoint(x: 0, y: max(0, CGFloat(fraction) * height - view.textContainerInset.height))
                     let glyph = layout.glyphIndex(for: point, in: container)
-                    let character = fraction == 1 ? view.string.utf16.count : layout.numberOfGlyphs > 0 ? layout.characterIndexForGlyph(at: min(glyph, layout.numberOfGlyphs - 1)) : 0
+                    let character = fraction == 1 ? textLength : layout.numberOfGlyphs > 0 ? layout.characterIndexForGlyph(at: min(glyph, layout.numberOfGlyphs - 1)) : 0
                     self.navigate(column: column, range: NSRange(location: character, length: 0))
                 }
                 scroll.overview.onSelect = { [weak self] index in
@@ -481,15 +481,35 @@ struct DiffTextSurface: NSViewRepresentable {
             }
         }
         func alignWrappedRows() {
-            refreshOverviews()
-            guard !aligning, split, scrolls.count == 2 else { return }
+            guard !aligning else { return }
             let widths = scrolls.map { $0.contentSize.width }
             guard lastAlignedSignature != signature || lastAlignedWidths != widths || lastAlignedWrap != wraps else { return }
             lastAlignedSignature = signature; lastAlignedWidths = widths; lastAlignedWrap = wraps
             aligning = true
             defer { aligning = false; refreshOverviews() }
             let views = scrolls.compactMap { $0.documentView as? NSTextView }
-            guard views.count == 2 else { return }
+            guard split, views.count == 2 else { return }
+            if wraps != true {
+                for (index, view) in views.enumerated() {
+                    if let storage = view.textStorage {
+                        var spacing: [(NSRange, NSMutableParagraphStyle)] = []
+                        storage.enumerateAttribute(.paragraphStyle, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+                            guard let style = value as? NSParagraphStyle, style.paragraphSpacing != 0,
+                                  let paragraph = style.mutableCopy() as? NSMutableParagraphStyle else { return }
+                            paragraph.paragraphSpacing = 0
+                            spacing.append((range, paragraph))
+                        }
+                        if !spacing.isEmpty {
+                            storage.beginEditing()
+                            for (range, paragraph) in spacing { storage.addAttribute(.paragraphStyle, value: paragraph, range: range) }
+                            storage.endEditing()
+                        }
+                    }
+                    view.sizeToFit(); view.setFrameOrigin(.zero)
+                    view.setFrameSize(NSSize(width: max(view.frame.width, scrolls[index].contentSize.width), height: view.frame.height))
+                }
+                return
+            }
             var rows: [[NSRange]] = []
             for (index, view) in views.enumerated() {
                 if wraps == true {
@@ -498,15 +518,17 @@ struct DiffTextSurface: NSViewRepresentable {
                 }
                 let source = view.string as NSString
                 var ranges: [NSRange] = [], offset = 0
+                view.textStorage?.beginEditing()
                 while offset < source.length {
                     let range = source.lineRange(for: NSRange(location: offset, length: 0))
                     ranges.append(range); offset = NSMaxRange(range)
-                    if let existing = view.textStorage?.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle,
+                    if let existing = view.textStorage?.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle, existing.paragraphSpacing != 0,
                        let paragraph = existing.mutableCopy() as? NSMutableParagraphStyle {
                         paragraph.paragraphSpacing = 0
                         view.textStorage?.addAttribute(.paragraphStyle, value: paragraph, range: range)
                     }
                 }
+                view.textStorage?.endEditing()
                 view.layoutManager?.ensureLayout(for: view.textContainer!)
                 rows.append(ranges)
             }
@@ -518,6 +540,7 @@ struct DiffTextSurface: NSViewRepresentable {
                     return layout.boundingRect(forGlyphRange: glyphs, in: container).height
                 }
             }
+            views.forEach { $0.textStorage?.beginEditing() }
             for row in rows[0].indices {
                 let height = max(heights[0][row], heights[1][row])
                 for column in 0..<2 {
@@ -525,9 +548,11 @@ struct DiffTextSurface: NSViewRepresentable {
                     guard let style = view.textStorage?.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle,
                           let paragraph = style.mutableCopy() as? NSMutableParagraphStyle else { continue }
                     paragraph.paragraphSpacing = max(0, height - heights[column][row])
+                    guard paragraph.paragraphSpacing != style.paragraphSpacing else { continue }
                     view.textStorage?.addAttribute(.paragraphStyle, value: paragraph, range: range)
                 }
             }
+            views.forEach { $0.textStorage?.endEditing() }
             for (index, view) in views.enumerated() {
                 view.layoutManager?.ensureLayout(for: view.textContainer!); view.sizeToFit(); view.setFrameOrigin(.zero)
                 view.setFrameSize(NSSize(width: wraps == true ? scrolls[index].contentSize.width : max(view.frame.width, scrolls[index].contentSize.width), height: view.frame.height))

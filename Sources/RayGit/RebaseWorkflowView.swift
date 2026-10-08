@@ -185,14 +185,13 @@ struct RebaseWorkflowView: View {
                 .background(Color.red.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
             HStack(spacing: 10) {
                 if store.isBusy { ProgressView().controlSize(.small) }
-                Spacer()
                 if let onClose { Button(workflowText("Close"), action: onClose).keyboardShortcut(.cancelAction).disabled(store.isBusy) }
                 Button(sessionText("Preview and run rebase")) { prepare() }.buttonStyle(.borderedProminent)
                     .disabled(store.isBusy || captured == nil || todo.isEmpty)
-            }
+            }.frame(maxWidth: .infinity)
         }.tint(.blue).controlSize(.regular).padding(20)
             .onChange(of: messageSelection) { _, _ in loadMessage() }
-            .sheet(isPresented: $confirm, onDismiss: { pending = nil }) { preview }
+            .rayGitSheet(isPresented: $confirm, onDismiss: { pending = nil }) { preview }
     }
     private func actionColor(_ command: String) -> Color {
         switch command { case "reword": return .orange; case "squash": return .purple; case "edit": return .yellow; case "drop": return .red; case "exec": return .secondary; default: return .blue }
@@ -247,10 +246,9 @@ struct RebaseWorkflowView: View {
             }
             Divider()
             HStack(spacing: 8) {
-                Spacer()
                 Button(sessionText("Cancel")) { confirm = false; pending = nil }.keyboardShortcut(.cancelAction)
                 Button(sessionText("Run confirmed plan")) { if let request = pending { confirm = false; pending = nil; run(request) } }.buttonStyle(.borderedProminent)
-            }
+            }.frame(maxWidth: .infinity)
         }.controlSize(.small).padding(20).frame(width: 800, height: 600)
     }
 

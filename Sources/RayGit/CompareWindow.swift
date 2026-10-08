@@ -102,15 +102,8 @@ private final class CompareController: NSWindowController, NSWindowDelegate {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     func askToClose() -> NSApplication.ModalResponse {
-        let alert = NSAlert(); alert.messageText = compareText("Save changes before closing?")
-        alert.informativeText = session?.path ?? ""
-        alert.addButton(withTitle: compareText("Save")); alert.addButton(withTitle: compareText("Discard Draft")); alert.addButton(withTitle: compareText("Cancel"))
-        let response = alert.runModal()
-        // runModal ends the modal session; explicitly remove its window before
-        // the compare window closes and releases its hosting controller.
-        alert.window.orderOut(nil)
-        alert.window.close()
-        return response
+        DialogAppearance.confirmClose(title: compareText("Save changes before closing?"), message: session?.path ?? "",
+                                      save: compareText("Save"), discard: compareText("Discard Draft"), cancel: compareText("Cancel"))
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard let session else { return true }
@@ -406,17 +399,17 @@ private struct FileCompareContent: View {
                 else { previousEditorLayout = new }
             }
             .task { await session.reload() }
-            .alert(compareText("Replace working tree draft with auto merge?"), isPresented: $confirmMerge) {
-                Button(compareText("Auto Merge"), role: .destructive) { Task { await session.autoMerge() } }
-                Button(compareText("Cancel"), role: .cancel) {}
+            .rayGitAlert(compareText("Replace working tree draft with auto merge?"), isPresented: $confirmMerge) {
+                RayGitAlertButton(compareText("Auto Merge"), role: .destructive) { Task { await session.autoMerge() } }
+                RayGitAlertButton(compareText("Cancel"), role: .cancel) {}
             }
-            .alert(compareText("Replace unsaved draft with selected version?"), isPresented: $confirmVersion) {
-                Button(compareText("Replace Draft"), role: .destructive) { if let pendingVersion { session.draft = pendingVersion }; pendingVersion = nil }
-                Button(compareText("Cancel"), role: .cancel) { pendingVersion = nil }
+            .rayGitAlert(compareText("Replace unsaved draft with selected version?"), isPresented: $confirmVersion) {
+                RayGitAlertButton(compareText("Replace Draft"), role: .destructive) { if let pendingVersion { session.draft = pendingVersion }; pendingVersion = nil }
+                RayGitAlertButton(compareText("Cancel"), role: .cancel) { pendingVersion = nil }
             } message: { Text(compareText("This replaces the entire editor draft. Disk and index are unchanged until you save or mark resolved.")) }
-            .alert(compareText("Discard unsaved changes and reload?"), isPresented: $confirmReload) {
-                Button(compareText("Reload"), role: .destructive) { Task { await session.reload() } }
-                Button(compareText("Cancel"), role: .cancel) {}
+            .rayGitAlert(compareText("Discard unsaved changes and reload?"), isPresented: $confirmReload) {
+                RayGitAlertButton(compareText("Reload"), role: .destructive) { Task { await session.reload() } }
+                RayGitAlertButton(compareText("Cancel"), role: .cancel) {}
             }
     }
     private func performShortcut(_ command: ShortcutCommand) -> Bool {
@@ -684,14 +677,10 @@ private struct CompareWindowContent: View {
             let output: String
             if let stash { output = try await repository.stashDiff(ref: stash) }
             else if let target {
-                let snapshot = try await repository.comparisonPreview(target: target)
+                let result = try await repository.displayDiff(target: target, ignoreWhitespace: ignoreWhitespace)
                 guard token == version else { return }
-                preview = snapshot.requiresStaticPreview ? snapshot : nil
-                if snapshot.requiresStaticPreview { output = "" }
-                else {
-                    let raw = try await repository.diff(target: target, ignoreWhitespace: ignoreWhitespace)
-                    output = try await snapshot.displayPatch(fallingBackFrom: raw, ignoreWhitespace: ignoreWhitespace)
-                }
+                preview = result.preview
+                output = result.text
             }
             else { output = "" }
             guard token == version else { return }; text = output

@@ -6,7 +6,18 @@ func sidebarRefinementText(_ key: String, _ arguments: CVarArg...) -> String {
     L10n.text(key, table: "SidebarRefinement", arguments: arguments)
 }
 
-enum SidebarAction { case openRepository, revealRepository, removeRecent, checkout, history, rename, delete, copy, stashShow, stashApply, stashDrop }
+enum SidebarAction { case openRepository, revealRepository, removeRecent, checkout, history, rename, delete, copy, stashShow, stashApply, stashDrop, merge, stopTracking, setTracking }
+
+private struct RepositoryRowButtonStyle: ButtonStyle {
+    var selected: Bool
+    var allowsSelection: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        let highlighted = selected || (allowsSelection && configuration.isPressed)
+        configuration.label
+            .foregroundStyle(highlighted ? Color.white : Color.primary)
+            .background(highlighted ? RayGitStyle.blue : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+    }
+}
 
 struct RepositorySidebar: View {
     @ObservedObject var store: RepositoryStore
@@ -34,7 +45,7 @@ struct RepositorySidebar: View {
                     }.padding(.horizontal, 12)
                 }.font(.system(size: 12))
                     .onChange(of: repositoryFocusRequest) { _, _ in
-                        guard let path = store.repositoryURL?.path ?? store.recentPaths.first else { return }
+                        guard let path = store.highlightedRepositoryPath ?? store.recentPaths.first else { return }
                         proxy.scrollTo(path)
                         DispatchQueue.main.async { focusedRepository = path }
                     }
@@ -97,7 +108,10 @@ struct RepositorySidebar: View {
                                     Button(interactionText("Check Out…")) { onAction(.checkout, target) }.disabled(store.isBusy)
                                 }
                                 Button(interactionText("Log")) { onAction(.history, (item.hasPrefix("remote:") ? "refs/remotes/" : "refs/heads/") + target) }.disabled(store.isBusy)
+                                Button(sidebarRefinementText("Merge into Current Branch")) { onAction(.merge, (item.hasPrefix("remote:") ? "refs/remotes/" : "refs/heads/") + target) }.disabled(store.isBusy || (!item.hasPrefix("remote:") && target == store.branch))
+                                Button(sidebarRefinementText("Stop Tracking Remote Branch")) { onAction(.stopTracking, item.hasPrefix("remote:") ? "refs/remotes/" + target : target) }.disabled(store.isBusy)
                                 if item.hasPrefix("branch:") {
+                                    Button(sidebarRefinementText("Set Tracking Branch…")) { onAction(.setTracking, target) }.disabled(store.isBusy)
                                     Divider()
                                     Button(interactionText("Rename Branch…")) { onAction(.rename, target) }.disabled(store.isBusy)
                                     Button(interactionText("Delete Branch…")) { onAction(.delete, target) }.disabled(store.isBusy || store.branches.first(where: { $0.name == target })?.isCurrent == true)
@@ -116,18 +130,23 @@ struct RepositorySidebar: View {
         }
         .controlSize(.small)
         .background(RayGitStyle.sidebar)
-        .sheet(item: $contextTarget) { target in RepositoryContextEditor(store: store, target: target) }
-        .sheet(isPresented: Binding(get: { rebaseReference != nil }, set: { if !$0 { rebaseReference = nil } })) {
+        .rayGitSheet(item: $contextTarget) { target in RepositoryContextEditor(store: store, target: target) }
+        .rayGitSheet(isPresented: Binding(get: { rebaseReference != nil }, set: { if !$0 { rebaseReference = nil } })) {
             RebaseWorkflowView(store: store, onClose: { rebaseReference = nil }, initialBase: rebaseReference ?? "HEAD~1")
                 .frame(width: 1000, height: 700).padding(20)
         }
-        .alert(shortcutText("Rename Stash"), isPresented: Binding(get: { renameStash != nil }, set: { if !$0 { renameStash = nil } })) {
-            TextField(workflowText("Stash message"), text: $stashName)
-            Button(workflowText("Cancel"), role: .cancel) { renameStash = nil }
-            Button(shortcutText("Rename Stash")) {
-                guard let reference = renameStash else { return }; let name = stashName; renameStash = nil
-                store.operation(shortcutText("Rename Stash")) { _ = try await $0.renameStash(reference: reference, message: name) }
-            }.disabled(stashName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .rayGitSheet(isPresented: Binding(get: { renameStash != nil }, set: { if !$0 { renameStash = nil } })) {
+            VStack(alignment: .leading, spacing: 18) {
+                Text(shortcutText("Rename Stash")).font(.headline)
+                TextField(workflowText("Stash message"), text: $stashName).textFieldStyle(.roundedBorder)
+                HStack {
+                    Button(workflowText("Cancel")) { renameStash = nil }.keyboardShortcut(.cancelAction)
+                    Button(shortcutText("Rename Stash")) {
+                        guard let reference = renameStash else { return }; let name = stashName; renameStash = nil
+                        store.operation(shortcutText("Rename Stash")) { _ = try await $0.renameStash(reference: reference, message: name) }
+                    }.disabled(stashName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).keyboardShortcut(.defaultAction)
+                }.frame(maxWidth: .infinity)
+            }.padding(24).frame(width: 360)
         }
     }
     private func prepareStashRename(_ reference: String) {
@@ -169,13 +188,13 @@ struct RepositorySidebar: View {
             .listRowInsets(EdgeInsets(top: 2, leading: 12, bottom: 2, trailing: 8))
     }
     private func repositoryRow(_ path: String) -> some View {
-        let active = path == store.repositoryURL?.path
+        let active = path == store.highlightedRepositoryPath
         let sync = store.repositorySyncStates[path]
         let ahead = sync?.ahead ?? 0, behind = sync?.behind ?? 0, conflicts = sync?.conflicts ?? 0
         let hasPush = ahead > 0, hasPull = behind > 0, hasConflict = conflicts > 0
         let symbol = hasConflict ? "exclamationmark.triangle.fill" : hasPush && hasPull ? "arrow.up.arrow.down.circle" : hasPull ? "arrow.down.circle" : hasPush ? "arrow.up.circle" : "folder"
         let status = hasConflict ? sidebarRefinementText("conflicts", conflicts) : hasPush && hasPull ? sidebarRefinementText("pushPull", ahead, behind) : hasPull ? sidebarRefinementText("pull", behind) : hasPush ? sidebarRefinementText("push", ahead) : path
-        return Button { if !store.isBusy { onAction(.openRepository, path) } } label: {
+        return Button { if store.canOpenRepository { onAction(.openRepository, path) } } label: {
             HStack(spacing: 6) {
                 Image(systemName: "folder").font(.system(size: 13)).frame(width: 20, height: 19)
                     .overlay(alignment: .bottomTrailing) {
@@ -194,17 +213,16 @@ struct RepositorySidebar: View {
                         .padding(.horizontal, 5).padding(.vertical, 1)
                         .background((active ? Color.white : Color.secondary).opacity(0.14), in: RoundedRectangle(cornerRadius: 5))
                 }
-            }.foregroundStyle(active ? Color.white : Color.primary)
-                .padding(.horizontal, 10).frame(height: 26).frame(maxWidth: .infinity, alignment: .leading)
-                .background(active ? RayGitStyle.blue : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+            }.padding(.horizontal, 10).frame(height: 26).frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
-        }.buttonStyle(.plain).help(path).transaction { $0.animation = nil }
+        }.buttonStyle(RepositoryRowButtonStyle(selected: active, allowsSelection: store.canOpenRepository)).help(path).transaction { $0.animation = nil }
+            .accessibilityAddTraits(active ? .isSelected : [])
             .focusable().focused($focusedRepository, equals: path).id(path)
-            .onKeyPress(.return) { guard !store.isBusy else { return .handled }; onAction(.openRepository, path); return .handled }
+            .onKeyPress(.return) { guard store.canOpenRepository else { return .handled }; onAction(.openRepository, path); return .handled }
             .frame(maxWidth: .infinity)
             .contentShape(RoundedRectangle(cornerRadius: 7))
             .contextMenu {
-                Button(interactionText("Open Repository")) { onAction(.openRepository, path) }.disabled(store.isBusy)
+                Button(interactionText("Open Repository")) { onAction(.openRepository, path) }.disabled(!store.canOpenRepository)
                 Button(L10n.text("Refresh Repository")) {
                     Task { _ = await store.performRepositoryContextOperation(L10n.text("Refresh Repository"), path: path) { repository in _ = try await repository.status() } }
                 }.disabled(store.isBusy)

@@ -59,14 +59,14 @@ struct WorkspaceTree: View {
             .onReceive(NotificationCenter.default.publisher(for: .rayGitWorktreeChanged)) { note in
                 if let changed = note.object as? URL, changed == repository.url { Task { await reload() } }
             }
-            .sheet(isPresented: $showIgnored) {
+            .rayGitSheet(isPresented: $showIgnored) {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(compareText("Ignored Files")).font(.headline)
                     List(ignored, id: \.self) { Text($0).font(.system(size: 12)).textSelection(.enabled) }
-                    HStack { Spacer(); Button(compareText("Close")) { showIgnored = false }.keyboardShortcut(.cancelAction) }
+                    HStack { Button(compareText("Close")) { showIgnored = false }.keyboardShortcut(.cancelAction) }.frame(maxWidth: .infinity)
                 }.controlSize(.small).padding(20).frame(width: 600, height: 450)
             }
-            .sheet(isPresented: $showIgnoreEditor) {
+            .rayGitSheet(isPresented: $showIgnoreEditor) {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(compareText("Edit .gitignore")).font(.headline)
                     if let editorError { Text(editorError).foregroundStyle(.orange).font(.caption).textSelection(.enabled) }
@@ -75,7 +75,6 @@ struct WorkspaceTree: View {
                         .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
                         .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(0.12)))
                     HStack {
-                        Spacer()
                         Button(compareText("Cancel")) { showIgnoreEditor = false }.keyboardShortcut(.cancelAction)
                         Button(compareText("Save")) {
                             guard !isBusy, !mutationBusy else { return }
@@ -86,7 +85,7 @@ struct WorkspaceTree: View {
                                 catch { editorError = compareText(OperationFailure.message(error, repository: repository.url)) }
                             }
                         }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(mutationBusy || isBusy)
-                    }
+                    }.frame(maxWidth: .infinity)
                 }.controlSize(.small).padding(20).frame(width: 650, height: 500)
             }
     }

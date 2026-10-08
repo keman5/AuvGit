@@ -4,7 +4,7 @@
 "refresh" = "Refresh";
 "refreshHelp" = "Refresh ⌥⌘R";
 "pullTitle" = "Pull Remote Changes";
-"pullMessage" = "Pull the current branch using fast-forward only. Diverged branches will stop with an error.";
+"pullMessage" = "Pull fetches remote commits and fast-forwards the current branch. Fetch only updates remote records, leaving local files unchanged. Pull stops if branches have diverged.";
 "pushTitle" = "Push Current Branch";
 "pushMessage" = "Push commits on the current branch to its configured remote upstream.";
 "newBranch" = "New Branch";

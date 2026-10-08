@@ -45,3 +45,33 @@
 "Finish or abort the active Git operation before resetting" = "请先完成或中止正在进行的 Git 操作，然后再重置";
 
 "Repository or HEAD changed. Reopen the reset confirmation." = "仓库或 HEAD 已改变，请重新打开重置确认。";
+
+"git fetch" = "正在获取";
+"git pull" = "正在拉取";
+"git push" = "正在推送";
+"git ls-remote" = "正在检查远程引用";
+"git config" = "正在检查配置";
+"git show-ref" = "正在检查本地引用";
+"git symbolic-ref" = "正在检查分支";
+"git log" = "正在读取历史";
+"git status" = "正在刷新文件";
+"git add" = "正在暂存";
+"git reset" = "正在取消暂存";
+"git commit" = "正在提交";
+"git checkout" = "正在检出";
+"git merge" = "正在合并";
+"git rebase" = "正在变基";
+"git stash" = "正在储藏";
+
+"remote" = "远程";
+"Enumerating objects" = "正在枚举对象";
+"Counting objects" = "正在统计对象";
+"Compressing objects" = "正在压缩对象";
+"Writing objects" = "正在写入对象";
+"Receiving objects" = "正在接收对象";
+"Resolving deltas" = "正在解析差异";
+"Checking connectivity" = "正在检查连通性";
+"Updating files" = "正在更新文件";
+"Filtering content" = "正在过滤内容";
+"Finding sources" = "正在查找来源";
+"Reusing objects" = "正在复用对象";

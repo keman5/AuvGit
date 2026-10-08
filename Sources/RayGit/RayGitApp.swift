@@ -32,7 +32,7 @@ struct RayGitApp: App {
                 .onReceive(Timer.publish(every: 3, on: .main, in: .common).autoconnect()) { _ in Task { await store.pollForChanges() } }
         }
         .windowToolbarStyle(.unified)
-        .defaultSize(width: 1280, height: 820)
+        .defaultSize(width: 1080, height: 820)
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {
@@ -122,9 +122,11 @@ final class RepositoryStore: ObservableObject {
     /// A Log window owns this transient store, not the main workspace session.
     func closeTransientSession() {
         guard !persistsSession else { return }
+        openingTask?.cancel(); openingTask = nil; openingVersion = UUID()
         fileObserver = nil
         filesystemRefresh?.cancel(); filesystemRefresh = nil
         searchTask?.cancel(); searchTask = nil
+        diffTask?.cancel(); diffTask = nil
         repoVersion = UUID(); historyVersion = UUID(); detailVersion = UUID(); diffVersion = UUID()
         accessedURL?.stopAccessingSecurityScopedResource(); accessedURL = nil
         repository = nil; repositoryURL = nil
@@ -183,11 +185,24 @@ final class RepositoryStore: ObservableObject {
     var hasLatestOperation: Bool { latestOperationKey != nil }
     private var operationStarted = Date()
     private(set) var currentUserOperationID = UUID()
+    @Published private(set) var liveProgress: NetworkProgress?
+    private var progressOperationID: UUID?
+    private var progressRepository: URL?
+    var visibleProgress: NetworkProgress? { progressRepository == repositoryURL ? liveProgress : nil }
     var footerStatus: String {
+        if let liveProgress, progressRepository == repositoryURL {
+            let detail = Self.progressDetail(liveProgress.message)
+            return status + " · " + detail
+        }
         if !hasLatestOperation, error == nil, statusKey == "Refreshed · %@ changes · %@ staged" {
             return L10n.text("Refreshed", table: "OperationLog")
         }
         return displayStatus
+    }
+    static func progressDetail(_ message: String) -> String {
+        if message.hasPrefix("remote: ") { return L10n.text("remote", table: "OperationLog") + ": " + progressDetail(String(message.dropFirst(8))) }
+        guard let colon = message.firstIndex(of: ":") else { return L10n.text(message, table: "OperationLog") }
+        return L10n.text(String(message[..<colon]), table: "OperationLog") + message[colon...]
     }
     var displayStatus: String {
         if let error { return hasLatestOperation ? status + ": " + error : error }
@@ -198,9 +213,22 @@ final class RepositoryStore: ObservableObject {
         return userCommandLog.filter { $0.operationID == id }.sorted { $0.date < $1.date }
     }
     func beginUserOperation(_ name: String) {
+        liveProgress = nil; progressOperationID = nil; progressRepository = nil
         currentUserOperationID = UUID(); operationStarted = Date(); latestOperationName = name; latestOperationKey = "%@…"; errorMessage = nil
     }
+    func progressHandler(for repository: GitRepository, operationID: UUID) -> @Sendable (NetworkProgress) -> Void {
+        progressOperationID = operationID; progressRepository = repository.url
+        return { [weak self] event in
+            Task { @MainActor in self?.receiveProgress(event, repository: repository, operationID: operationID) }
+        }
+    }
+    func receiveProgress(_ event: NetworkProgress, repository: GitRepository, operationID: UUID) {
+        guard progressOperationID == operationID, currentUserOperationID == operationID,
+              self.repository === repository, isBusy else { return }
+        liveProgress = event
+    }
     func finishUserOperation(_ name: String, repository: GitRepository, failure: Error? = nil, reportInCurrentWindow: Bool = false) {
+        liveProgress = nil; progressOperationID = nil; progressRepository = nil
         let cancelled = failure is CancellationError
         let message = cancelled ? nil : failure.map { GitCommandLog.redact($0.localizedDescription) }
         userOperationLog.insert(GitCommandLog.userOperation(directory: repository.url, name: name, started: operationStarted, error: message, cancelled: cancelled, operationID: currentUserOperationID), at: 0)
@@ -218,6 +246,8 @@ final class RepositoryStore: ObservableObject {
     @Published var commits: [GitCommit] = []
     @Published var commitFiles: [GitCommitFile] = []
     @Published var selectedPaths: Set<String> = []
+    @Published private(set) var automaticallySelectedPath: String?
+    @Published private(set) var initialWorkspaceSelectionReady = false
     @Published var historyNavigationGeneration = UUID()
     @Published var historyStashRef: String?
     @Published var historyStashHash: String?
@@ -296,9 +326,15 @@ final class RepositoryStore: ObservableObject {
     private var restored = false
     private var repoVersion = UUID()
     private var diffVersion = UUID()
+    private var diffTask: Task<Void, Never>?
     private var historyVersion = UUID()
     private var selectFirstHistoryCommit = false
     private var openingRepositoryPath: String?
+    @Published private(set) var pendingRepositoryPath: String?
+    var highlightedRepositoryPath: String? { pendingRepositoryPath ?? repositoryURL?.path }
+    private var openingVersion = UUID()
+    private var openingTask: Task<Void, Never>?
+    var canOpenRepository: Bool { !isBusy || openingRepositoryPath != nil }
     private var recentSyncTask: Task<Void, Never>?
     private var recentSyncDate = Date.distantPast
     private var refreshingRepository: URL?
@@ -308,6 +344,10 @@ final class RepositoryStore: ObservableObject {
     private var searchTask: Task<Void, Never>?
     private var historyLoadedCount = 0
     var selectedFile: GitFile? { files.first { $0.path == selectedPaths.sorted().first } }
+    func usesStagedDiff(for file: GitFile) -> Bool {
+        file.isStaged && (!file.isUnstaged || stagedDiff)
+    }
+    var effectiveStagedDiff: Bool { selectedFile.map { usesStagedDiff(for: $0) } ?? stagedDiff }
     var filteredFiles: [GitFile] { files.filter { fileFilter.isEmpty || RayGitPreferences.matches($0.path, query: fileFilter) } }
     var stagedCount: Int { files.filter { $0.isStaged && !$0.isConflict }.count }
 
@@ -341,40 +381,69 @@ final class RepositoryStore: ObservableObject {
         panel.prompt = L10n.text("Open Repository"); panel.message = L10n.text("Choose a Git repository folder")
         if panel.runModal() == .OK, let url = panel.url { Task { await open(url) } }
     }
+    @discardableResult
+    func requestOpen(_ url: URL) -> Task<Void, Never>? {
+        guard canOpenRepository else { return nil }
+        pendingRepositoryPath = url.path
+        openingTask?.cancel()
+        let version = UUID(); openingVersion = version
+        let task = Task {
+            await Task.yield()
+            await performOpen(url, version: version)
+        }
+        openingTask = task
+        return task
+    }
     func open(_ url: URL) async {
-        guard !isBusy else { return }
-        if let repositoryURL, Self.sameRepositoryLocation(url, repositoryURL) {
+        guard let task = requestOpen(url) else { return }
+        await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+    }
+    private func performOpen(_ url: URL, version: UUID) async {
+        guard openingVersion == version else { return }
+        defer {
+            if openingVersion == version {
+                if openingRepositoryPath != nil { isBusy = false }
+                openingRepositoryPath = nil; pendingRepositoryPath = nil; isRestoringViewState = false; openingTask = nil; flushSession()
+            }
+        }
+        guard !Task.isCancelled else { return }
+        if !isBusy, !isRestoringViewState, let repositoryURL, Self.sameRepositoryLocation(url, repositoryURL) {
             await refreshFileStatus()
             return
         }
         refreshReadVersion = UUID(); refreshingRepository = nil
+        repoVersion = UUID(); historyVersion = UUID(); detailVersion = UUID(); diffVersion = UUID()
+        diffTask?.cancel(); diffTask = nil
         openingRepositoryPath = url.path
+        if let path = repositoryURL?.path { session.repositories[path] = captureViewState() }
         flushSession()
         isRestoringViewState = true
-        defer { isRestoringViewState = false; flushSession() }
-        isBusy = true; errorMessage = nil; setStatus("Opening repository…")
+        isBusy = true; errorMessage = nil; latestOperationKey = nil; setStatus("Opening repository…")
+        fileObserver = nil; filesystemRefresh?.cancel(); searchTask?.cancel()
+        repository = nil; repositoryURL = nil
+        files = []; branches = []; branch = ""; commits = []; commitFiles = []; stashes = []
+        selectedPaths = []; automaticallySelectedPath = nil; initialWorkspaceSelectionReady = false; selectedCommit = nil; selectedCommitPath = nil
+        commitMessage = ""; amend = false
+        clearDiff(); setDiffTitle("Select a file to view changes")
+        loadingHistory = false
         do {
             var selectedURL = url
             if let data = UserDefaults.standard.data(forKey: "bookmark:" + url.path) { var stale = false; if let restored = try? URL(resolvingBookmarkData: data, options: .withSecurityScope, bookmarkDataIsStale: &stale) { selectedURL = restored } }
             let accessed = selectedURL.startAccessingSecurityScopedResource()
             let repo: GitRepository
             do { repo = try await GitRepository.open(selectedURL) } catch { if accessed { selectedURL.stopAccessingSecurityScopedResource() }; throw error }
+            guard !Task.isCancelled, openingVersion == version else { if accessed { selectedURL.stopAccessingSecurityScopedResource() }; return }
             accessedURL?.stopAccessingSecurityScopedResource(); accessedURL = accessed ? selectedURL : nil
             if persistsSession, let data = try? selectedURL.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) { UserDefaults.standard.set(data, forKey: "bookmark:" + repo.url.path) }
             if !openRepositories.contains(repo.url.path) { openRepositories.append(repo.url.path) }
             let root = repo.url
+            diffTask?.cancel(); diffTask = nil
             repoVersion = UUID(); diffVersion = UUID(); detailVersion = UUID(); historyVersion = UUID()
             repository = repo; repositoryURL = root
             fileObserver = nil; filesystemRefresh?.cancel()
-            let gitDirectory = try await repo.workflowRead(["rev-parse", "--absolute-git-dir"]).trimmingCharacters(in: .newlines)
+            async let gitDirectoryRead = repo.workflowRead(["rev-parse", "--absolute-git-dir"])
+            async let commonPathRead = repo.workflowRead(["rev-parse", "--git-common-dir"])
             lastObservedState = nil; lastHistoryState = nil; lastMainHistoryHead = nil; checkedHistoryRefs = nil; historyPinnedCommit = nil
-            let commonPath = try await repo.workflowRead(["rev-parse", "--git-common-dir"]).trimmingCharacters(in: .newlines)
-            let commonURL = commonPath.hasPrefix("/") ? URL(fileURLWithPath: commonPath) : root.appendingPathComponent(commonPath).standardizedFileURL
-            fileObserver = RepositoryFileObserver(paths: Array(Set([root.path, gitDirectory, commonURL.path]))) { [weak self] in
-                Task { @MainActor [weak self] in self?.scheduleFilesystemRefresh(root: root) }
-            }
-            files = []; branches = []; commits = []; commitFiles = []; stashes = []
-            selectedPaths = []; selectedCommit = nil; selectedCommitPath = nil; diffText = ""; conflictPreview = nil
             let restoredView = session.repositories[root.path] ?? session.repositories[url.path] ?? defaultViewState()
             applyViewState(restoredView)
             if followsCurrentBranch { selectFirstHistoryCommit = true; selectedCommit = nil; selectedCommitPath = nil; historyNavigationGeneration = UUID() }
@@ -382,13 +451,26 @@ final class RepositoryStore: ObservableObject {
                 recentPaths.append(root.path)
                 UserDefaults.standard.set(recentPaths, forKey: "recentRepositories")
             }
-            isBusy = false; await refresh()
+            openingRepositoryPath = nil; isBusy = false
+            async let refreshed: Void = refresh()
+            let gitDirectory = try await gitDirectoryRead.trimmingCharacters(in: .newlines)
+            guard !Task.isCancelled, openingVersion == version else { return }
+            let commonPath = try await commonPathRead.trimmingCharacters(in: .newlines)
+            guard !Task.isCancelled, openingVersion == version else { return }
+            let commonURL = commonPath.hasPrefix("/") ? URL(fileURLWithPath: commonPath) : root.appendingPathComponent(commonPath).standardizedFileURL
+            fileObserver = RepositoryFileObserver(paths: Array(Set([root.path, gitDirectory, commonURL.path]))) { [weak self] in
+                Task { @MainActor [weak self] in self?.scheduleFilesystemRefresh(root: root) }
+            }
+            await refreshed
+            guard !Task.isCancelled, openingVersion == version else { return }
             refreshRecentRepositoryStates()
             if let hash = restoredView.selectedCommit, !followsCurrentBranch, (try? await repo.workflowRevision(hash)) != nil {
+                guard !Task.isCancelled, openingVersion == version else { return }
                 selectedCommit = hash; await loadCommitFiles()
+                guard !Task.isCancelled, openingVersion == version else { return }
                 if let path = restoredView.selectedCommitPath, commitFiles.contains(where: { $0.path == path }) { selectedCommitPath = path; await loadDiff() }
             }
-        } catch { report(error); isBusy = false }
+        } catch { if openingVersion == version, !Task.isCancelled, !(error is CancellationError) { report(error) } }
     }
     private func scheduleFilesystemRefresh(root: URL) {
         guard RayGitPreferences.backgroundRefresh, repositoryURL == root else { return }
@@ -419,48 +501,47 @@ final class RepositoryStore: ObservableObject {
         checkingFilesystemState = true
         defer { checkingFilesystemState = false }
         do {
-            let state = try await GitCommandLog.$suppressRoutineReads.withValue(true) {
+            let (newFiles, state) = try await GitCommandLog.$suppressRoutineReads.withValue(true) {
                 let newFiles = try await repository.status()
                 guard version == repoVersion, readVersion == refreshReadVersion, !isBusy else { throw CancellationError() }
                 applyFileStatus(newFiles)
-                return try await repository.changeState(files: newFiles)
+                return try await (newFiles, repository.changeState(files: newFiles))
             }
             guard version == repoVersion, readVersion == refreshReadVersion, !isBusy, repositoryURL == repository.url, state != lastObservedState else { return }
-            await refresh()
+            await refresh(knownFiles: newFiles, knownState: state)
         } catch { /* A canceled background read never becomes an operation error. */ }
     }
-    func refresh() async {
+    func refresh(knownFiles: [GitFile]? = nil, knownState: RepositoryChangeState? = nil) async {
         guard let repository, !isBusy, refreshingRepository != repository.url else { return }
         refreshingRepository = repository.url; let version = repoVersion
         let refreshVersion = UUID(); refreshReadVersion = refreshVersion
         defer { if refreshReadVersion == refreshVersion { refreshingRepository = nil } }
         do {
-            async let newFiles = repository.status()
+            async let newFiles: [GitFile] = { if let knownFiles { return knownFiles }; return try await repository.status() }()
             async let newBranches = repository.branches()
             async let newBranch = repository.currentBranch()
             async let newStashes = repository.stashes()
+            async let syncRead = GitCommandLog.$suppressRoutineReads.withValue(true) {
+                try? await repository.workflowRead(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
+            }
             let fileStatus = try await newFiles
-            guard version == repoVersion, refreshReadVersion == refreshVersion else { return }
+            guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
             applyFileStatus(fileStatus)
+            async let stateRead: RepositoryChangeState = { if let knownState { return knownState }; return try await repository.changeState(files: fileStatus) }()
+            async let workspaceDiff: Void = mode == "workspace" ? loadDiff() : ()
+            guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
             if repositoryChangeCounts[repository.url.path] != fileStatus.count { repositoryChangeCounts[repository.url.path] = fileStatus.count }
             let result = try await (fileStatus, newBranches, newBranch, newStashes)
-            guard version == repoVersion, refreshReadVersion == refreshVersion else { return }
-            let syncText = try? await GitCommandLog.$suppressRoutineReads.withValue(true) {
-                try await repository.workflowRead(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
-            }
-            let syncCounts = syncText?.split(whereSeparator: { $0.isWhitespace }).compactMap { Int($0) } ?? []
-            guard version == repoVersion, refreshReadVersion == refreshVersion else { return }
-            let syncState = RepositorySyncState(ahead: syncCounts.count == 2 ? syncCounts[0] : nil, behind: syncCounts.count == 2 ? syncCounts[1] : nil, conflicts: result.0.filter(\.isConflict).count)
-            if repositorySyncStates[repository.url.path] != syncState { repositorySyncStates[repository.url.path] = syncState }
+            guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
             if branches != result.1 { branches = result.1 }
             if branch != result.2 { branch = result.2 }
             if stashes != result.3 { stashes = result.3 }
             setStatus("Refreshed · %@ changes · %@ staged", arguments: [String(files.count), String(stagedCount)])
-            let observedState = try await repository.changeState(files: files)
-            guard version == repoVersion, refreshReadVersion == refreshVersion else { return }
+            let observedState = try await stateRead
+            guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
             if followsCurrentBranch {
                 let head = result.2 + "|" + ((try? await repository.workflowRevision("HEAD")) ?? "")
-                guard version == repoVersion, refreshReadVersion == refreshVersion else { return }
+                guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
                 if lastMainHistoryHead != head {
                     lastMainHistoryHead = head; resetMainHistorySelection()
                 }
@@ -470,18 +551,34 @@ final class RepositoryStore: ObservableObject {
                 await loadHistory(reset: true)
                 if version == repoVersion, refreshReadVersion == refreshVersion { lastHistoryState = observedState.history }
             }
-            guard version == repoVersion, refreshReadVersion == refreshVersion else { return }
-            if observedState != lastObservedState { await loadDiff() }
+            guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
+            if mode != "workspace", observedState != lastObservedState { await loadDiff() }
             if version == repoVersion, refreshReadVersion == refreshVersion { lastObservedState = observedState }
-        } catch { if version == repoVersion, refreshReadVersion == refreshVersion { report(error) } }
+            let syncText = await syncRead
+            let syncCounts = syncText?.split(whereSeparator: { $0.isWhitespace }).compactMap { Int($0) } ?? []
+            guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
+            let syncState = RepositorySyncState(ahead: syncCounts.count == 2 ? syncCounts[0] : nil, behind: syncCounts.count == 2 ? syncCounts[1] : nil, conflicts: result.0.filter(\.isConflict).count)
+            if repositorySyncStates[repository.url.path] != syncState { repositorySyncStates[repository.url.path] = syncState }
+            await workspaceDiff
+        } catch { if !Task.isCancelled, !(error is CancellationError), version == repoVersion, refreshReadVersion == refreshVersion { report(error) } }
     }
     static func sameRepositoryLocation(_ lhs: URL, _ rhs: URL) -> Bool {
-        lhs.resolvingSymlinksInPath().standardizedFileURL == rhs.resolvingSymlinksInPath().standardizedFileURL
+        lhs.resolvingSymlinksInPath().standardizedFileURL.path == rhs.resolvingSymlinksInPath().standardizedFileURL.path
     }
     private func applyFileStatus(_ newFiles: [GitFile]) {
         if files != newFiles { files = newFiles; filesGeneration = UUID() }
         let surviving = selectedPaths.intersection(Set(newFiles.map(\.path)))
         if surviving != selectedPaths { selectedPaths = surviving }
+        if isRestoringViewState, selectedPaths.isEmpty {
+            let showHidden = UserDefaults.standard.object(forKey: "workspace.showHiddenFiles") as? Bool ?? true
+            if let first = filteredFiles.filter({ showHidden || !WorkspaceStatusFilter.isHiddenPath($0.path) })
+                .min(by: { $0.path.localizedStandardCompare($1.path) == .orderedAscending }) {
+                selectedPaths = [first.path]
+                automaticallySelectedPath = first.path
+                stagedDiff = first.isStaged && !first.isUnstaged
+            }
+        }
+        if isRestoringViewState { initialWorkspaceSelectionReady = true }
     }
     /// Re-selecting the current repository updates its files without reopening its history.
     func refreshFileStatus() async {
@@ -492,10 +589,10 @@ final class RepositoryStore: ObservableObject {
         defer { if refreshReadVersion == refreshVersion { refreshingRepository = nil } }
         do {
             let newFiles = try await repository.status()
-            guard version == repoVersion, refreshReadVersion == refreshVersion else { return }
+            guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
             applyFileStatus(newFiles)
             let state = try await repository.changeState(files: newFiles)
-            guard version == repoVersion, refreshReadVersion == refreshVersion else { return }
+            guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
             if repositoryChangeCounts[repository.url.path] != newFiles.count { repositoryChangeCounts[repository.url.path] = newFiles.count }
             let previous = repositorySyncStates[repository.url.path]
             let sync = RepositorySyncState(ahead: previous?.ahead, behind: previous?.behind, conflicts: newFiles.filter(\.isConflict).count)
@@ -503,7 +600,7 @@ final class RepositoryStore: ObservableObject {
             setStatus("Refreshed · %@ changes · %@ staged", arguments: [String(files.count), String(stagedCount)])
             if state != lastObservedState { await loadDiff() }
             if version == repoVersion, refreshReadVersion == refreshVersion, state.history == lastHistoryState { lastObservedState = state }
-        } catch { if version == repoVersion, refreshReadVersion == refreshVersion { report(error) } }
+        } catch { if !Task.isCancelled, !(error is CancellationError), version == repoVersion, refreshReadVersion == refreshVersion { report(error) } }
     }
     private func refreshRecentRepositoryStates() {
         guard persistsSession, recentSyncTask == nil, Date().timeIntervalSince(recentSyncDate) > 30 else { return }
@@ -571,12 +668,13 @@ final class RepositoryStore: ObservableObject {
             if reset, selectFirstHistoryCommit {
                 selectFirstHistoryCommit = false; selectedCommit = rows.first?.hash
                 await loadCommitFiles()
+                guard !Task.isCancelled, historyVersion == version else { return }
             }
             if let selectedCommit, !commits.contains(where: { $0.hash == selectedCommit }) {
                 if !followsCurrentBranch, checkedHistoryRefs == nil || historyStashHash != nil, let selected = try? await repository.log(limit: 1, ref: selectedCommit).first, historyVersion == version { commits.append(selected) }
                 else if !isRestoringViewState { self.selectedCommit = nil; commitFiles = []; selectedCommitPath = nil }
             }
-        } catch { if historyVersion == version { report(error) } }
+        } catch { if !Task.isCancelled, !(error is CancellationError), historyVersion == version { report(error) } }
         if historyVersion == version { loadingHistory = false }
     }
     func showStashHistory(ref: String) {
@@ -610,6 +708,7 @@ final class RepositoryStore: ObservableObject {
         searchTask = Task { try? await Task.sleep(nanoseconds: 250_000_000); guard !Task.isCancelled else { return }; await loadHistory(reset: true) }
     }
     func loadCommitFiles() async {
+        guard mode == "history" else { return }
         let version = UUID(); detailVersion = version; commitFiles = []; selectedCommitPath = nil
         guard let repository, let selectedCommit else { await loadDiff(); return }
         do {
@@ -631,104 +730,121 @@ final class RepositoryStore: ObservableObject {
         return hash == activeDetailStashHash && stashUntrackedPaths.contains(path) ? hash + "^3" : hash
     }
     func loadDiff() async {
+        guard !Task.isCancelled else { return }
+        diffTask?.cancel()
+        let task = Task { await performLoadDiff() }
+        diffTask = task
+        await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+    }
+    private var requestedDiffIdentity: String {
+        (repositoryURL?.path ?? "") + "|" + mode + "|" + (mode == "history" ? (selectedCommit ?? "") + "|" + (selectedCommitPath ?? "") : (selectedFile?.path ?? "") + "|\(effectiveStagedDiff)") + "|\(ignoreWhitespace)"
+    }
+    var canMutateDisplayedDiff: Bool { pendingRepositoryPath == nil && !loadingDiff && displayedDiffIdentity == requestedDiffIdentity }
+    private func clearDiff() {
+        displayedDiffIdentity = nil
+        diffText = ""; conflictPreview = nil; staticPreview = nil
+        diffRevisionFilename = nil; diffLeftRevision = nil; diffRightRevision = nil
+        loadingDiff = false
+    }
+    private func performLoadDiff() async {
+        guard !Task.isCancelled else { return }
         let version = UUID(); diffVersion = version
-        let requestedIgnoreWhitespace = ignoreWhitespace
-        let identity = (repositoryURL?.path ?? "") + "|" + mode + "|" + (mode == "history" ? (selectedCommit ?? "") + "|" + (selectedCommitPath ?? "") : (selectedFile?.path ?? "") + "|\(stagedDiff)")
-        if displayedDiffIdentity != identity {
-            displayedDiffIdentity = identity
-            if !diffText.isEmpty { diffText = "" }
-            conflictPreview = nil; staticPreview = nil
-            diffRevisionFilename = nil; diffLeftRevision = nil; diffRightRevision = nil
-        }
-        guard let repository else { loadingDiff = false; return }
-        if mode == "history", let hash = selectedCommit, hash == activeDetailStashHash, let path = selectedCommitPath {
-            loadingDiff = true
-            setDiffTitle("%@  /  %@", arguments: [String(hash.prefix(8)), path])
-            do {
-                let target = DiffTarget.commit(hash: comparisonRevision(for: path) ?? hash, path: path)
-                try await updateDiffRevisionTitles(target: target, repository: repository, version: version)
-                let preview = try await repository.comparisonPreview(target: target)
-                guard diffVersion == version else { return }
-                if preview.requiresStaticPreview { if conflictPreview != nil { conflictPreview = nil }; staticPreview = preview; loadingDiff = false; return }
-                let raw = try await StashHistory.diff(repository: repository, hash: hash, path: path, untracked: stashUntrackedPaths.contains(path))
-                guard diffVersion == version else { return }
-                let text = try await preview.displayPatch(fallingBackFrom: raw, ignoreWhitespace: requestedIgnoreWhitespace)
-                guard diffVersion == version else { return }; publishDiffText(text)
-            } catch { if diffVersion == version { report(error) } }
-            if diffVersion == version { loadingDiff = false }
-            return
-        }
-        let target: DiffTarget
+        let identity = requestedDiffIdentity, requestedIgnoreWhitespace = ignoreWhitespace
+        guard let repository else { clearDiff(); return }
+        let target: DiffTarget, title: String, arguments: [String]
+        let stashHash = mode == "history" && selectedCommit == activeDetailStashHash ? selectedCommit : nil
+        let stashPath = selectedCommitPath
+        let untrackedStash = selectedCommitPath.map { stashUntrackedPaths.contains($0) } ?? false
+        let conflictPath = mode == "workspace" && selectedFile?.isConflict == true ? selectedFile?.path : nil
         if mode == "history" {
-            guard let selectedCommit, let path = selectedCommitPath else { setDiffTitle("Select a commit and file to view changes"); loadingDiff = false; return }
-            target = .commit(hash: selectedCommit, path: path); setDiffTitle("%@  /  %@", arguments: [String(selectedCommit.prefix(8)), path])
+            guard let hash = selectedCommit, let path = selectedCommitPath else {
+                clearDiff(); setDiffTitle("Select a commit and file to view changes"); return
+            }
+            target = .commit(hash: stashHash == nil ? hash : comparisonRevision(for: path) ?? hash, path: path)
+            title = "%@  /  %@"; arguments = [String(hash.prefix(8)), path]
         } else {
-            guard let file = selectedFile else { setDiffTitle("Select a file to view changes"); loadingDiff = false; return }
-            target = stagedDiff ? .staged(path: file.path) : .worktree(path: file.path, untracked: file.isUntracked)
-            setDiffTitle(stagedDiff ? "%@  ·  HEAD → Index" : "%@  ·  Index → Working Tree", arguments: [file.path])
+            guard let file = selectedFile else { clearDiff(); setDiffTitle("Select a file to view changes"); return }
+            let staged = usesStagedDiff(for: file)
+            target = staged ? .staged(path: file.path) : .worktree(path: file.path, untracked: file.isUntracked)
+            title = conflictPath != nil ? "%@  ·  Conflict" : staged ? "%@  ·  HEAD → Index" : "%@  ·  Index → Working Tree"
+            arguments = [file.path]
         }
         loadingDiff = true
         do {
-            try await updateDiffRevisionTitles(target: target, repository: repository, version: version)
-            if mode == "workspace", let file = selectedFile, file.isConflict {
-                let snapshot = try await repository.fileComparison(path: file.path)
-                guard diffVersion == version else { return }
-                if snapshot.requiresStaticPreview { staticPreview = snapshot; if conflictPreview != nil { conflictPreview = nil } }
-                else { if staticPreview != nil { staticPreview = nil }; conflictPreview = snapshot }
-                setDiffTitle("%@  ·  Conflict", arguments: [file.path])
-                loadingDiff = false
-                return
+            let revisions = try await diffRevisionTitles(target: target, repository: repository)
+            let text: String, preview: FileComparisonSnapshot?, conflict: FileComparisonSnapshot?
+            if let conflictPath {
+                let snapshot = try await repository.fileComparison(path: conflictPath)
+                text = ""; preview = snapshot.requiresStaticPreview ? snapshot : nil
+                conflict = snapshot.requiresStaticPreview ? nil : snapshot
+            } else if let stashHash, let path = stashPath {
+                let snapshot = try await repository.comparisonPreview(target: target)
+                if snapshot.requiresStaticPreview { text = ""; preview = snapshot }
+                else {
+                    let raw = try await StashHistory.diff(repository: repository, hash: stashHash, path: path, untracked: untrackedStash)
+                    text = try await snapshot.displayPatch(fallingBackFrom: raw, ignoreWhitespace: requestedIgnoreWhitespace)
+                    preview = nil
+                }
+                conflict = nil
+            } else {
+                let result = try await repository.displayDiff(target: target, ignoreWhitespace: requestedIgnoreWhitespace)
+                text = result.text; preview = result.preview; conflict = nil
             }
-            let preview = try await repository.comparisonPreview(target: target)
-            guard diffVersion == version else { return }
-            if preview.requiresStaticPreview { if conflictPreview != nil { conflictPreview = nil }; staticPreview = preview; loadingDiff = false; return }
-            let raw = try await repository.diff(target: target, ignoreWhitespace: requestedIgnoreWhitespace)
-            guard diffVersion == version else { return }
-            let text = try await preview.displayPatch(fallingBackFrom: raw, ignoreWhitespace: requestedIgnoreWhitespace)
-            guard diffVersion == version else { return }; publishDiffText(text)
-        } catch { if diffVersion == version { report(error) } }
+            guard !Task.isCancelled, diffVersion == version, self.repository === repository, requestedDiffIdentity == identity,
+                  pendingRepositoryPath.map({ Self.sameRepositoryLocation(URL(fileURLWithPath: $0), repository.url) }) ?? true else { return }
+            displayedDiffIdentity = identity
+            if diffText != text { diffText = text }
+            staticPreview = preview; conflictPreview = conflict
+            diffRevisionFilename = revisions?.name; diffLeftRevision = revisions?.left; diffRightRevision = revisions?.right
+            setDiffTitle(title, arguments: arguments)
+        } catch { if !Task.isCancelled, diffVersion == version { report(error) } }
         if diffVersion == version { loadingDiff = false }
     }
-    private func publishDiffText(_ text: String) {
-        if staticPreview != nil { staticPreview = nil }
-        if conflictPreview != nil { conflictPreview = nil }
-        if diffText != text { diffText = text }
-    }
-    private func updateDiffRevisionTitles(target: DiffTarget, repository: GitRepository, version: UUID) async throws {
+    private func diffRevisionTitles(target: DiffTarget, repository: GitRepository) async throws -> (name: String, left: String, right: String)? {
         let path: String, left: String, right: String
         switch target {
         case let .staged(value):
             path = value; left = "HEAD"; right = "$index"
         case let .worktree(value, untracked):
-            path = value; left = untracked ? "$empty" : "$index"
-            right = "$worktree"
+            path = value; left = untracked ? "$empty" : "$index"; right = "$worktree"
         case let .commit(hash, value):
             path = value
             let commit: GitCommit?
             if let existing = commits.first(where: { $0.hash == hash }) { commit = existing }
             else { commit = try await repository.log(limit: 1, ref: hash).first }
-            guard let commit else { return }
-            left = commit.parents.first.map { String($0.prefix(8)) } ?? "$empty"
-            right = commit.shortHash
+            guard let commit else { return nil }
+            left = commit.parents.first.map { String($0.prefix(8)) } ?? "$empty"; right = commit.shortHash
         }
-        guard diffVersion == version else { return }
-        let name = (path as NSString).lastPathComponent
-        if diffRevisionFilename != name { diffRevisionFilename = name }
-        if diffLeftRevision != left { diffLeftRevision = left }
-        if diffRightRevision != right { diffRightRevision = right }
+        return ((path as NSString).lastPathComponent, left, right)
+    }
+    /// Local refs are advisory. This never contacts a remote or authorizes force push.
+    func checkNetworkPreflight(_ operation: NetworkOperation, completion: @escaping (LocalNetworkPreflight?) -> Void) {
+        guard let repository, !isBusy, pendingRepositoryPath == nil else { return }
+        isBusy = true
+        Task {
+            let hint = try? await GitCommandLog.$suppressRoutineReads.withValue(true) {
+                try await repository.localNetworkPreflight(operation)
+            }
+            guard self.repository === repository else { return }
+            isBusy = false
+            completion(hint)
+        }
     }
     func operation(_ name: String, onFailure: ((Error) -> Void)? = nil, body: @escaping (GitRepository) async throws -> Void) {
-        guard let repository, !isBusy else { return }
+        guard let repository, !isBusy, pendingRepositoryPath == nil else { return }
+        diffTask?.cancel(); diffTask = nil
         refreshReadVersion = UUID(); refreshingRepository = nil; diffVersion = UUID(); historyVersion = UUID()
         isBusy = true; beginUserOperation(name)
         let operationID = currentUserOperationID
+        let progress = progressHandler(for: repository, operationID: operationID)
         Task {
             var failure: Error?
-            do { try await GitCommandLog.$operationID.withValue(operationID) { try await GitCommandLog.$userInitiated.withValue(true) { try await body(repository) } }; if !persistsSession { NotificationCenter.default.post(name: .rayGitWorktreeChanged, object: repository.url) }; activityRecords.insert((Date(), name, nil), at: 0); setStatus("%@ completed", arguments: [name]) }
+            do { try await GitCommandLog.$progress.withValue(progress) { try await GitCommandLog.$operationID.withValue(operationID) { try await GitCommandLog.$userInitiated.withValue(true) { try await body(repository) } } }; if !persistsSession { NotificationCenter.default.post(name: .rayGitWorktreeChanged, object: repository.url) }; activityRecords.insert((Date(), name, nil), at: 0); setStatus("%@ completed", arguments: [name]) }
             catch { failure = error }
             finishUserOperation(name, repository: repository, failure: failure)
-            isBusy = false; await refresh()
+            isBusy = false
             if let failure { onFailure?(failure) }
+            await refresh()
         }
     }
     /// Runs against the captured sidebar target, even when another repository is active.
@@ -738,11 +854,12 @@ final class RepositoryStore: ObservableObject {
         let label = name + " · " + target.url.lastPathComponent
         isBusy = true; beginUserOperation(label)
         let operationID = currentUserOperationID
+        let progress = progressHandler(for: target, operationID: operationID)
         var failure: Error?
         do {
-            try await GitCommandLog.$operationID.withValue(operationID) {
+            try await GitCommandLog.$progress.withValue(progress) { try await GitCommandLog.$operationID.withValue(operationID) {
                 try await GitCommandLog.$userInitiated.withValue(true) { try await body(target) }
-            }
+            } }
             activityRecords.insert((Date(), label, nil), at: 0)
             NotificationCenter.default.post(name: .rayGitWorktreeChanged, object: target.url)
         } catch { failure = error }

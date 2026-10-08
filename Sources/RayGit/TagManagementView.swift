@@ -113,27 +113,36 @@ struct TagManagementView: View {
             Divider()
             HStack {
                 if store.isBusy { ProgressView().controlSize(.small) }
-                Spacer()
                 Button(workflowText("Close")) { dismiss() }.keyboardShortcut(.cancelAction)
-            }.padding(.horizontal, 24).padding(.vertical, 14)
+            }.frame(maxWidth: .infinity).padding(.horizontal, 24).padding(.vertical, 14)
         }.tint(.blue).background(Color(nsColor: .windowBackgroundColor)).disabled(store.isBusy).interactiveDismissDisabled(store.isBusy).frame(width: 1020, height: 700)
         .task { await reload() }
-        .sheet(isPresented: $showCreate) { createSheet }
-        .alert(item: $pending) { request in
-            Alert(title: Text(workflowText("Confirm repository change")), message: Text(request.name + "\n" + request.remote + "\n" + output), primaryButton: .destructive(Text(workflowText("Continue"))) { publish(request) }, secondaryButton: .cancel(Text(workflowText("Cancel"))))
+        .rayGitSheet(isPresented: $showCreate) { createSheet }
+        .rayGitAlert(item: $pending) { request in
+            RayGitAlert(title: workflowText("Confirm repository change"), message: request.name + "\n" + request.remote + "\n" + output, buttons: [
+                RayGitAlertButton(workflowText("Cancel"), role: .cancel),
+                RayGitAlertButton(workflowText("Continue"), role: .destructive) { publish(request) }
+            ])
         }
     }
     private var createSheet: some View {
         VStack(alignment: .leading, spacing: 22) {
             DesignPageHeading(title: workflowText("Create tag"), subtitle: designText("Point a new tag at a repository revision"), icon: "tag")
-            DesignSettingRow(workflowText("Tag name")) { StableTextField(workflowText("Tag name"), text: $name).textFieldStyle(.roundedBorder).frame(width: 280) }
-            DesignSettingRow(workflowText("Target revision")) { StableTextField(workflowText("Target revision"), text: $revision).textFieldStyle(.roundedBorder).frame(width: 280) }
-            DesignSettingRow(designText("Tag type")) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(workflowText("Tag name")).font(.callout)
+                StableTextField(workflowText("Tag name"), text: $name).textFieldStyle(.roundedBorder).frame(maxWidth: .infinity)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text(workflowText("Target revision")).font(.callout)
+                StableTextField(workflowText("Target revision"), text: $revision).textFieldStyle(.roundedBorder).frame(maxWidth: .infinity)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text(designText("Tag type")).font(.callout)
                 Picker(designText("Tag type"), selection: $tagKind) {
                     Text(designText("Lightweight")).tag("lightweight")
                     Text(designText("Annotated")).tag("annotated")
                     Text(workflowText("Signed tag")).tag("signed")
-                }.labelsHidden().pickerStyle(.radioGroup).frame(width: 280, alignment: .leading)
+                }.labelsHidden().pickerStyle(.radioGroup).frame(maxWidth: .infinity, alignment: .leading)
             }
             if tagKind != "lightweight" {
                 Text(workflowText("Annotation")).font(.system(size: 13, weight: .medium))
@@ -144,12 +153,11 @@ struct TagManagementView: View {
             Divider()
             HStack {
                 if store.isBusy { ProgressView().controlSize(.small) }
-                Spacer()
                 Button(workflowText("Cancel")) { showCreate = false }.keyboardShortcut(.cancelAction)
                 Button(workflowText("Create tag")) { create() }.buttonStyle(.borderedProminent)
                     .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || revision.isEmpty || (tagKind != "lightweight" && annotation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
-            }
-        }.padding(26).frame(width: 520).disabled(store.isBusy).interactiveDismissDisabled(store.isBusy)
+            }.frame(maxWidth: .infinity)
+        }.padding(22).frame(width: 360).disabled(store.isBusy).interactiveDismissDisabled(store.isBusy)
     }
     private func field(_ label: String, text: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 8) {

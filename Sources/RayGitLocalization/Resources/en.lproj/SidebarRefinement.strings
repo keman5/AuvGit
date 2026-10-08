@@ -8,3 +8,11 @@
 
 "Expanded" = "Expanded";
 "Collapsed" = "Collapsed";
+
+"Merge into Current Branch" = "Merge into Current Branch";
+"Stop Tracking Remote Branch" = "Stop Tracking Remote Branch";
+"Set Tracking Branch…" = "Set Tracking Branch…";
+"Remote Branch" = "Remote Branch";
+"Changes Saved in Stash" = "Changes Saved in Stash";
+"Auto Stash Retained" = "Local changes were automatically saved in stash %@. The stash is retained; apply it when you are ready.";
+"Merge Branch Message" = "Merge %@ into the current branch %@?";

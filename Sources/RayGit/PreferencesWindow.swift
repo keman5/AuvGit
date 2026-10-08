@@ -123,9 +123,9 @@ struct PreferencesWindow: View {
         }.background(RayGitStyle.canvas).buttonBorderShape(.roundedRectangle(radius: 6)).frame(minWidth: 760, idealWidth: 1040, minHeight: 620, idealHeight: 780)
             .onChange(of: query) { _, _ in if !filtered.contains(selected), let first = filtered.first { selected = first } }
             .onChange(of: theme) { _, _ in RayGitPreferences.applyAppearance() }
-            .alert(prefsText("Clear local records?"), isPresented: Binding(get: { clearAction != nil }, set: { if !$0 { clearAction = nil } })) {
-                Button(prefsText("Cancel"), role: .cancel) { clearAction = nil }
-                Button(prefsText("Clear"), role: .destructive) { if clearAction == "recent" { store.clearRecentRepositories() } else { store.clearSessionDrafts() }; clearAction = nil }
+            .rayGitAlert(prefsText("Clear local records?"), isPresented: Binding(get: { clearAction != nil }, set: { if !$0 { clearAction = nil } })) {
+                RayGitAlertButton(prefsText("Cancel"), role: .cancel) { clearAction = nil }
+                RayGitAlertButton(prefsText("Clear"), role: .destructive) { if clearAction == "recent" { store.clearRecentRepositories() } else { store.clearSessionDrafts() }; clearAction = nil }
             } message: { Text(prefsText(clearAction == "recent" ? "Only the recent repository list is cleared. Repository files remain on disk." : "Saved view state and commit drafts are cleared, including the current draft. Repository files and commits remain on disk.")) }
     }
     @ViewBuilder private var page: some View {

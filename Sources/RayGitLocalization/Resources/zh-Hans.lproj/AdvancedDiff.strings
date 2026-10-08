@@ -7,7 +7,7 @@
 "previousPage" = "上一页";
 "nextPage" = "下一页";
 "page" = "第 %d 页 · 从第 %d 行开始";
-"external" = "外部比较…";
+"external" = "外部比较";
 "chooseExternal" = "选择比较工具可执行文件或应用";
 "leftRevision" = "左侧版本";
 "rightRevision" = "右侧版本";

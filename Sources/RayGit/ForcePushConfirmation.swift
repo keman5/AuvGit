@@ -6,6 +6,49 @@ func forcePushText(_ key: String, _ arguments: CVarArg...) -> String {
     L10n.text(key, table: "ForcePush", arguments: arguments)
 }
 
+func networkPreflightMessage(_ hint: LocalNetworkPreflight) -> String {
+    switch hint {
+    case let .pushBehind(remote, branch, count):
+        return L10n.text("knownPushBehind", table: "Network", arguments: [remote, branch, count])
+    case let .pullDiverged(remoteOnly, localOnly):
+        return L10n.text("knownPullDiverged", table: "Network", arguments: [localOnly, remoteOnly])
+    }
+}
+
+struct NetworkPreflightPrompt: Identifiable {
+    let id = UUID()
+    let operation: NetworkOperation
+    let repository: GitRepository
+    let hint: LocalNetworkPreflight
+}
+struct PullOperationPrompt: Identifiable {
+    let id = UUID()
+    let repository: GitRepository
+    let hint: LocalNetworkPreflight?
+}
+
+struct PullOperationConfirmation: View {
+    let hint: LocalNetworkPreflight?
+    let cancel: () -> Void
+    let execute: (NetworkOperation) -> Void
+    @FocusState private var pullFocused: Bool
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(L10n.text("pullTitle", table: "Main")).font(.headline)
+            Text(hint.map(networkPreflightMessage) ?? L10n.text("pullMessage", table: "Main"))
+            HStack {
+                Spacer()
+                Button(L10n.text("cancel", table: "Network"), action: cancel).keyboardShortcut(.cancelAction)
+                Button(L10n.text("pull", table: "Network")) { execute(.pull) }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent).focused($pullFocused)
+                Button(L10n.text("fetch", table: "Network")) { execute(.fetch) }
+                Spacer()
+            }
+        }.padding(24).frame(width: 360)
+            .defaultFocus($pullFocused, true)
+            .onAppear { DispatchQueue.main.async { pullFocused = true } }
+    }
+}
+
 struct ForcePushPrompt: Identifiable {
     let id = UUID()
     let repository: GitRepository
@@ -28,7 +71,8 @@ struct ForcePushConfirmation: View {
                 Button(forcePushText("cancel"), action: cancel)
                     .keyboardShortcut(.defaultAction)
                 Button(forcePushText("action"), role: .destructive, action: execute)
+                Spacer()
             }
-        }.padding(24).frame(width: 490).onExitCommand(perform: cancel)
+        }.padding(24).frame(width: 360).onExitCommand(perform: cancel)
     }
 }

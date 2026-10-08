@@ -66,10 +66,9 @@ struct ComparisonSearchPopover: View {
             HStack {
                 Toggle(comparisonSearchText("Case sensitive"), isOn: $options.caseSensitive)
                 Toggle(comparisonSearchText("Regular expression"), isOn: $options.regularExpression)
-                Spacer()
                 if isSearching { ProgressView().controlSize(.mini); if let onCancelSearch { Button(comparisonSearchText("Cancel search"), action: onCancelSearch) } }
                 Text("\(min(max(0, matchIndex), matchCount))/\(matchCount)").monospacedDigit()
-            }.font(.caption)
+            }.frame(maxWidth: .infinity).font(.caption)
             if let error { Text(error).font(.caption).foregroundStyle(.orange).textSelection(.enabled) }
             Divider()
             ComparisonSearchField(text: $replacement, placeholder: comparisonSearchText("Replace with"),

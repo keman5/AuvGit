@@ -9,6 +9,14 @@ private final class ProgressRecorder: @unchecked Sendable {
     var text: String { lock.lock(); defer { lock.unlock() }; return values.joined() }
 }
 final class GitProcessTests: XCTestCase {
+    func testSerialCheapCommandsReportLatency() async throws {
+        let started = Date()
+        for _ in 0..<20 {
+            let output = try await GitProcess.run(at: FileManager.default.temporaryDirectory, arguments: ["--version"])
+            XCTAssertTrue(output.text.hasPrefix("git version "))
+        }
+        print("GitProcess: 20 serial version commands took \(Date().timeIntervalSince(started)) seconds")
+    }
     func testGitHubAuthenticationFallbackIsCommandLocalAndHostScoped() {
         XCTAssertEqual(NetworkAuthentication.arguments(ghPath: nil), [])
         XCTAssertEqual(NetworkAuthentication.arguments(ghPath: "/opt/homebrew/bin/gh"), [
@@ -49,6 +57,26 @@ final class GitProcessTests: XCTestCase {
         XCTAssertTrue(recorder.text.contains("42%"))
         XCTAssertEqual(GitProgressParser.parse(recorder.text)?.fraction, 0.42)
         XCTAssertFalse(GitProgressParser.redact("https://secret:token@host.invalid/path?q=secret").contains("token"))
+    }
+    func testTaskLocalProgressArrivesBeforeProcessExits() async throws {
+        let directory = try await fixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        _ = try await GitProcess.run(at: directory, arguments: ["config", "alias.liveprogress", "!printf 'Receiving objects: 42%% (42/100)\\r' >&2; while [ ! -f release ]; do sleep 0.05; done"])
+        let recorder = ProgressRecorder()
+        let task = Task {
+            try await GitCommandLog.$progress.withValue({ recorder.append($0.message + "\n") }) {
+                try await GitProcess.run(at: directory, arguments: ["liveprogress"])
+            }
+        }
+        for _ in 0..<100 {
+            if recorder.text.contains("42%") { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        let beforeExit = recorder.text
+        try Data().write(to: directory.appendingPathComponent("release"))
+        _ = try await task.value
+        XCTAssertTrue(beforeExit.contains("git liveprogress"))
+        XCTAssertTrue(beforeExit.contains("42%"), "Progress must stream while the child is still waiting")
     }
     func testAlreadyCancelledTaskDoesNotStartGit() async throws {
         let directory = try await fixture()

@@ -10,6 +10,12 @@ enum RayGitStyle {
     static let chrome = Color(nsColor: NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .controlBackgroundColor : NSColor(calibratedRed: 0.98, green: 0.985, blue: 0.995, alpha: 1)
     })
+    static let windowCornerRadius: CGFloat = 8
+    static let toolbar = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(calibratedWhite: 0.16, alpha: 1)
+            : NSColor(calibratedRed: 0.94, green: 0.95, blue: 0.965, alpha: 1)
+    })
     static let border = Color(nsColor: .separatorColor).opacity(0.65)
     static let horizontalInset: CGFloat = 12
     static let rowHeight: CGFloat = 30

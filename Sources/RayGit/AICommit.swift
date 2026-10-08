@@ -6,6 +6,44 @@ import RayGitLocalization
 
 func aiCommitText(_ key: String) -> String { L10n.text(key, table: "AICommit") }
 
+enum AICommitScopeChoice {
+    static let key = "aiCommit.rememberedScope"
+    static func remembered(defaults: UserDefaults = .standard) -> AICommitScope? {
+        defaults.string(forKey: key).flatMap(AICommitScope.init(rawValue:))
+    }
+    static func save(_ scope: AICommitScope, remember: Bool, defaults: UserDefaults = .standard) {
+        if remember { defaults.set(scope.rawValue, forKey: key) }
+        else { defaults.removeObject(forKey: key) }
+    }
+}
+
+struct AICommitScopeSheet: View {
+    let generate: (AICommitScope) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var scope = AICommitScopeChoice.remembered() ?? .staged
+    @State private var remember = true
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(aiCommitText("Generate commit message")).font(.headline)
+            Text(aiCommitText("Choose which changes AI should describe."))
+            Picker(aiCommitText("Generation scope"), selection: $scope) {
+                Text(aiCommitText("Staged files only")).tag(AICommitScope.staged)
+                Text(aiCommitText("All workspace changes")).tag(AICommitScope.workspace)
+            }.pickerStyle(.radioGroup).labelsHidden()
+            Text(aiCommitText("Workspace scope includes staged, unstaged, and untracked changes. Unchanged and ignored files are excluded. No files are staged or committed."))
+                .font(.caption).foregroundStyle(.secondary)
+            Toggle(aiCommitText("Remember my choice"), isOn: $remember)
+            HStack {
+                Button(aiCommitText("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(aiCommitText("Generate")) {
+                    AICommitScopeChoice.save(scope, remember: remember)
+                    generate(scope)
+                }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
+            }.frame(maxWidth: .infinity)
+        }.padding(24).frame(width: 380)
+    }
+}
+
 struct AICommitConfiguration {
     var provider = UserDefaults.standard.string(forKey: "aiCommit.provider") ?? "codex"
     var endpoint = UserDefaults.standard.string(forKey: "aiCommit.endpoint") ?? "https://api.openai.com/v1/chat/completions"
@@ -72,6 +110,7 @@ final class AICommitController: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var error: String?
     @Published private(set) var canGenerateSummary = false
+    private(set) var scope: AICommitScope = .staged
     private var task: Task<Void, Never>?
     private var requestID = UUID()
     func cancel() { requestID = UUID(); task?.cancel(); task = nil; isLoading = false }
@@ -80,42 +119,36 @@ final class AICommitController: ObservableObject {
         let head = (try? await repository.workflowRead(["rev-parse", "--verify", "HEAD"])) ?? "unborn"
         return head + "\0" + index
     }
-    func generate(store: RepositoryStore, summaryOnly: Bool = false) {
+    func generate(store: RepositoryStore, scope: AICommitScope = .staged, summaryOnly: Bool = false) {
         guard !isLoading, let repository = store.repository, !store.isBusy else { return }
         let configuration = AICommitConfiguration(), original = store.commitMessage, token = UUID(), root = repository.url
+        self.scope = scope
         requestID = token; isLoading = true; error = nil; canGenerateSummary = false
         task = Task { [weak self, weak store] in
             do {
                 let identity = try await Self.stagedIdentity(repository)
                 let draftGuard = AICommitDraftGuard(repository: root, stagedIdentity: identity, originalDraft: original)
-                let prompt: String
-                if summaryOnly {
-                    let status = try await repository.aiCommitRead(["diff", "--cached", "--no-ext-diff", "--no-textconv", "--name-status", "--no-renames"], maximumBytes: AICommitInputPolicy.summaryLimit)
-                    let stat = try await repository.aiCommitRead(["diff", "--cached", "--no-ext-diff", "--no-textconv", "--shortstat", "--no-renames"], maximumBytes: AICommitInputPolicy.summaryLimit)
-                    guard !status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw AICommitFailure("No staged changes") }
-                    prompt = AICommitInputPolicy.summaryPrompt(status: status, stat: stat)
-                } else {
-                    let patch: String
-                    do {
-                        patch = try await repository.aiCommitRead(["diff", "--cached", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3"], maximumBytes: configuration.maximumPatchKB * 1000)
-                    } catch AICommitInputError.exceedsLimit {
-                        if let self, self.requestID == token { self.canGenerateSummary = true }
-                        throw AICommitFailure("Staged diff exceeds the configured limit")
-                    }
-                    guard !patch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw AICommitFailure("No staged changes") }
-                    prompt = AICommitInputPolicy.patchPrompt(patch)
+                let workspaceState = scope == .workspace ? try await repository.changeState(files: repository.status()) : nil
+                let input: String
+                do {
+                    input = try await repository.aiCommitInput(scope: scope, summaryOnly: summaryOnly, maximumBytes: summaryOnly ? AICommitInputPolicy.summaryLimit : configuration.maximumPatchKB * 1000)
+                } catch AICommitInputError.exceedsLimit {
+                    if !summaryOnly, let self, self.requestID == token { self.canGenerateSummary = true }
+                    throw AICommitFailure(summaryOnly ? "Change summary exceeds the configured limit" : "Changes exceed the configured limit")
                 }
+                guard !input.isEmpty else { throw AICommitFailure(scope == .staged ? "No staged changes" : "No workspace changes") }
+                let prompt = summaryOnly ? AICommitInputPolicy.summaryPrompt(status: input, stat: "", scope: scope) : AICommitInputPolicy.patchPrompt(input, scope: scope)
                 guard identity == (try await Self.stagedIdentity(repository)) else { throw AICommitFailure("Repository or staged changes changed") }
+                if let workspaceState, workspaceState != (try await repository.changeState(files: repository.status())) { throw AICommitFailure("Workspace changes changed during generation") }
                 try Task.checkCancellation()
                 let generated = try await AICommitService.generate(prompt: prompt, configuration: configuration)
                 try Task.checkCancellation()
                 let currentIdentity = try await Self.stagedIdentity(repository)
+                if let workspaceState, workspaceState != (try await repository.changeState(files: repository.status())) { throw AICommitFailure("Workspace changes changed during generation") }
                 guard let self, let store, self.requestID == token else { return }
                 if let rejection = draftGuard.rejection(repository: store.repositoryURL, stagedIdentity: currentIdentity, draft: store.commitMessage, isBusy: store.isBusy) { throw AICommitFailure(rejection) }
                 store.commitMessage = generated
-            } catch is CancellationError {} catch AICommitInputError.exceedsLimit {
-                if let self, self.requestID == token { self.error = aiCommitText("Staged summary is too large; select fewer staged files") }
-            } catch {
+            } catch is CancellationError {} catch {
                 if let self, self.requestID == token { self.error = (error as? AICommitFailure)?.localizedDescription ?? aiCommitText("Generation failed; check AI settings") }
             }
             if let self, self.requestID == token { self.isLoading = false; self.task = nil }
@@ -147,10 +180,10 @@ private enum AICommitService {
 }
 
 /// Runs in a disposable empty directory, never in the repository. Patch goes through stdin.
-private enum AICommitCLI {
+enum AICommitCLI {
     /// Carry only the selected provider's transport settings. The original user
     /// config, MCP servers, hooks, plugins and project instructions never load.
-    private static func isolatedProviderConfig(from home: URL) -> String? {
+    static func isolatedProviderConfig(from home: URL) -> String? {
         guard let source = try? String(contentsOf: home.appendingPathComponent("config.toml"), encoding: .utf8) else { return nil }
         let lines = source.components(separatedBy: .newlines)
         let pattern = try! NSRegularExpression(pattern: #"^\s*model_provider\s*=\s*["']([A-Za-z0-9_-]+)["']\s*(?:#.*)?$"#)
@@ -161,7 +194,7 @@ private enum AICommitCLI {
             if let match = pattern.firstMatch(in: line, range: NSRange(location: 0, length: string.length)) { provider = string.substring(with: match.range(at: 1)) }
         }
         guard let provider else { return nil }
-        let allowed: Set<String> = ["name", "base_url", "wire_api", "env_key", "requires_openai_auth", "supports_websockets", "request_max_retries", "stream_max_retries", "stream_idle_timeout_ms"]
+        let allowed: Set<String> = ["name", "base_url", "wire_api", "env_key", "experimental_bearer_token", "requires_openai_auth", "supports_websockets", "request_max_retries", "stream_max_retries", "stream_idle_timeout_ms"]
         var selected = false, values: [String] = []
         for raw in lines {
             let line = raw.trimmingCharacters(in: .whitespaces)
@@ -218,7 +251,7 @@ struct AICommitSettingsSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(aiCommitText("Settings")).font(.headline)
-            Text(aiCommitText("Only staged changes are sent to your selected service. Generated text fills the draft and never commits.")).font(.caption).foregroundStyle(.secondary)
+            Text(aiCommitText("Only changes in the selected scope are sent to your service. Generated text fills the draft and never stages or commits.")).font(.caption).foregroundStyle(.secondary)
             Picker(aiCommitText("Service"), selection: $configuration.provider) {
                 Text(aiCommitText("Choose a service")).tag("")
                 Text(aiCommitText("Local Codex CLI")).tag("codex")
@@ -234,17 +267,17 @@ struct AICommitSettingsSheet: View {
             }
             StableTextField(aiCommitText("Model"), text: $configuration.model)
             HStack {
-                Text(aiCommitText("Staged patch limit (KB)"))
+                Text(aiCommitText("Patch limit (KB)"))
                 TextField("120", value: $configuration.maximumPatchKB, format: .number.grouping(.never)).frame(width: 80)
                 Stepper("", value: $configuration.maximumPatchKB, in: 30...4000, step: 10).labelsHidden()
                 Text("30–4000").font(.caption).foregroundStyle(.secondary)
             }
-            Text(aiCommitText("Increase the staged patch limit in AI settings, or generate from staged file names and change counts. Summary mode cannot describe code details.")).font(.caption).foregroundStyle(.secondary)
+            Text(aiCommitText("Increase the patch limit in AI settings, or generate from file names and change counts. Summary mode cannot describe code details.")).font(.caption).foregroundStyle(.secondary)
 
-            HStack { if !error.isEmpty { FloatingNotice(message: error) }; Spacer(); Button(aiCommitText("Cancel")) { dismiss() }; Button(aiCommitText("Save")) {
+            HStack { if !error.isEmpty { FloatingNotice(message: error) }; Button(aiCommitText("Cancel")) { dismiss() }; Button(aiCommitText("Save")) {
                 do { if !key.isEmpty { try AICommitSecret.save(key) }; configuration.save(); dismiss() }
                 catch { self.error = OperationFailure.message(error) }
-            }.buttonStyle(.borderedProminent).disabled(configuration.provider.isEmpty || configuration.model.trimmingCharacters(in: .whitespaces).isEmpty || !(30...4000).contains(configuration.maximumPatchKB)) }
+            }.buttonStyle(.borderedProminent).disabled(configuration.provider.isEmpty || configuration.model.trimmingCharacters(in: .whitespaces).isEmpty || !(30...4000).contains(configuration.maximumPatchKB)) }.frame(maxWidth: .infinity)
         }.textFieldStyle(.roundedBorder).padding(22).frame(width: 520)
     }
 }

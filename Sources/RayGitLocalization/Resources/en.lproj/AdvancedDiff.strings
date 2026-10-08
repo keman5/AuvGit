@@ -7,7 +7,7 @@
 "previousPage" = "Previous page";
 "nextPage" = "Next page";
 "page" = "Page %d · starts at line %d";
-"external" = "External Compare…";
+"external" = "External Compare";
 "chooseExternal" = "Choose a comparison executable or app";
 "leftRevision" = "Left revision";
 "rightRevision" = "Right revision";

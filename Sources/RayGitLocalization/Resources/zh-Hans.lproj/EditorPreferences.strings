@@ -44,3 +44,9 @@
 "Unavailable version" = "外部工具模板引用了不可用的版本：";
 
 "Automatic" = "自动";
+
+"Use defaults" = "使用默认值";
+
+"Merge arguments JSON" = "合并参数 JSON";
+
+"Beyond Compare help" = "Beyond Compare 关闭对比后才会返回。比较默认只读；合并参数依次为左侧、右侧、基准和输出文件。两组参数均可修改。";

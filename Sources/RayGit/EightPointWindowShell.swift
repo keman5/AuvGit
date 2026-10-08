@@ -74,12 +74,22 @@ final class EightPointFrameView: NSView {
         chrome = ShellTitlebar(frame: .zero)
         edges = ShellResizeEdges(frame: .zero)
         super.init(frame: content.frame)
-        wantsLayer = true; layer?.cornerRadius = 8; layer?.masksToBounds = true
+        wantsLayer = true; layer?.cornerRadius = RayGitStyle.windowCornerRadius; layer?.masksToBounds = true
         addSubview(hosted)
         addSubview(chrome)
         addSubview(edges)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // Native sheet dimming is a sibling of the content view. Clip the whole
+        // frame so the dimmer cannot fill the transparent eight-point corners.
+        if let frame = window?.contentView?.superview {
+            frame.wantsLayer = true
+            frame.layer?.cornerRadius = RayGitStyle.windowCornerRadius
+            frame.layer?.masksToBounds = true
+        }
+    }
     override var wantsUpdateLayer: Bool { true }
     override func updateLayer() { layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor }
     override func layout() {

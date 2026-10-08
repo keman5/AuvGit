@@ -5,6 +5,21 @@ import GitCore
 
 final class RepositoryTerminalView: LocalProcessTerminalView {
     var acceptsInput: () -> Bool = { false }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateNativeColors()
+    }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateNativeColors()
+    }
+    fileprivate func updateNativeColors() {
+        // SwiftTerm converts colors to RGB immediately, outside AppKit's drawing context.
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            nativeBackgroundColor = NSColor.textBackgroundColor.usingColorSpace(.sRGB)!
+            nativeForegroundColor = NSColor.textColor.usingColorSpace(.sRGB)!
+        }
+    }
     override func send(source: SwiftTerm.Terminal, data: ArraySlice<UInt8>) {
         // Emulator replies (e.g. cursor-position queries) must keep working in hidden sessions.
         // User input reaches the distinct TerminalView delegate overload below.
@@ -29,8 +44,7 @@ final class TerminalSession: ObservableObject, LocalProcessTerminalViewDelegate 
     init(directory: URL) {
         self.directory = directory
         view = RepositoryTerminalView(frame: CGRect(x: 0, y: 0, width: 900, height: 240), font: .monospacedSystemFont(ofSize: 12, weight: .regular), options: TerminalOptions(scrollback: 5000))
-        view.nativeBackgroundColor = .textBackgroundColor
-        view.nativeForegroundColor = .textColor
+        view.updateNativeColors()
         view.processDelegate = self
     }
 

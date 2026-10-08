@@ -10,7 +10,7 @@ public enum GitProgressParser {
     public static func parse(_ line: String) -> NetworkProgress? {
         let clean = line.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return nil }
-        let safe = redact(clean)
+        let safe = GitCommandLog.redact(clean)
         let regex = try! NSRegularExpression(pattern: #"(\d{1,3})%"#)
         if let match = regex.firstMatch(in: safe, range: NSRange(location: 0, length: safe.utf16.count)), let value = Double((safe as NSString).substring(with: match.range(at: 1))) {
             return NetworkProgress(message: safe, fraction: min(1, max(0, value / 100)))
@@ -21,7 +21,7 @@ public enum GitProgressParser {
         text.replacingOccurrences(of: #"(?:https?|ssh|git)://[^\s]+"#, with: "[remote]", options: .regularExpression)
     }
 }
-private final class ProgressLines: @unchecked Sendable {
+final class ProgressLines: @unchecked Sendable {
     private let lock = NSLock()
     private var pending = ""
     private let callback: @Sendable (NetworkProgress) -> Void

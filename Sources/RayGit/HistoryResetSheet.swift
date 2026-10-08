@@ -31,7 +31,6 @@ struct HistoryResetSheet: View {
             Text(text((request.advanced ? mode : .hard).rawValue + "Message")).font(.caption).foregroundStyle(.secondary)
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
             HStack {
-                Spacer()
                 Button(workflowText("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(text("confirm"), role: (request.advanced ? mode : .hard) == .hard ? .destructive : nil) {
                     guard let context, store.repositoryURL == request.repositoryURL, !store.isBusy else { return }
@@ -41,8 +40,8 @@ struct HistoryResetSheet: View {
                     }
                     dismiss()
                 }.disabled(context == nil || store.isBusy || store.repositoryURL != request.repositoryURL)
-            }
-        }.padding(22).frame(width: 500)
+            }.frame(maxWidth: .infinity)
+        }.padding(22).frame(width: 360)
         .task {
             guard let repository = store.repository, repository.url == request.repositoryURL else { return }
             do { context = try await repository.resetContext() } catch { self.error = GitFailureSummary.message(for: error.localizedDescription, localize: { L10n.text($0, table: "OperationLog") }) ?? GitCommandLog.redact(error.localizedDescription) }

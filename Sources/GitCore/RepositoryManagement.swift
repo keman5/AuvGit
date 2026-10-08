@@ -18,6 +18,22 @@ public extension GitRepository {
         return try await GitProcess.run(at: url, arguments: ["rev-parse", "--verify", "--end-of-options", value + "^{commit}"]).text.trimmingCharacters(in: .newlines)
     }
     func workflowRead(_ arguments: [String]) async throws -> String { try await GitProcess.run(at: url, arguments: arguments).text }
+    func setUpstream(branch: String, remoteBranch: String?) async throws {
+        guard !branch.isEmpty, !branch.hasPrefix("-"), !branch.contains("\0"), !branch.contains("\n") else { throw GitError("Invalid branch") }
+        var args = ["branch"]
+        if let remoteBranch {
+            guard remoteBranch.hasPrefix("refs/remotes/"), !remoteBranch.contains("\0"), !remoteBranch.contains("\n") else { throw GitError("Invalid remote branch") }
+            args.append("--set-upstream-to=" + remoteBranch)
+        } else { args.append("--unset-upstream") }
+        _ = try await GitProcess.run(at: url, arguments: args + ["--", branch])
+    }
+    func stopTracking(remoteBranch: String) async throws {
+        let output = try await workflowRead(["for-each-ref", "--format=%(refname:short)%09%(upstream)", "refs/heads/"])
+        for line in output.split(separator: "\n") {
+            let fields = line.split(separator: "\t", omittingEmptySubsequences: false)
+            if fields.count == 2, fields[1] == remoteBranch { try await setUpstream(branch: String(fields[0]), remoteBranch: nil) }
+        }
+    }
     func compareReferences(_ left: String, _ right: String) async throws -> String {
         let a = try await workflowRevision(left), b = try await workflowRevision(right)
         return try await workflowRead(["diff", "--no-ext-diff", "--no-textconv", "--no-color", a, b, "--"])
