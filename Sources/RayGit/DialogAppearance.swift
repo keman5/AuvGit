@@ -2,17 +2,21 @@ import AppKit
 import SwiftUI
 
 extension View {
+    func rayGitPopover<Content: View>(isPresented: Binding<Bool>, arrowEdge: Edge = .top,
+                                      @ViewBuilder content: @escaping () -> Content) -> some View {
+        popover(isPresented: isPresented, arrowEdge: arrowEdge) { content().nativeFocusRoot() }
+    }
     func rayGitSheet<Content: View>(isPresented: Binding<Bool>, onDismiss: (() -> Void)? = nil,
                                     @ViewBuilder content: @escaping () -> Content) -> some View {
         sheet(isPresented: isPresented, onDismiss: onDismiss) {
-            content().background(Color(nsColor: .windowBackgroundColor)).background(DialogFrameStyle())
+            content().nativeFocusRoot().background(Color(nsColor: .windowBackgroundColor)).background(DialogFrameStyle())
                 .presentationCornerRadius(RayGitStyle.windowCornerRadius)
         }
     }
     func rayGitSheet<Item: Identifiable, Content: View>(item: Binding<Item?>, onDismiss: (() -> Void)? = nil,
                                                        @ViewBuilder content: @escaping (Item) -> Content) -> some View {
         sheet(item: item, onDismiss: onDismiss) { value in
-            content(value).background(Color(nsColor: .windowBackgroundColor)).background(DialogFrameStyle())
+            content(value).nativeFocusRoot().background(Color(nsColor: .windowBackgroundColor)).background(DialogFrameStyle())
                 .presentationCornerRadius(RayGitStyle.windowCornerRadius)
         }
     }
@@ -83,9 +87,17 @@ private struct RayGitAlertView<Message: View>: View {
 @MainActor
 enum DialogAppearance {
     static func style(_ window: NSWindow) {
-        // SwiftUI sheets accept a borderless frame; native NSAlert panels do not.
-        // App confirmations use RayGitAlertView so modality stays with SwiftUI.
-        window.styleMask = window.styleMask.intersection([.resizable])
+        // A SwiftUI sheet is an NSWindow: removing .titled makes it unable
+        // to become key, so AppKit never dispatches its first Tab. Hide the
+        // chrome while preserving the window's native keyboard eligibility.
+        if !(window is DialogPanel) {
+            window.styleMask.insert([.titled, .fullSizeContentView])
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+                window.standardWindowButton(button)?.isHidden = true
+            }
+        }
         guard let frame = window.contentView?.superview else { return }
         window.isOpaque = false
         window.backgroundColor = .clear
@@ -101,7 +113,7 @@ enum DialogAppearance {
                        RayGitAlertButton(discard, role: .destructive) { NSApp.stopModal(withCode: .alertSecondButtonReturn) },
                        RayGitAlertButton(cancel, role: .cancel) { NSApp.stopModal(withCode: .alertThirdButtonReturn) }]
         let host = NSHostingView(rootView: RayGitAlertView(title: title, message: Text(message), buttons: buttons, close: {})
-            .background(Color(nsColor: .windowBackgroundColor)))
+            .background(Color(nsColor: .windowBackgroundColor)).nativeFocusRoot())
         window.contentView = host
         window.setContentSize(host.fittingSize)
         style(window)

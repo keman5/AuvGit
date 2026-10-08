@@ -76,6 +76,7 @@ private final class GitLogArchive: @unchecked Sendable {
     }
 }
 public enum GitCommandLog {
+    @TaskLocal static var privateCredentials: [String] = []
     @TaskLocal public static var suppressRoutineReads = false
     @TaskLocal public static var userInitiated = false
     @TaskLocal public static var operationID: UUID?
@@ -91,7 +92,12 @@ public enum GitCommandLog {
                          output: "", error: redact(message), duration: 0, exitCode: nil, operation: "Application operation")
     }
     public static func redact(_ value: String) -> String {
-        var text = value.replacingOccurrences(of: #"(?:https?|ssh|git)://[^\s]+"#, with: "[remote]", options: .regularExpression)
+        redact(value, credentials: privateCredentials)
+    }
+    static func redact(_ value: String, credentials: [String]) -> String {
+        var text = value
+        for credential in credentials where !credential.isEmpty { text = text.replacingOccurrences(of: credential, with: "[redacted]") }
+        text = text.replacingOccurrences(of: #"(?:https?|ssh|git)://[^\s]+"#, with: "[remote]", options: .regularExpression)
         for pattern in [#"(?i)(authorization:\s*(?:bearer|basic)\s+)\S+"#, #"(?i)((?:password|token|secret|access_token)=)[^\s&]+"#, #"(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)"#] {
             text = text.replacingOccurrences(of: pattern, with: "[redacted]", options: .regularExpression)
         }

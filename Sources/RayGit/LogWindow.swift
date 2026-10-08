@@ -50,7 +50,7 @@ private final class LogWindowController: NSWindowController, NSWindowDelegate {
         window.title = repository.url.lastPathComponent + " — " + logText("Log")
         window.minSize = NSSize(width: 1040, height: 640)
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: LogWindowContent(store: store))
+        window.contentView = NSHostingView(rootView: LogWindowContent(store: store).nativeFocusRoot())
         super.init(window: window)
         window.delegate = self; window.center()
         opening = Task { [weak self] in

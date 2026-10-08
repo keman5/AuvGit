@@ -4,14 +4,16 @@ import SwiftUI
 /// A native field keeps empty replacement fields clickable and provides explicit
 /// Return / Shift-Return / Escape handling without stealing the editor's focus.
 struct ComparisonSearchField: NSViewRepresentable {
+    @Environment(\.nativeFocusScope) private var scope
+    @Environment(\.isEnabled) private var enabled
     @Binding var text: String
     let placeholder: String
     var initialFocus = false
     let onNavigate: (Bool) -> Void
     let onEscape: () -> Void
-    final class Coordinator: NSObject, NSTextFieldDelegate {
+    @MainActor final class Coordinator: NSObject, NSTextFieldDelegate {
         var parent: ComparisonSearchField
-        var focused = false
+        let fallbackScope = NativeFocusCoordinator()
         init(_ parent: ComparisonSearchField) { self.parent = parent }
         func controlTextDidChange(_ notification: Notification) {
             if let field = notification.object as? NSTextField { parent.text = field.stringValue }
@@ -37,11 +39,14 @@ struct ComparisonSearchField: NSViewRepresentable {
     }
     func updateNSView(_ field: NSTextField, context: Context) {
         context.coordinator.parent = self
+        field.isEnabled = enabled
         if field.stringValue != text { field.stringValue = text }
         field.placeholderString = placeholder
-        if initialFocus && !context.coordinator.focused {
-            context.coordinator.focused = true
-            DispatchQueue.main.async { [weak field] in field?.window?.makeFirstResponder(field) }
+        let focusScope = scope ?? context.coordinator.fallbackScope
+        if scope == nil { focusScope.attach(to: field.window) }
+        focusScope.register(field, initial: initialFocus)
+        if scope == nil && field.window == nil {
+            DispatchQueue.main.async { [weak field, weak focusScope] in focusScope?.attach(to: field?.window) }
         }
     }
 }

@@ -36,6 +36,9 @@ public actor GitRepository {
         if symbolic.code == 0 { return symbolic.text.trimmingCharacters(in: .newlines) }
         return "Detached " + (try await run(["rev-parse", "--short", "HEAD"])).text.trimmingCharacters(in: .newlines)
     }
+    public func worktrees() async throws -> [GitWorktree] {
+        GitWorktree.parsePorcelain(try await run(["worktree", "list", "--porcelain", "-z"]).data)
+    }
     public func log(limit: Int = 200, skip: Int = 0, search: String = "", path: String? = nil, ref: String? = nil, author: String = "", firstParent: Bool = false, refs: [String]? = nil, stashHashes: [String] = [], includeRecyclable: Bool = false) async throws -> [GitCommit] {
         if let refs, refs.isEmpty, stashHashes.isEmpty, !includeRecyclable { return [] }
         var args = ["log", "--topo-order", "-z", "--format=%H%x00%P%x00%an%x00%at%x00%s%x00%B%x00%D%x00%ae%x00%cn%x00%ce%x00%ct"]

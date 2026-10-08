@@ -5,6 +5,7 @@ import SwiftUI
 /// prompt overlay can change its baseline when its field editor gains focus.
 struct HistorySearchField: NSViewRepresentable {
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.nativeFocusScope) private var scope
     @Binding var text: String
     let placeholder: String
     let accessibilityLabel: String
@@ -13,9 +14,8 @@ struct HistorySearchField: NSViewRepresentable {
     var initialFocus = false
     var focusRequest: UUID? = nil
 
-    final class Coordinator: NSObject, NSTextFieldDelegate {
-        var didFocus = false
-        var focusRequest: UUID?
+    @MainActor final class Coordinator: NSObject, NSTextFieldDelegate {
+        let fallbackScope = NativeFocusCoordinator()
         var parent: HistorySearchField
         init(_ parent: HistorySearchField) { self.parent = parent }
         func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
@@ -33,7 +33,7 @@ struct HistorySearchField: NSViewRepresentable {
         field.cell = StableSingleLineCell(textCell: "")
         field.isEditable = true; field.isSelectable = true
         field.isBezeled = false; field.isBordered = false; field.drawsBackground = false
-        field.focusRingType = .none
+        field.focusRingType = .default
         field.font = .systemFont(ofSize: 13)
         field.textColor = .labelColor
         field.cell?.usesSingleLineMode = true
@@ -50,10 +50,15 @@ struct HistorySearchField: NSViewRepresentable {
         if field.stringValue != text { field.stringValue = text }
         field.isBezeled = rounded
         field.bezelStyle = .roundedBezel
-        if (initialFocus && !context.coordinator.didFocus) || (focusRequest != nil && focusRequest != context.coordinator.focusRequest) {
-            context.coordinator.focusRequest = focusRequest
-            context.coordinator.didFocus = true
-            DispatchQueue.main.async { [weak field] in field?.window?.makeFirstResponder(field) }
+        let focusScope = scope ?? context.coordinator.fallbackScope
+        // Inherited scopes are bound by their presentation root. A field
+        // carried into another host must never rebind its parent's scope.
+        if scope == nil { focusScope.attach(to: field.window) }
+        focusScope.register(field, initial: initialFocus, request: focusRequest)
+        if scope == nil && field.window == nil {
+            DispatchQueue.main.async { [weak field, weak focusScope] in
+                focusScope?.attach(to: field?.window)
+            }
         }
         field.placeholderAttributedString = NSAttributedString(string: placeholder, attributes: [
             .font: field.font ?? NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.placeholderTextColor
@@ -69,12 +74,14 @@ struct StableTextField: View {
     var onSubmit: (() -> Void)?
     var rounded: Bool
     var initialFocus: Bool
-    init(_ placeholder: String, text: Binding<String>, onSubmit: (() -> Void)? = nil, rounded: Bool = true, initialFocus: Bool = false) {
+    var focusRequest: UUID?
+    init(_ placeholder: String, text: Binding<String>, onSubmit: (() -> Void)? = nil, rounded: Bool = true, initialFocus: Bool = false, focusRequest: UUID? = nil) {
         self.placeholder = placeholder; _text = text; self.onSubmit = onSubmit
         self.rounded = rounded; self.initialFocus = initialFocus
+        self.focusRequest = focusRequest
     }
     var body: some View {
-        HistorySearchField(text: $text, placeholder: placeholder, accessibilityLabel: placeholder, onSubmit: onSubmit, rounded: rounded, initialFocus: initialFocus)
+        HistorySearchField(text: $text, placeholder: placeholder, accessibilityLabel: placeholder, onSubmit: onSubmit, rounded: rounded, initialFocus: initialFocus, focusRequest: focusRequest)
             .frame(minHeight: rounded ? 24 : 20)
     }
 }

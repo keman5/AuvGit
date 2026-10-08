@@ -78,6 +78,27 @@ final class GitProcessTests: XCTestCase {
         XCTAssertTrue(beforeExit.contains("git liveprogress"))
         XCTAssertTrue(beforeExit.contains("42%"), "Progress must stream while the child is still waiting")
     }
+    func testPrivateCredentialIsRedactedFromEveryProgressCallback() async throws {
+        let directory = try await fixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let credential = "exact private credential with spaces"
+        _ = try await GitProcess.run(
+            at: directory,
+            arguments: ["config", "alias.echo-private", "!printf '%s\\n' '\(credential)' >&2"]
+        )
+        let rawProgress = ProgressRecorder(), operationProgress = ProgressRecorder()
+
+        _ = try await GitCommandLog.$privateCredentials.withValue([credential]) {
+            try await GitCommandLog.$progress.withValue({ operationProgress.append($0.message + "\n") }) {
+                try await GitProcess.run(at: directory, arguments: ["echo-private"], progress: { rawProgress.append($0) })
+            }
+        }
+
+        XCTAssertFalse(rawProgress.text.contains(credential))
+        XCTAssertFalse(operationProgress.text.contains(credential))
+        XCTAssertTrue(rawProgress.text.contains("[redacted]"))
+        XCTAssertTrue(operationProgress.text.contains("[redacted]"))
+    }
     func testAlreadyCancelledTaskDoesNotStartGit() async throws {
         let directory = try await fixture()
         defer { try? FileManager.default.removeItem(at: directory) }

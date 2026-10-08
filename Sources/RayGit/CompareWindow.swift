@@ -93,8 +93,8 @@ private final class CompareController: NSWindowController, NSWindowDelegate {
         } else { window.title = title + " — " + interactionText("File Compare") }
         window.minSize = NSSize(width: 1050, height: 600)
         window.isReleasedWhenClosed = false
-        if let session { window.contentView = NSHostingView(rootView: FileCompareContent(session: session, searchOptions: searchOptions, replacement: replacement, initialLine: initialLine, initialPaneID: initialPaneID)) }
-        else { window.contentView = NSHostingView(rootView: CompareWindowContent(title: title, repository: repository, target: target, stash: stash)) }
+        if let session { window.contentView = NSHostingView(rootView: FileCompareContent(session: session, searchOptions: searchOptions, replacement: replacement, initialLine: initialLine, initialPaneID: initialPaneID).nativeFocusRoot()) }
+        else { window.contentView = NSHostingView(rootView: CompareWindowContent(title: title, repository: repository, target: target, stash: stash).nativeFocusRoot()) }
         super.init(window: window); window.delegate = self; window.center()
         observer = session?.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.window?.isDocumentEdited = self?.session?.isDirty == true }
@@ -586,7 +586,7 @@ private struct FileCompareContent: View {
             Button { showConflictHelp.toggle() } label: { ComparisonToolbarIcon(name: "info.circle") }.buttonStyle(ComparisonToolbarButtonStyle())
                 .foregroundStyle(.secondary)
                 .help(compareText("Conflict: edit the result, save, then mark resolved")).accessibilityLabel(compareText("Conflict: edit the result, save, then mark resolved"))
-                .popover(isPresented: $showConflictHelp, arrowEdge: .bottom) {
+                .rayGitPopover(isPresented: $showConflictHelp, arrowEdge: .bottom) {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(compareText("Conflict: edit the result, save, then mark resolved")).fontWeight(.semibold)
                         Text(resolverText("Ours = Stage 2; Theirs = Stage 3. During rebase, Ours is the upstream side."))

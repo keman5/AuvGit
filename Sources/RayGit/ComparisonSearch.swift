@@ -83,6 +83,6 @@ struct ComparisonSearchPopover: View {
                 Spacer()
             }.disabled(error != nil || (canReplace && (options.query.isEmpty || matchCount == 0)))
             Text(comparisonSearchText(canReplace ? "Replacements change the draft only. Use Undo to revert." : "This preview is read-only.")).font(.caption).foregroundStyle(.secondary)
-        }.controlSize(.small).padding(14).frame(width: 400).onExitCommand(perform: close)
+        }.controlSize(.small).padding(14).frame(width: 400).onExitCommand(perform: close).nativeFocusRoot()
     }
 }

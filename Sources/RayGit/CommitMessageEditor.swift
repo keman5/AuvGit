@@ -69,6 +69,11 @@ private final class CommitMessageScrollView: NSScrollView {
 }
 
 final class CommitPlaceholderTextView: NSTextView {
+    override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); setAccessibilityHelp(NativeFocusNavigation.editorHelp) }
+    override func keyDown(with event: NSEvent) {
+        if NativeFocusNavigation.leaveEditor(event, from: self) { return }
+        super.keyDown(with: event)
+    }
     var placeholder = ""
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)

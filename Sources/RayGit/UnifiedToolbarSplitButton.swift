@@ -21,7 +21,7 @@ struct UnifiedToolbarSplitButton<LabelContent: View, MenuContent: View>: View {
                     Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
                         .frame(width: 14, height: 28).contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel(title)
-                    .popover(isPresented: $menuPresented, arrowEdge: .bottom) {
+                    .rayGitPopover(isPresented: $menuPresented, arrowEdge: .bottom) {
                         VStack(alignment: .leading, spacing: 4) { menu() }
                             .buttonStyle(.plain).lineLimit(1).truncationMode(.tail)
                             .frame(width: menuWidth - 20, alignment: .leading).padding(10)

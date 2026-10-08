@@ -12,17 +12,18 @@ struct WorkspaceFooterSplit<History: View, Commit: View>: NSViewRepresentable {
         return view
     }
     func updateNSView(_ view: HistoryCommitSplitView, context: Context) {
-        context.coordinator.history.rootView = AnyView(history.controlSize(.small))
-        context.coordinator.commit.rootView = AnyView(commit.controlSize(.small))
+        context.coordinator.history.rootView = Coordinator.focusRoot(history)
+        context.coordinator.commit.rootView = Coordinator.focusRoot(commit)
     }
     final class Coordinator {
         let history: NSHostingView<AnyView>
         let commit: NSHostingView<AnyView>
         init(_ model: WorkspaceFooterSplit) {
-            history = NSHostingView(rootView: AnyView(model.history.controlSize(.small)))
-            commit = NSHostingView(rootView: AnyView(model.commit.controlSize(.small)))
+            history = NSHostingView(rootView: Self.focusRoot(model.history))
+            commit = NSHostingView(rootView: Self.focusRoot(model.commit))
             history.sizingOptions = []; commit.sizingOptions = []
         }
+        static func focusRoot<V: View>(_ view: V) -> AnyView { AnyView(view.controlSize(.small).nativeFocusRoot()) }
     }
 }
 

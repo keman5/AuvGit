@@ -1,16 +1,136 @@
 import Foundation
 import Darwin
 
+public struct HTTPSCloneCredential: Sendable {
+    public let username: String
+    public let password: String
+    public let saveToKeychain: Bool
+
+    public init(username: String, password: String, saveToKeychain: Bool) {
+        self.username = username
+        self.password = password
+        self.saveToKeychain = saveToKeychain
+    }
+}
+
+final class HTTPSCredentialLease {
+    let directoryURL: URL
+    let credentialURL: URL
+    let helperURL: URL
+    let gitArguments: [String]
+
+    init(source: URL, credential: HTTPSCloneCredential, keychainHelper: URL? = nil) throws {
+        guard Self.valid(credential.username), Self.valid(credential.password) else {
+            throw GitError("HTTPS username and password or token must be non-empty single-line values.")
+        }
+        guard let components = URLComponents(url: source, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "https", let host = components.host, !host.isEmpty,
+              components.user == nil, components.password == nil, components.query == nil, components.fragment == nil,
+              components.port.map({ (1...65535).contains($0) }) ?? true else {
+            throw GitError("HTTPS credentials require a valid HTTPS clone URL.")
+        }
+        let port = components.port ?? 443
+        let expectedHost = host.lowercased() + (port == 443 ? "" : ":\(port)")
+        let manager = FileManager.default
+        let directory = manager.temporaryDirectory.appendingPathComponent("raygit-credential-" + UUID().uuidString, isDirectory: true)
+        let credentialFile = directory.appendingPathComponent("credential")
+        let helperFile = directory.appendingPathComponent("helper.sh")
+        let storageCommand = keychainHelper.map { Self.shellQuote($0.path) } ?? "/usr/bin/git credential-osxkeychain"
+        do {
+            try manager.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+            let response = "username=\(credential.username)\npassword=\(credential.password)\n\n"
+            guard manager.createFile(atPath: credentialFile.path, contents: Data(response.utf8), attributes: [.posixPermissions: 0o600]) else {
+                throw GitError("Cannot create the temporary HTTPS credential response.")
+            }
+            let script = """
+            #!/bin/sh
+            protocol=
+            host=
+            username=
+            password=
+            malformed=
+            seen='|'
+            while IFS= read -r line; do
+              [ -z "$line" ] && break
+              case "$line" in *=*) ;; *) malformed=1; continue ;; esac
+              key=${line%%=*}
+              value=${line#*=}
+              case "$seen" in *"|$key|"*) malformed=1 ;; esac
+              seen="$seen$key|"
+              case "$key" in
+                protocol) protocol=$value ;;
+                host) host=$value ;;
+                username) username=$value ;;
+                password) password=$value ;;
+              esac
+            done
+            host=$(printf '%s' "$host" | /usr/bin/tr '[:upper:]' '[:lower:]')
+            \(port == 443 ? "host=${host%:443}" : "")
+            [ -z "$malformed" ] || exit 0
+            [ "$protocol" = https ] && [ "$host" = \(Self.shellQuote(expectedHost)) ] || exit 0
+            case "$1" in
+              get) /bin/cat \(Self.shellQuote(credentialFile.path)) ;;
+              store)
+                \(credential.saveToKeychain ? "" : "exit 0")
+                supplied=$(printf 'username=%s\\npassword=%s' "$username" "$password")
+                expected=$(/bin/cat \(Self.shellQuote(credentialFile.path)))
+                [ "$supplied" = "$expected" ] || exit 0
+                # Git approves after authentication; checkout may still fail later.
+                { printf 'protocol=https\\nhost=%s\\n' "$host"; /bin/cat \(Self.shellQuote(credentialFile.path)); } | \(storageCommand) store >/dev/null 2>&1 || :
+                ;;
+              erase) : ;;
+            esac
+            exit 0
+
+            """
+            guard manager.createFile(atPath: helperFile.path, contents: Data(script.utf8), attributes: [.posixPermissions: 0o700]) else {
+                throw GitError("Cannot create the temporary HTTPS credential helper.")
+            }
+        } catch {
+            try? manager.removeItem(at: directory)
+            throw error
+        }
+        directoryURL = directory
+        credentialURL = credentialFile
+        helperURL = helperFile
+        var arguments = ["-c", "credential.helper="]
+        arguments += ["-c", "credential.helper=!" + Self.shellQuote(helperFile.path)]
+        gitArguments = arguments
+    }
+
+    func remove() { try? FileManager.default.removeItem(at: directoryURL) }
+    deinit { remove() }
+
+    private static func valid(_ value: String) -> Bool {
+        !value.isEmpty && !value.contains("\n") && !value.contains("\r") && !value.contains("\0")
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
+    }
+}
+
 public extension GitRepository {
     static func initialize(at directory: URL) async throws -> GitRepository {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         _ = try await GitProcess.run(at: directory, arguments: ["init"])
         return try await open(directory)
     }
-    static func clone(source: String, destination: URL) async throws -> GitRepository {
+    static func clone(source: String, destination: URL, credential: HTTPSCloneCredential? = nil) async throws -> GitRepository {
         guard !source.isEmpty, !source.hasPrefix("-"), !source.contains("\0") else { throw GitError("Invalid clone source") }
+        if credential != nil, URLComponents(string: source)?.scheme?.lowercased() != "https" {
+            throw GitError("HTTPS credentials can only be used with an HTTPS clone URL.")
+        }
         try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-        _ = try await GitProcess.run(at: destination.deletingLastPathComponent(), arguments: ["clone", "--", source, destination.path])
+        let lease = try credential.map { value in
+            guard let sourceURL = URL(string: source) else { throw GitError("HTTPS credentials require a valid HTTPS clone URL.") }
+            return try HTTPSCredentialLease(source: sourceURL, credential: value)
+        }
+        defer { lease?.remove() }
+        let authentication = lease?.gitArguments ?? NetworkAuthentication.arguments
+        _ = try await GitCommandLog.$privateCredentials.withValue(credential.map { [$0.password] } ?? []) {
+            try await GitProcess.run(at: destination.deletingLastPathComponent(), arguments: authentication + ["clone", "--", source, destination.path])
+        }
         return try await open(destination)
     }
     func workflowRevision(_ value: String) async throws -> String {

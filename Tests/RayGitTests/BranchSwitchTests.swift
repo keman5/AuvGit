@@ -67,6 +67,32 @@ final class BranchSwitchTests: XCTestCase {
         let recovered = try await repo.workflowRead(["show", stash + "^3:collision.txt"])
         XCTAssertEqual(recovered, "untracked work")
     }
+    func testSelectingBranchOwnedByLinkedWorktreeOpensThatProject() async throws {
+        let repo = try await fixture()
+        let linked = repo.url.deletingLastPathComponent().appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: repo.url); try? FileManager.default.removeItem(at: linked) }
+        _ = try await GitProcess.run(at: repo.url, arguments: ["worktree", "add", linked.path, "other"])
+        let store = RepositoryStore(persistsSession: false)
+        store.openRepositories = []
+        store.recentPaths = []
+        defer { store.closeTransientSession() }
+        await store.open(repo.url)
+
+        store.switchBranch(to: "other")
+        for _ in 0..<500 {
+            if store.repositoryURL.map({ RepositoryStore.sameRepositoryLocation($0, linked) }) == true, !store.isBusy { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        let mainBranch = try await GitRepository(url: repo.url).currentBranch()
+        let linkedBranch = try await GitRepository(url: linked).currentBranch()
+        let stashes = try await GitRepository(url: repo.url).stashes()
+        XCTAssertTrue(try XCTUnwrap(store.repositoryURL).path.hasSuffix(linked.lastPathComponent))
+        XCTAssertEqual(mainBranch, "main")
+        XCTAssertEqual(linkedBranch, "other")
+        XCTAssertTrue(stashes.isEmpty)
+        XCTAssertNil(store.error)
+    }
     func testSelectedBranchUpstreamAndRemoteStopTrackingAreExactlyScoped() async throws {
         let repo = try await fixture(); defer { try? FileManager.default.removeItem(at: repo.url) }
         _ = try await GitProcess.run(at: repo.url, arguments: ["remote", "add", "origin", repo.url.path])

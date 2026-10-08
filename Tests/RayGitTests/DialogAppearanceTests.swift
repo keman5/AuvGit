@@ -10,7 +10,15 @@ final class DialogAppearanceTests: XCTestCase {
         window.isReleasedWhenClosed = false
         defer { window.close() }
         DialogAppearance.style(window)
-        XCTAssertEqual(window.styleMask, [.resizable])
+        XCTAssertTrue(window.styleMask.contains(.titled))
+        XCTAssertTrue(window.styleMask.contains(.fullSizeContentView))
+        XCTAssertTrue(window.styleMask.contains(.resizable))
+        XCTAssertTrue(window.canBecomeKey)
+        XCTAssertEqual(window.titleVisibility, .hidden)
+        XCTAssertTrue(window.titlebarAppearsTransparent)
+        for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            XCTAssertNotEqual(window.standardWindowButton(button)?.isHidden, false)
+        }
         XCTAssertEqual(window.contentView?.superview?.layer?.cornerRadius, 8)
         XCTAssertEqual(window.contentView?.superview?.layer?.masksToBounds, true)
         XCTAssertFalse(window.isOpaque)

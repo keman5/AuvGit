@@ -1003,6 +1003,11 @@ private enum ConflictVisualStyle {
 }
 
 final class ComparisonTextView: UndoableComparisonTextView {
+    override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); setAccessibilityHelp(NativeFocusNavigation.editorHelp) }
+    override func keyDown(with event: NSEvent) {
+        if NativeFocusNavigation.leaveEditor(event, from: self) { return }
+        super.keyDown(with: event)
+    }
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         ComparisonCaret.draw(in: self, dirtyRect: dirtyRect)

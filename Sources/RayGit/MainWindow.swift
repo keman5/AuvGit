@@ -115,7 +115,7 @@ struct MainWindow: View {
     private var toolbarContent: some View {
         // Recreate localized descendants without recreating MainWindow's session owner.
         windowContent.id(languageCode)
-            .background(TitlebarToolbarSupport(shellContent: { model in NSHostingView(rootView: MainWindow(store: store, usesBorderlessToolbar: true, shellToolbarModel: model)) }, hidesNativeToolbar: usesBorderlessToolbar, shellWindowTitle: usesBorderlessToolbar ? (store.highlightedRepositoryPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "RayGit") : nil).frame(width: 0, height: 0))
+            .background(TitlebarToolbarSupport(shellContent: { model in NSHostingView(rootView: MainWindow(store: store, usesBorderlessToolbar: true, shellToolbarModel: model).nativeFocusRoot()) }, hidesNativeToolbar: usesBorderlessToolbar, shellWindowTitle: usesBorderlessToolbar ? (store.highlightedRepositoryPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "RayGit") : nil).frame(width: 0, height: 0))
             .modifier(ToolbarWindowTitleRemoval())
             // Version the customization identity: the old AppKit-injected identifiers
             // cannot be restored into SwiftUI's item storage. Keep other preferences intact.
@@ -936,17 +936,18 @@ private struct WorkspacePaneSplit<Files: View, Diff: View, Footer: View>: NSView
         let footerHost: NSHostingView<AnyView>
         var hosts: [NSView] { [fileHost, diffHost, footerHost] }
         init(_ model: WorkspacePaneSplit) {
-            fileHost = NSHostingView(rootView: AnyView(model.files.controlSize(.small)))
-            diffHost = NSHostingView(rootView: AnyView(model.diff.controlSize(.small)))
-            footerHost = NSHostingView(rootView: AnyView(model.footer.controlSize(.small)))
+            fileHost = NSHostingView(rootView: Self.focusRoot(model.files))
+            diffHost = NSHostingView(rootView: Self.focusRoot(model.diff))
+            footerHost = NSHostingView(rootView: Self.focusRoot(model.footer))
             // Pane sizes belong to the split; SwiftUI content may expand inside each one.
             fileHost.sizingOptions = []; diffHost.sizingOptions = []; footerHost.sizingOptions = []
         }
         func update(_ model: WorkspacePaneSplit) {
-            fileHost.rootView = AnyView(model.files.controlSize(.small))
-            diffHost.rootView = AnyView(model.diff.controlSize(.small))
-            footerHost.rootView = AnyView(model.footer.controlSize(.small))
+            fileHost.rootView = Self.focusRoot(model.files)
+            diffHost.rootView = Self.focusRoot(model.diff)
+            footerHost.rootView = Self.focusRoot(model.footer)
         }
+        private static func focusRoot<V: View>(_ view: V) -> AnyView { AnyView(view.controlSize(.small).nativeFocusRoot()) }
     }
 }
 

@@ -16,7 +16,7 @@ struct FloatingNotice: View {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                 .frame(width: 24, height: 24).contentShape(Rectangle())
         }.buttonStyle(.plain).help(message).accessibilityLabel(message)
-            .popover(isPresented: $expanded, arrowEdge: .bottom) {
+            .rayGitPopover(isPresented: $expanded, arrowEdge: .bottom) {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(message).fontWeight(.semibold).textSelection(.enabled)
                     if !guidance.isEmpty { Text(guidance).textSelection(.enabled) }

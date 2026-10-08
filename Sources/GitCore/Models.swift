@@ -19,6 +19,42 @@ public struct GitBranch: Identifiable, Hashable, Sendable {
     public let isRemote: Bool
     public init(name: String, isCurrent: Bool, isRemote: Bool) { self.name = name; self.isCurrent = isCurrent; self.isRemote = isRemote }
 }
+public struct GitWorktree: Equatable, Sendable {
+    public let path: String
+    public let head: String
+    public let branch: String?
+    public let isBare: Bool
+    public let isLocked: Bool
+    public let isPrunable: Bool
+    public init(path: String, head: String, branch: String?, isBare: Bool = false, isLocked: Bool = false, isPrunable: Bool = false) {
+        self.path = path; self.head = head; self.branch = branch
+        self.isBare = isBare; self.isLocked = isLocked; self.isPrunable = isPrunable
+    }
+    static func parsePorcelain(_ data: Data) -> [GitWorktree] {
+        var result: [GitWorktree] = []
+        var path: String?, head = "", branch: String?
+        var isBare = false, isLocked = false, isPrunable = false
+        func finish() {
+            guard let path else { return }
+            result.append(GitWorktree(path: path, head: head, branch: branch, isBare: isBare, isLocked: isLocked, isPrunable: isPrunable))
+        }
+        for bytes in data.split(separator: 0, omittingEmptySubsequences: false) {
+            guard !bytes.isEmpty else {
+                finish(); path = nil; head = ""; branch = nil; isBare = false; isLocked = false; isPrunable = false
+                continue
+            }
+            let field = String(decoding: bytes, as: UTF8.self)
+            if field.hasPrefix("worktree ") { path = String(field.dropFirst(9)) }
+            else if field.hasPrefix("HEAD ") { head = String(field.dropFirst(5)) }
+            else if field.hasPrefix("branch refs/heads/") { branch = String(field.dropFirst(18)) }
+            else if field == "bare" { isBare = true }
+            else if field == "locked" || field.hasPrefix("locked ") { isLocked = true }
+            else if field == "prunable" || field.hasPrefix("prunable ") { isPrunable = true }
+        }
+        finish()
+        return result
+    }
+}
 public struct GitCommit: Identifiable, Hashable, Sendable {
     public var id: String { hash }
     public let hash: String

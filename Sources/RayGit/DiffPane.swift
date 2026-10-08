@@ -580,6 +580,11 @@ private extension NSAttributedString.Key {
 
 /// The attributed preview contains visual gutters, but copying returns selected code.
 final class ReadOnlyDiffTextView: NSTextView {
+    override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); setAccessibilityHelp(NativeFocusNavigation.editorHelp) }
+    override func keyDown(with event: NSEvent) {
+        if NativeFocusNavigation.leaveEditor(event, from: self) { return }
+        super.keyDown(with: event)
+    }
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         ComparisonCaret.draw(in: self, dirtyRect: dirtyRect)

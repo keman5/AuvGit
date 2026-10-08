@@ -25,6 +25,7 @@ struct RayGitApp: App {
     var body: some Scene {
         WindowGroup {
             MainWindow(store: store)
+                .nativeFocusRoot()
                 .environment(\.locale, L10n.locale)
                 .frame(minWidth: 1000)
                 .task { appDelegate.store = store; RayGitPreferences.applyAppearance(); await store.restore() }
@@ -56,6 +57,7 @@ struct RayGitApp: App {
         }
         Settings {
             PreferencesWindow(store: store)
+                .nativeFocusRoot()
                 .environment(\.locale, L10n.locale)
         }
         .defaultSize(width: 860, height: 660)
@@ -372,6 +374,14 @@ final class RepositoryStore: ObservableObject {
         var value = RepositoryViewState(); value.mode = persistsSession ? "workspace" : "history"; return value
     }
     func clearRecentRepositories() { recentPaths = []; UserDefaults.standard.removeObject(forKey: "recentRepositories") }
+    private func registerRepositoryPaths(_ paths: [String]) {
+        for path in paths {
+            let url = URL(fileURLWithPath: path)
+            if !openRepositories.contains(where: { Self.sameRepositoryLocation(URL(fileURLWithPath: $0), url) }) { openRepositories.append(path) }
+            if !recentPaths.contains(where: { Self.sameRepositoryLocation(URL(fileURLWithPath: $0), url) }) { recentPaths.append(path) }
+        }
+        if persistsSession { UserDefaults.standard.set(recentPaths, forKey: "recentRepositories") }
+    }
     func clearSessionDrafts() {
         session.repositories = [:]; commitMessage = ""; amend = false
         for suffix in ["", ".backup", ".corrupt"] { UserDefaults.standard.removeObject(forKey: sessionKey + suffix) }
@@ -436,7 +446,15 @@ final class RepositoryStore: ObservableObject {
             guard !Task.isCancelled, openingVersion == version else { if accessed { selectedURL.stopAccessingSecurityScopedResource() }; return }
             accessedURL?.stopAccessingSecurityScopedResource(); accessedURL = accessed ? selectedURL : nil
             if persistsSession, let data = try? selectedURL.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) { UserDefaults.standard.set(data, forKey: "bookmark:" + repo.url.path) }
-            if !openRepositories.contains(repo.url.path) { openRepositories.append(repo.url.path) }
+            registerRepositoryPaths([repo.url.path])
+            if let worktrees = try? await repo.worktrees() {
+                var linkedPaths: [String] = []
+                for worktree in worktrees where !worktree.isBare && !worktree.isPrunable {
+                    guard let linked = try? await GitRepository.open(URL(fileURLWithPath: worktree.path)) else { continue }
+                    linkedPaths.append(linked.url.path)
+                }
+                registerRepositoryPaths(linkedPaths)
+            }
             let root = repo.url
             diffTask?.cancel(); diffTask = nil
             repoVersion = UUID(); diffVersion = UUID(); detailVersion = UUID(); historyVersion = UUID()
@@ -448,10 +466,6 @@ final class RepositoryStore: ObservableObject {
             let restoredView = session.repositories[root.path] ?? session.repositories[url.path] ?? defaultViewState()
             applyViewState(restoredView)
             if followsCurrentBranch { selectFirstHistoryCommit = true; selectedCommit = nil; selectedCommitPath = nil; historyNavigationGeneration = UUID() }
-            if persistsSession, !recentPaths.contains(root.path) {
-                recentPaths.append(root.path)
-                UserDefaults.standard.set(recentPaths, forKey: "recentRepositories")
-            }
             openingRepositoryPath = nil; isBusy = false
             async let refreshed: Void = refresh()
             let gitDirectory = try await gitDirectoryRead.trimmingCharacters(in: .newlines)

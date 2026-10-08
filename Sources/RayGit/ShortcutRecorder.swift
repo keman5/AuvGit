@@ -32,12 +32,13 @@ struct ShortcutRecorder: NSViewRepresentable {
         var value = ShortcutBinding(key: "", modifiers: 0)
         var onChange: ((ShortcutBinding) -> Void)?
         private var keyMonitor: Any?
+        private var recording = false
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             if let keyMonitor { NSEvent.removeMonitor(keyMonitor); self.keyMonitor = nil }
             guard window != nil else { return }
             keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                guard let self, self.window?.firstResponder === self, event.window === self.window else { return event }
+                guard let self, self.recording, self.window?.firstResponder === self, event.window === self.window else { return event }
                 self.keyDown(with: event)
                 return nil
             }
@@ -47,14 +48,25 @@ struct ShortcutRecorder: NSViewRepresentable {
         override init(frame: NSRect) { super.init(frame: frame); setAccessibilityElement(true); setAccessibilityRole(.textField) }
         required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
         override func becomeFirstResponder() -> Bool { needsDisplay = true; return true }
-        override func resignFirstResponder() -> Bool { needsDisplay = true; return true }
-        override func accessibilityPerformPress() -> Bool { window?.makeFirstResponder(self) ?? false }
-        override func mouseDown(with event: NSEvent) { window?.makeFirstResponder(self) }
+        override func resignFirstResponder() -> Bool { recording = false; needsDisplay = true; return true }
+        override func accessibilityPerformPress() -> Bool {
+            guard window?.makeFirstResponder(self) == true else { return false }
+            recording = true; needsDisplay = true; return true
+        }
+        override func mouseDown(with event: NSEvent) { _ = accessibilityPerformPress() }
         override func performKeyEquivalent(with event: NSEvent) -> Bool {
-            guard window?.firstResponder === self else { return false }
+            guard recording, window?.firstResponder === self else { return false }
             keyDown(with: event); return true
         }
         override func keyDown(with event: NSEvent) {
+            if !recording {
+                let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+                if event.keyCode == 48, flags.isEmpty || flags == .shift {
+                    if flags.contains(.shift) { window?.selectPreviousKeyView(nil) } else { window?.selectNextKeyView(nil) }
+                } else if flags.isEmpty, event.keyCode == 49 || event.keyCode == 36 { _ = accessibilityPerformPress() }
+                else { super.keyDown(with: event) }
+                return
+            }
             if event.keyCode == 53 { window?.makeFirstResponder(nil); return }
             if let captured = recordedShortcut(event, preserving: value) { onChange?(captured); window?.makeFirstResponder(nil) }
         }
@@ -63,7 +75,7 @@ struct ShortcutRecorder: NSViewRepresentable {
             let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 5, yRadius: 5)
             NSColor.textBackgroundColor.setFill(); shape.fill()
             (focused ? NSColor.keyboardFocusIndicatorColor : NSColor.separatorColor).setStroke(); shape.lineWidth = focused ? 2 : 1; shape.stroke()
-            let text = focused ? shortcutText("Press a key") : (value.key.isEmpty ? shortcutText("Unassigned") : ShortcutBinding(key: value.key, modifiers: 0).displayString)
+            let text = recording ? shortcutText("Press a key") : (value.key.isEmpty ? shortcutText("Unassigned") : ShortcutBinding(key: value.key, modifiers: 0).displayString)
             let paragraph = NSMutableParagraphStyle()
             paragraph.alignment = .center; paragraph.lineBreakMode = .byTruncatingTail
             let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize), .foregroundColor: NSColor.labelColor, .paragraphStyle: paragraph]

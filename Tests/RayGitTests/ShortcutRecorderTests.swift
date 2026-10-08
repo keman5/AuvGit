@@ -23,6 +23,7 @@ final class ShortcutRecorderTests: XCTestCase {
         var captured: ShortcutBinding?
         view.onChange = { captured = $0 }
         XCTAssertTrue(window.makeFirstResponder(view))
+        XCTAssertTrue(view.accessibilityPerformPress())
         XCTAssertTrue(view.performKeyEquivalent(with: event("c", flags: [.command])))
         XCTAssertEqual(captured, .init(key: "c", modifiers: 1))
         view.keyDown(with: event("\u{1b}", keyCode: 53))
@@ -52,11 +53,30 @@ final class ShortcutRecorderTests: XCTestCase {
         view.onChange = { captured = $0 }
         window.makeKeyAndOrderFront(nil)
         XCTAssertTrue(window.makeFirstResponder(view))
+        XCTAssertTrue(view.accessibilityPerformPress())
         let key = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command], timestamp: 0, windowNumber: window.windowNumber, context: nil, characters: "o", charactersIgnoringModifiers: "o", isARepeat: false, keyCode: 31)!
         application.sendEvent(key)
         XCTAssertEqual(captured, .init(key: "o", modifiers: 1))
         XCTAssertFalse(target.invoked)
         XCTAssertFalse(window.firstResponder === view)
+    }
+
+    func testOrdinaryFocusDoesNotRecordTabOrConsumeCommandShortcuts() {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let view = ShortcutRecorder.RecorderView(frame: NSRect(x: 10, y: 60, width: 150, height: 24))
+        let field = NSTextField(frame: NSRect(x: 10, y: 10, width: 150, height: 24))
+        window.contentView!.addSubview(view); window.contentView!.addSubview(field)
+        window.recalculateKeyViewLoop()
+        var captured: ShortcutBinding?
+        view.onChange = { captured = $0 }
+        window.makeFirstResponder(view)
+        XCTAssertFalse(view.performKeyEquivalent(with: event("c", flags: [.command])))
+        view.keyDown(with: event("\t", keyCode: 48))
+        XCTAssertNil(captured)
+        XCTAssertTrue(window.firstResponder === field.currentEditor() || window.firstResponder === field)
     }
 
 }

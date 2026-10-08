@@ -171,9 +171,16 @@ struct CreateRepositorySheet: View {
     @State private var cloneDestination = CloneDestination()
     @State private var busy = false
     @State private var error = ""
+    @State private var authenticationRequested = false
+    @State private var username = ""
+    @State private var password = ""
+    @State private var saveCredential = true
+    @State private var authenticationFocusRequest: UUID?
+    private let initiallyFocusSource: Bool
     init(store: RepositoryStore, initialClone: Bool? = nil) {
         self.store = store
         let draft = RepositoryCreationDraft.load()
+        initiallyFocusSource = (initialClone ?? draft.clone) && draft.source.isEmpty
         _clone = State(initialValue: initialClone ?? draft.clone)
         _source = State(initialValue: draft.source)
         _destination = State(initialValue: draft.destination)
@@ -183,17 +190,29 @@ struct CreateRepositorySheet: View {
         VStack(alignment: .leading, spacing: 16) {
             Text(workflowText("Create Repository")).font(.title2.weight(.semibold))
             VStack(alignment: .leading, spacing: 12) {
-                Toggle(workflowText("Clone existing repository"), isOn: $clone)
+                KeyViewProxy(label: workflowText("Clone existing repository"), checked: clone) { clone.toggle() }
                     .onChange(of: clone) { _, value in
                         if value { cloneDestination.sourceChanged(source); destination = cloneDestination.path }
+                        else { authenticationRequested = false; username = ""; password = "" }
                     }
                 if clone {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(workflowText("Clone URL or local path")).font(.callout)
-                        StableTextField(workflowText("Clone URL or local path"), text: $source).textFieldStyle(.roundedBorder)
+                        StableTextField(workflowText("Clone URL or local path"), text: $source, initialFocus: initiallyFocusSource).textFieldStyle(.roundedBorder)
                             .onChange(of: source) { _, value in
+                                authenticationRequested = false; username = ""; password = ""; error = ""
                                 cloneDestination.sourceChanged(value); destination = cloneDestination.path
                             }
+                    }
+                    if authenticationRequested {
+                        Divider()
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(workflowText("HTTPS authentication")).font(.headline)
+                            StableTextField(workflowText("Username"), text: $username, focusRequest: authenticationFocusRequest).textFieldStyle(.roundedBorder)
+                            SecureField(workflowText("Password or personal access token"), text: $password).textFieldStyle(.roundedBorder)
+                            KeyViewProxy(label: workflowText("Save authenticated credentials in macOS Keychain"), checked: saveCredential) { saveCredential.toggle() }
+                            Text(workflowText("Git saves credentials after authentication succeeds, even if cloning fails later.")).font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
                 VStack(alignment: .leading, spacing: 8) {
@@ -202,8 +221,8 @@ struct CreateRepositorySheet: View {
                         StableTextField(workflowText("Destination folder"), text: Binding(get: { destination }, set: {
                             destination = $0
                             if clone { cloneDestination.edit($0) }
-                        })).textFieldStyle(.roundedBorder)
-                        Button(workflowText(clone ? "Choose parent folder…" : "Choose…")) {
+                        }), initialFocus: !initiallyFocusSource).textFieldStyle(.roundedBorder)
+                        KeyViewProxy(label: workflowText(clone ? "Choose parent folder…" : "Choose…")) {
                             let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
                             if clone { panel.directoryURL = cloneDestination.parent }
                             if panel.runModal() == .OK, let folder = panel.url {
@@ -218,16 +237,17 @@ struct CreateRepositorySheet: View {
             Divider()
             HStack(spacing: 8) {
                 if busy { ProgressView().controlSize(.small) }
-                Button(workflowText("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
-                Button(workflowText("Create")) { create() }.buttonStyle(.borderedProminent)
-                    .disabled(busy || CloneDestination.targetURL(destination) == nil || (clone && source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+                KeyViewProxy(label: workflowText("Cancel"), keyEquivalent: "\u{1b}") { dismiss() }.disabled(busy)
+                KeyViewProxy(label: workflowText(authenticationRequested ? "Retry Clone" : "Create"), prominent: true) { create() }
+                    .disabled(busy || CloneDestination.targetURL(destination) == nil || (clone && source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) || (authenticationRequested && (username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)))
             }.frame(maxWidth: .infinity)
-        }.controlSize(.small).interactiveDismissDisabled(busy).padding(20).frame(width: 400)
+        }.controlSize(.small).interactiveDismissDisabled(busy).padding(20).frame(width: 440)
+            .nativeFocusRoot(reusingParent: true)
             .onChange(of: clone) { _, _ in saveDraft() }
             .onChange(of: source) { _, _ in saveDraft() }
             .onChange(of: destination) { _, _ in saveDraft() }
             .onChange(of: cloneDestination) { _, _ in saveDraft() }
-            .onDisappear { saveDraft() }
+            .onDisappear { password = ""; saveDraft() }
     }
     private func saveDraft() {
         var draft = RepositoryCreationDraft()
@@ -238,14 +258,32 @@ struct CreateRepositorySheet: View {
     private func create() {
         let cloning = clone, cloneSource = source.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let target = CloneDestination.targetURL(destination) else { return }
+        let credential = authenticationRequested ? HTTPSCloneCredential(
+            username: username.trimmingCharacters(in: .whitespacesAndNewlines),
+            password: password,
+            saveToKeychain: saveCredential
+        ) : nil
         busy = true; store.isBusy = true
         Task {
             do {
-                let repo = try await cloning ? GitRepository.clone(source: cloneSource, destination: target) : GitRepository.initialize(at: target)
+                let repo = try await cloning ? GitRepository.clone(source: cloneSource, destination: target, credential: credential) : GitRepository.initialize(at: target)
                 if cloning { cloneDestination.rememberSuccessfulClone(target) }
+                password = ""
                 store.isBusy = false; await store.open(repo.url); dismiss()
             }
-            catch { self.error = OperationFailure.message(error) }
+            catch {
+                _ = OperationFailure.message(error)
+                switch CloneAuthentication.classify(source: cloneSource, error: error) {
+                case .httpsCredentials:
+                    if !authenticationRequested { authenticationFocusRequest = UUID() }
+                    authenticationRequested = true
+                    self.error = workflowText("HTTPS authentication is required. Enter your username and password or personal access token, then retry.")
+                case .sshKey:
+                    self.error = workflowText("SSH authentication failed. Add a private key to your SSH agent and register its public key with the Git server, then retry.")
+                case .other(let message):
+                    self.error = message
+                }
+            }
             busy = false; store.isBusy = false
         }
     }

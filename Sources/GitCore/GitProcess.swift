@@ -63,6 +63,7 @@ enum GitProcess {
         let actualArguments = ["--no-pager"] + proxyArguments + arguments
         let logCommand = !GitCommandLog.suppressRoutineReads
         let operationProgress = logCommand ? GitCommandLog.progress : nil
+        let privateCredentials = GitCommandLog.privateCredentials
         let lines = operationProgress.map(ProgressLines.init)
         defer { lines?.finish() }
         let command = arguments.enumerated().first { index, argument in
@@ -70,8 +71,9 @@ enum GitProcess {
         }?.element ?? "git"
         operationProgress?(NetworkProgress(message: "git " + GitCommandLog.redact(command), fraction: nil))
         let streamedProgress: @Sendable (String) -> Void = { chunk in
-            progress?(chunk)
-            if !["config", "credential", "diff", "show", "log"].contains(command) { lines?.accept(chunk) }
+            let safeChunk = GitCommandLog.redact(chunk, credentials: privateCredentials)
+            progress?(safeChunk)
+            if !["config", "credential", "diff", "show", "log"].contains(command) { lines?.accept(safeChunk) }
         }
         return try await withTaskCancellationHandler {
             do {
@@ -83,6 +85,9 @@ enum GitProcess {
                 return result
             } catch {
                 if logCommand { GitCommandLog.record(directory: directory, executable: commandExecutable, arguments: actualArguments, output: "", error: error.localizedDescription, exitCode: (error as? GitError)?.exitCode, started: started) }
+                if !GitCommandLog.privateCredentials.isEmpty, let gitError = error as? GitError {
+                    throw GitError(GitCommandLog.redact(gitError.message), exitCode: gitError.exitCode)
+                }
                 throw error
             }
         } onCancel: { cancellation.cancel() }

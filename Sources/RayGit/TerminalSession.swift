@@ -7,6 +7,7 @@ final class RepositoryTerminalView: LocalProcessTerminalView {
     var acceptsInput: () -> Bool = { false }
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        setAccessibilityHelp(NativeFocusNavigation.editorHelp)
         updateNativeColors()
     }
     override func viewDidChangeEffectiveAppearance() {

@@ -104,7 +104,12 @@ struct TerminalShortcutMonitor: NSViewRepresentable {
             removeMonitor()
             guard window != nil else { return }
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                guard let self, let window = self.window, window.isKeyWindow, event.window === window, window.attachedSheet == nil,
+                guard let self, let window = self.window, window.isKeyWindow, event.window === window, window.attachedSheet == nil else { return event }
+                // SwiftTerm's keyDown is not open. Reuse this existing window-
+                // scoped monitor only when its terminal owns the first responder.
+                if let terminal = window.firstResponder as? RepositoryTerminalView,
+                   NativeFocusNavigation.leaveEditor(event, from: terminal) { return nil }
+                guard
                       event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad]) == .command,
                       event.charactersIgnoringModifiers == "`" else { return event }
                 self.toggle()

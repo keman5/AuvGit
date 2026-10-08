@@ -36,10 +36,23 @@ enum BranchSwitch {
 
 extension RepositoryStore {
     func switchBranch(to branch: String, savedChanges: @escaping @MainActor (String) -> Void = { _ in }) {
-        operation("切换分支") { repository in
-            if let stash = try await BranchSwitch.perform(repository: repository, branch: branch,
-                                           isCurrentRepository: { self.repository === repository }) {
-                savedChanges(stash)
+        guard let source = repository, !isBusy, pendingRepositoryPath == nil else { return }
+        Task {
+            if let worktrees = try? await source.worktrees(),
+               let target = worktrees.first(where: {
+                   $0.branch == branch && !$0.isBare && !$0.isPrunable && !Self.sameRepositoryLocation(URL(fileURLWithPath: $0.path), source.url)
+               }),
+               let linked = try? await GitRepository.open(URL(fileURLWithPath: target.path)),
+               self.repository === source, !self.isBusy, self.pendingRepositoryPath == nil {
+                self.requestOpen(linked.url)
+                return
+            }
+            guard self.repository === source, !self.isBusy, self.pendingRepositoryPath == nil else { return }
+            self.operation("切换分支") { repository in
+                if let stash = try await BranchSwitch.perform(repository: repository, branch: branch,
+                                               isCurrentRepository: { self.repository === repository }) {
+                    savedChanges(stash)
+                }
             }
         }
     }
