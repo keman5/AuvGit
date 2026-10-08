@@ -138,3 +138,8 @@
 "Delete local tag" = "删除本地标签";
 
 "Choose parent folder…" = "选择父文件夹…";
+
+"Commit workspace changes" = "提交工作区改动";
+"There are no staged files. All tracked changes will be staged and committed. Include untracked files too?" = "当前没有已暂存文件，将暂存并提交所有已跟踪文件的改动。是否同时包含未跟踪文件？";
+"Include untracked files" = "包含未跟踪文件";
+"Resolve conflicts before committing." = "请先解决冲突再提交。";

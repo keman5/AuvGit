@@ -369,6 +369,7 @@ struct MainWindow: View {
         .onChange(of: store.repositoryURL) { _, directory in
             guard handlesStoreEvents else { return }
             aiCommit.cancel()
+            store.workspaceCommitRequest = nil
             aiScopeRepository = nil
             if let directory, terminals.visible { terminals.show(for: directory, store: store) }
             else if directory == nil, store.pendingRepositoryPath == nil { terminals.hide() }
@@ -431,6 +432,9 @@ struct MainWindow: View {
             }.padding(20).frame(width: 360)
         }
         .rayGitSheet(isPresented: $showWorkspaceSearch) { WorkspaceSearchSheet(store: store) }
+        .rayGitSheet(item: $store.workspaceCommitRequest) { request in
+            WorkspaceCommitSheet(store: store, request: request)
+        }
         .rayGitSheet(isPresented: $showAISettings) { AICommitSettingsSheet() }
         .rayGitSheet(isPresented: Binding(get: { aiScopeRepository != nil }, set: { if !$0 { aiScopeRepository = nil } })) {
             AICommitScopeSheet { scope in
@@ -606,7 +610,7 @@ struct MainWindow: View {
                     else { store.commit() }
                 } label: { Text(mainText("commit")) }
                     .buttonStyle(.borderedProminent)
-                    .disabled(store.isBusy || store.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (!store.amend && store.stagedCount == 0) || store.files.contains(where: \.isConflict))
+                    .disabled(!store.canCommit)
             }
         }.controlSize(.small).padding(12).background(RayGitStyle.chrome)
     }

@@ -218,6 +218,12 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 24).help(text("allActions")).accessibilityLabel(text("allActions"))
         }
     }
+    private var statusColumnWidth: CGFloat {
+        let font = NSFont.systemFont(ofSize: 10, weight: .medium)
+        let titles = ["modified", "added", "deleted", "renamed", "copied", "type"].map { text("stagedStatus") + " · " + text($0) }
+            + [text("conflict"), text("untracked"), compactText("Ignored · read-only")]
+        return ceil(titles.map { ($0 as NSString).size(withAttributes: [.font: font]).width }.max() ?? 70) + 16
+    }
     private var fileTable: some View {
             Table(visibleFiles, selection: $selection, sortOrder: $sortOrder, columnCustomization: $columnCustomization) {
                 TableColumn(text("name"), value: \.name) { file in
@@ -229,7 +235,7 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
                 TableColumn(designWorkspaceText("Status"), value: \.statusKey) { file in
                     if let value = file.file { fileStatus(value) }
                     else { Text(compactText("Ignored · read-only")).font(.system(size: 10)).foregroundStyle(.secondary) }
-                }.width(min: 70, ideal: 90).customizationID("status")
+                }.width(statusColumnWidth).customizationID("status")
                 TableColumn(text("workspace"), value: \.worktreeKey) { file in status(file.file?.worktreeStatus ?? " ", selected: selection.contains(file.path)) }.width(min: 65, ideal: 85).customizationID("workspace").defaultVisibility(.hidden)
                 TableColumn(text("index"), value: \.indexKey) { file in status(file.file?.indexStatus ?? " ", selected: selection.contains(file.path)) }.width(min: 65, ideal: 85).customizationID("index").defaultVisibility(.hidden)
                 TableColumn(text("directory"), value: \.directory) { file in
@@ -305,6 +311,16 @@ private struct WorkspaceTableDensity: NSViewRepresentable {
         private func apply(to table: NSTableView) {
             // SwiftUI installs automatic sizing from hosting-cell fitting heights.
             // A rowHeight alone is ignored while that mode is enabled.
+            if let scroll = table.enclosingScrollView { scroll.autohidesScrollers = true }
+            if table.columnAutoresizingStyle != .uniformColumnAutoresizingStyle {
+                table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+            }
+            if let scroll = table.enclosingScrollView,
+               abs(table.frame.width - scroll.contentSize.width) > 1,
+               table.tableColumns.filter({ !$0.isHidden }).reduce(CGFloat.zero, { $0 + $1.minWidth + table.intercellSpacing.width }) <= scroll.contentSize.width {
+                table.setFrameSize(NSSize(width: scroll.contentSize.width, height: table.frame.height))
+                table.sizeToFit()
+            }
             if table.usesAutomaticRowHeights { table.usesAutomaticRowHeights = false }
             if table.rowSizeStyle != .custom { table.rowSizeStyle = .custom }
             if table.rowHeight != 22 { table.rowHeight = 22 }

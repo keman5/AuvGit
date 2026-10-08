@@ -289,6 +289,7 @@ final class RepositoryStore: ObservableObject {
     @Published var checkedHistoryRefs: Set<String>?
     @Published var historyPinnedCommit: String?
     @Published var commitMessage = ""
+    @Published var workspaceCommitRequest: WorkspaceCommitRequest?
     @Published var amend = false
     @Published var isBusy = false
     @Published var loadingDiff = false
@@ -888,13 +889,6 @@ final class RepositoryStore: ObservableObject {
         let targets = WorkspaceFileActionTargets.paths(for: .unstage, files: files, selection: selectedPaths)
         let paths = files.filter { targets.contains($0.path) }.flatMap { [$0.path] + ($0.originalPath.map { [$0] } ?? []) }
         guard !paths.isEmpty else { return }; operation("取消暂存") { try await $0.unstage(paths: paths) }
-    }
-    func commit() {
-        let message = commitMessage; let amend = amend
-        operation(amend ? "修订提交" : "提交") { repo in
-            try await repo.commit(message: message, amend: amend)
-            await MainActor.run { self.commitMessage = ""; self.amend = false }
-        }
     }
     func completeNetworkOperation(_ name: String, repository: GitRepository) {
         guard self.repository === repository else { return }

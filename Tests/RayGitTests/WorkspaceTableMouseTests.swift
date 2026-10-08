@@ -88,6 +88,26 @@ final class WorkspaceTableMouseTests: XCTestCase {
             }
         }
     }
+    func testDefaultColumnsFitWithoutHorizontalOverflow() async throws {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 550, height: 400), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let host = NSHostingView(rootView: Fixture(selection: Selection(), focus: WorkspaceFileFocus(), production: true,
+            files: [GitFile(path: "very/long/directory/" + String(repeating: "filename", count: 30) + ".swift", indexStatus: "A", worktreeStatus: "M")]))
+        window.contentView = host
+        for width in [550.0, 430.0, 700.0] {
+            window.setContentSize(NSSize(width: width, height: 400))
+            for _ in 0..<20 { host.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(10)) }
+            let table = try XCTUnwrap(findTable(host))
+            let scroll = try XCTUnwrap(table.enclosingScrollView)
+            let columns = table.tableColumns.filter { !$0.isHidden }
+            XCTAssertEqual(columns.count, 3)
+            XCTAssertLessThanOrEqual(table.frame.width, scroll.contentSize.width + 1)
+            XCTAssertEqual(columns[1].minWidth, columns[1].maxWidth, accuracy: 1)
+            XCTAssertLessThan(columns[1].width, 160)
+        }
+    }
     func testWorkspaceTableMouseSelection() async throws { try await exercise(production: true) }
     func testBorderlessShellWorkspaceTableMouseSelection() async throws { try await exercise(production: true, shell: true) }
 }

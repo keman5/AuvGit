@@ -114,10 +114,9 @@ final class AICommitController: ObservableObject {
     private var task: Task<Void, Never>?
     private var requestID = UUID()
     func cancel() { requestID = UUID(); task?.cancel(); task = nil; isLoading = false }
-    private static func stagedIdentity(_ repository: GitRepository) async throws -> String {
-        let index = try await repository.workflowRead(["ls-files", "--stage", "-z"])
-        let head = (try? await repository.workflowRead(["rev-parse", "--verify", "HEAD"])) ?? "unborn"
-        return head + "\0" + index
+    private let generateMessage: (String, AICommitConfiguration) async throws -> String
+    init(generateMessage: @escaping (String, AICommitConfiguration) async throws -> String = { try await AICommitService.generate(prompt: $0, configuration: $1) }) {
+        self.generateMessage = generateMessage
     }
     func generate(store: RepositoryStore, scope: AICommitScope = .staged, summaryOnly: Bool = false) {
         guard !isLoading, let repository = store.repository, !store.isBusy else { return }
@@ -126,28 +125,33 @@ final class AICommitController: ObservableObject {
         requestID = token; isLoading = true; error = nil; canGenerateSummary = false
         task = Task { [weak self, weak store] in
             do {
-                let identity = try await Self.stagedIdentity(repository)
-                let draftGuard = AICommitDraftGuard(repository: root, stagedIdentity: identity, originalDraft: original)
-                let workspaceState = scope == .workspace ? try await repository.changeState(files: repository.status()) : nil
-                let input: String
-                do {
-                    input = try await repository.aiCommitInput(scope: scope, summaryOnly: summaryOnly, maximumBytes: summaryOnly ? AICommitInputPolicy.summaryLimit : configuration.maximumPatchKB * 1000)
-                } catch AICommitInputError.exceedsLimit {
-                    if !summaryOnly, let self, self.requestID == token { self.canGenerateSummary = true }
-                    throw AICommitFailure(summaryOnly ? "Change summary exceeds the configured limit" : "Changes exceed the configured limit")
+                let draftGuard = AICommitDraftGuard(repository: root, originalDraft: original)
+                guard let generateMessage = self?.generateMessage else { return }
+                @MainActor func readInput() async throws -> String {
+                    do {
+                        let input = try await repository.aiCommitInput(scope: scope, summaryOnly: summaryOnly, maximumBytes: summaryOnly ? AICommitInputPolicy.summaryLimit : configuration.maximumPatchKB * 1000)
+                        guard !input.isEmpty else { throw AICommitFailure(scope == .staged ? "No staged changes" : "No workspace changes") }
+                        return input
+                    } catch AICommitInputError.exceedsLimit {
+                        if !summaryOnly, let self, self.requestID == token { self.canGenerateSummary = true }
+                        throw AICommitFailure(summaryOnly ? "Change summary exceeds the configured limit" : "Changes exceed the configured limit")
+                    }
                 }
-                guard !input.isEmpty else { throw AICommitFailure(scope == .staged ? "No staged changes" : "No workspace changes") }
-                let prompt = summaryOnly ? AICommitInputPolicy.summaryPrompt(status: input, stat: "", scope: scope) : AICommitInputPolicy.patchPrompt(input, scope: scope)
-                guard identity == (try await Self.stagedIdentity(repository)) else { throw AICommitFailure("Repository or staged changes changed") }
-                if let workspaceState, workspaceState != (try await repository.changeState(files: repository.status())) { throw AICommitFailure("Workspace changes changed during generation") }
-                try Task.checkCancellation()
-                let generated = try await AICommitService.generate(prompt: prompt, configuration: configuration)
-                try Task.checkCancellation()
-                let currentIdentity = try await Self.stagedIdentity(repository)
-                if let workspaceState, workspaceState != (try await repository.changeState(files: repository.status())) { throw AICommitFailure("Workspace changes changed during generation") }
-                guard let self, let store, self.requestID == token else { return }
-                if let rejection = draftGuard.rejection(repository: store.repositoryURL, stagedIdentity: currentIdentity, draft: store.commitMessage, isBusy: store.isBusy) { throw AICommitFailure(rejection) }
-                store.commitMessage = generated
+                var input = try await readInput()
+                while true {
+                    try Task.checkCancellation()
+                    guard let self, let store, self.requestID == token else { return }
+                    if let rejection = draftGuard.rejection(repository: store.repositoryURL, draft: store.commitMessage, isBusy: store.isBusy) { throw AICommitFailure(rejection) }
+                    let prompt = summaryOnly ? AICommitInputPolicy.summaryPrompt(status: input, stat: "", scope: scope) : AICommitInputPolicy.patchPrompt(input, scope: scope)
+                    let generated = try await generateMessage(prompt, configuration)
+                    try Task.checkCancellation()
+                    let latest = try await readInput()
+                    guard self.requestID == token else { return }
+                    if let rejection = draftGuard.rejection(repository: store.repositoryURL, draft: store.commitMessage, isBusy: store.isBusy) { throw AICommitFailure(rejection) }
+                    if latest != input { input = latest; continue }
+                    store.commitMessage = generated
+                    break
+                }
             } catch is CancellationError {} catch {
                 if let self, self.requestID == token { self.error = (error as? AICommitFailure)?.localizedDescription ?? aiCommitText("Generation failed; check AI settings") }
             }
