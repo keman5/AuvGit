@@ -22,6 +22,21 @@ enum RayGitStyle {
     static let blue = Color(red: 0.04, green: 0.46, blue: 1)
 }
 
+extension HistoryGraphColorToken {
+    var color: Color {
+        switch self {
+        case .blue: Color(red: 55 / 255, green: 138 / 255, blue: 221 / 255)
+        case .cyan: Color(red: 29 / 255, green: 158 / 255, blue: 117 / 255)
+        case .coral: Color(red: 216 / 255, green: 90 / 255, blue: 48 / 255)
+        case .purple: Color(red: 127 / 255, green: 119 / 255, blue: 221 / 255)
+        case .amber: Color(red: 186 / 255, green: 117 / 255, blue: 23 / 255)
+        case .pink: Color(red: 212 / 255, green: 83 / 255, blue: 126 / 255)
+        case .green: Color(red: 99 / 255, green: 153 / 255, blue: 34 / 255)
+        case .gray: Color(red: 136 / 255, green: 135 / 255, blue: 128 / 255)
+        }
+    }
+}
+
 struct RayGitPaneHeader: View {
     let title: String
     let systemImage: String

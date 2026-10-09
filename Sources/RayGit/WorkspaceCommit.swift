@@ -46,6 +46,7 @@ extension RepositoryStore {
                         }
                     }
                     try await repo.commit(message: message, amend: amending)
+                    self.recordSuccessfulCommitMessage(message, for: repo.url)
                     if self.repository === repo, self.commitMessage == message {
                         self.commitMessage = ""; self.amend = false
                     }
@@ -58,6 +59,17 @@ extension RepositoryStore {
         workspaceCommitRequest = nil
         guard repository === request.repository, commitMessage == request.message, !amend else { return }
         commit(includeUntracked: includeUntracked)
+    }
+
+    func recordSuccessfulCommitMessage(_ message: String, for repositoryURL: URL) {
+        commitHistory.record(message, for: repositoryURL)
+        if self.repositoryURL == repositoryURL { recentCommitMessages = commitHistory.messages(for: repositoryURL) }
+    }
+
+    func clearRecentCommitMessages() {
+        guard let repositoryURL else { return }
+        commitHistory.clear(for: repositoryURL)
+        recentCommitMessages = []
     }
 }
 

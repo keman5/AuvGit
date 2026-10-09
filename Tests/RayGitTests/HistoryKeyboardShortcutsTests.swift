@@ -121,9 +121,26 @@ final class HistoryKeyboardShortcutsTests: XCTestCase {
         XCTAssertNotNil(region.handle(try key("g")))
         XCTAssertNotNil(region.handle(try key(String(UnicodeScalar(NSF6FunctionKey)!), [])))
         XCTAssertEqual(actions.count, 14)
-        region.requiresFocusedRegion = true
+        let terminal = TerminalSession(directory: FileManager.default.temporaryDirectory).view
+        terminal.frame = region.frame
+        content.addSubview(terminal)
+        XCTAssertTrue(window.makeFirstResponder(terminal))
+        let actionCount = actions.count, findCount = finds, navigationCount = navigation.count, changeCount = changes
+        for event in [
+            try key("\r", []),
+            try key("f"),
+            try key("r"),
+            try key(String(UnicodeScalar(NSUpArrowFunctionKey)!), .option),
+            try key(String(UnicodeScalar(NSF4FunctionKey)!), [])
+        ] {
+            XCTAssertNotNil(region.handle(event))
+        }
+        XCTAssertEqual(actions.count, actionCount)
+        XCTAssertEqual(finds, findCount)
+        XCTAssertEqual(navigation.count, navigationCount)
+        XCTAssertEqual(changes, changeCount)
         XCTAssertTrue(window.makeFirstResponder(other))
-        XCTAssertNotNil(region.handle(try key("f")))
+        XCTAssertNil(region.handle(try key("f")))
         XCTAssertTrue(window.makeFirstResponder(table))
         XCTAssertNil(region.handle(try key("f")))
         XCTAssertTrue(region.shortcuts.setEnabled(false, for: .copyHash))

@@ -8,6 +8,7 @@ public struct CommitGraph: Sendable {
         public let fromY: Double
         public let toY: Double
         public let colorLane: Int
+        public let lineageHash: String
     }
     public struct Row: Sendable {
         public let hash: String
@@ -38,15 +39,15 @@ public struct CommitGraph: Sendable {
             var segments: [Segment] = []
             for (index, hash) in before.enumerated() {
                 if hash != commit.hash || wasKnown {
-                    segments.append(Segment(fromLane: index, toLane: index, fromY: 0, toY: 0.5, colorLane: index))
+                    segments.append(Segment(fromLane: index, toLane: index, fromY: 0, toY: 0.5, colorLane: index, lineageHash: hash))
                 }
                 if hash != commit.hash, let target = lanes.firstIndex(of: hash) {
-                    segments.append(Segment(fromLane: index, toLane: target, fromY: 0.5, toY: 1, colorLane: index))
+                    segments.append(Segment(fromLane: index, toLane: target, fromY: 0.5, toY: 1, colorLane: index, lineageHash: hash))
                 }
             }
             for parent in parents {
                 if let target = lanes.firstIndex(of: parent) {
-                    segments.append(Segment(fromLane: node, toLane: target, fromY: 0.5, toY: 1, colorLane: target))
+                    segments.append(Segment(fromLane: node, toLane: target, fromY: 0.5, toY: 1, colorLane: target, lineageHash: parent))
                 }
             }
             let count = max(1, before.count, lanes.count)

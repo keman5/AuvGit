@@ -7,6 +7,7 @@
 "Stage selected files, or all eligible files when none are selected" = "暂存选中文件；未选择时暂存全部可暂存文件";
 "Unstage selected files, or all eligible files when none are selected" = "取消暂存选中文件；未选择时取消全部可取消暂存文件";
 "Discard selected tracked changes, or all eligible tracked changes when none are selected" = "丢弃选中的已跟踪改动；未选择时丢弃全部可丢弃的已跟踪改动";
-"Choose a commit message template" = "选择提交消息模板";
-"Load configured template" = "加载已配置模板";
+"Recent commit messages" = "最近提交历史";
+"No recent commit messages" = "暂无最近提交消息";
+"Clear commit history" = "清除提交历史";
 "Open in Finder" = "在 Finder 中打开";

@@ -2,29 +2,59 @@ import SwiftUI
 import AppKit
 import GitCore
 
+enum RemoteAuthenticationMethod: String, CaseIterable {
+    case accessToken, accountPassword, sshPrivateKey
+}
+
+struct RemoteAuthenticationSubmission {
+    let credential: NetworkCredential
+    let sshPort: Int?
+}
+
+struct RemoteAuthenticationRetryContext {
+    let credential: NetworkCredential
+    let saveCredential: Bool
+    let remoteChanged: Bool
+
+    var acceptsMigratedPushIdentity: Bool { remoteChanged }
+    var requiresFreshForcePushPreparation: Bool { remoteChanged }
+}
+
 struct RemoteAuthenticationDraft {
     let endpoint: RemoteEndpoint
-    var username: String
-    var secret = ""
+    var method: RemoteAuthenticationMethod
+    var httpsUsername: String
+    var token = ""
+    var password = ""
+    var sshUsername: String
+    var sshPort: String
     var privateKey: URL?
-    var save = true
+    var passphrase = ""
 
-    init(endpoint: RemoteEndpoint, preferredUsername: String?, privateKey: URL? = nil) {
+    init(endpoint: RemoteEndpoint, preferredUsername: String?, privateKey: URL? = nil,
+         preferredSSHUsername: String? = nil) {
         self.endpoint = endpoint
-        username = preferredUsername ?? endpoint.username ?? (endpoint.transport == .ssh ? "git" : "")
+        method = endpoint.transport == .https ? .accessToken : .sshPrivateKey
+        httpsUsername = endpoint.transport == .https ? (preferredUsername ?? endpoint.username ?? "") : ""
+        sshUsername = endpoint.transport == .ssh ? (preferredUsername ?? endpoint.username ?? "git") : (preferredSSHUsername ?? "git")
+        sshPort = String(endpoint.transport == .ssh ? endpoint.port : 22)
         self.privateKey = privateKey
     }
 
-    var credential: NetworkCredential? {
-        let name = username.trimmingCharacters(in: .whitespacesAndNewlines)
+    var submission: RemoteAuthenticationSubmission? {
+        let name = (method == .sshPrivateKey ? sshUsername : httpsUsername).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, !name.contains("\n"), !name.contains("\r"), !name.contains("\0") else { return nil }
-        switch endpoint.transport {
-        case .https:
-            guard !secret.isEmpty, !secret.contains("\n"), !secret.contains("\r"), !secret.contains("\0") else { return nil }
-            return .https(username: name, password: secret)
-        case .ssh:
+        switch method {
+        case .accessToken, .accountPassword:
+            guard endpoint.transport == .https else { return nil }
+            let value = method == .accessToken ? token : password
+            guard !value.isEmpty, !value.contains("\n"), !value.contains("\r"), !value.contains("\0") else { return nil }
+            return RemoteAuthenticationSubmission(credential: .https(username: name, password: value), sshPort: nil)
+        case .sshPrivateKey:
+            guard let port = Int(sshPort), (1...65535).contains(port) else { return nil }
             guard let privateKey, FileManager.default.fileExists(atPath: privateKey.path) else { return nil }
-            return .ssh(username: name, privateKey: privateKey, passphrase: secret.isEmpty ? nil : secret)
+            guard !passphrase.contains("\n"), !passphrase.contains("\r"), !passphrase.contains("\0") else { return nil }
+            return RemoteAuthenticationSubmission(credential: .ssh(username: name, privateKey: privateKey, passphrase: passphrase.isEmpty ? nil : passphrase), sshPort: port)
         }
     }
 }
@@ -36,13 +66,16 @@ struct RemoteAuthenticationRequest: Identifiable {
     let operation: NetworkOperation
     let endpoint: RemoteEndpoint
     let preferredUsername: String?
+    let preferredSSHUsername: String?
     let privateKey: URL?
-    let retry: @MainActor (NetworkCredential, Bool) -> Void
+    let retry: @MainActor (RemoteAuthenticationRetryContext) -> Void
 }
 
 @MainActor
 final class RemoteAuthenticationCoordinator: ObservableObject {
     @Published var request: RemoteAuthenticationRequest?
+    @Published private(set) var submissionError: String?
+    @Published private(set) var isSubmitting = false
     private let credentials: RemoteCredentialStore
 
     init(credentials: RemoteCredentialStore = .shared) { self.credentials = credentials }
@@ -56,24 +89,58 @@ final class RemoteAuthenticationCoordinator: ObservableObject {
 
     @discardableResult
     func presentIfNeeded(error: Error, repository: GitRepository, operation: NetworkOperation,
-                         retry: @escaping @MainActor (NetworkCredential, Bool) -> Void) async -> Bool {
+                         retry: @escaping @MainActor (RemoteAuthenticationRetryContext) -> Void) async -> Bool {
         guard let target = try? await repository.remoteAuthenticationTarget(for: operation),
               NetworkAuthenticationPolicy.prompt(for: error, endpoint: target.endpoint) != nil else { return false }
         let preferred = credentials.preferredUsername(for: target.endpoint) ?? target.endpoint.username
         var privateKey: URL?
-        if let preferred, case let .ssh(_, key, _)? = try? credentials.load(for: target.endpoint, username: preferred) { privateKey = key }
+        var preferredSSHUsername: String?
+        if target.endpoint.transport == .ssh {
+            preferredSSHUsername = preferred
+            if let preferred, case let .ssh(_, key, _)? = try? credentials.load(for: target.endpoint, username: preferred) { privateKey = key }
+        } else if let candidate = target.endpoint.convertingToSSH(username: "git", port: 22) {
+            preferredSSHUsername = credentials.preferredUsername(for: candidate)
+            if let preferredSSHUsername,
+               case let .ssh(_, key, _)? = try? credentials.load(for: candidate, username: preferredSSHUsername) { privateKey = key }
+        }
+        submissionError = nil
         request = RemoteAuthenticationRequest(repository: repository, operation: operation, endpoint: target.endpoint,
-                                              preferredUsername: preferred, privateKey: privateKey, retry: retry)
+                                              preferredUsername: preferred, preferredSSHUsername: preferredSSHUsername,
+                                              privateKey: privateKey, retry: retry)
         return true
     }
 
-    func submit(_ credential: NetworkCredential, save: Bool) {
-        let retry = request?.retry
-        request = nil
-        retry?(credential, save)
+    func submit(_ submission: RemoteAuthenticationSubmission) {
+        guard let request, !isSubmitting else { return }
+        if request.endpoint.transport == .https,
+           case let .ssh(username, key, _) = submission.credential,
+           let port = submission.sshPort {
+            isSubmitting = true; submissionError = nil
+            Task { @MainActor in
+                do {
+                    let plan = try await request.repository.remoteSSHMigrationPlan(for: request.operation, username: username, port: port)
+                    let accessed = key.startAccessingSecurityScopedResource()
+                    defer { if accessed { key.stopAccessingSecurityScopedResource() } }
+                    try await request.repository.migrateRemoteToSSH(plan, credential: submission.credential)
+                    try credentials.save(submission.credential, for: plan.replacement)
+                    self.request = nil; isSubmitting = false
+                    request.retry(RemoteAuthenticationRetryContext(credential: submission.credential,
+                                                                   saveCredential: false,
+                                                                   remoteChanged: true))
+                } catch {
+                    submissionError = OperationFailure.message(error, repository: request.repository.url)
+                    isSubmitting = false
+                }
+            }
+            return
+        }
+        self.request = nil; submissionError = nil
+        request.retry(RemoteAuthenticationRetryContext(credential: submission.credential,
+                                                       saveCredential: true,
+                                                       remoteChanged: false))
     }
 
-    func cancel() { request = nil }
+    func cancel() { guard !isSubmitting else { return }; request = nil; submissionError = nil }
 
     func save(_ credential: NetworkCredential, for repository: GitRepository, operation: NetworkOperation) async throws {
         let target = try await repository.remoteAuthenticationTarget(for: operation)
@@ -90,15 +157,20 @@ final class RemoteAuthenticationCoordinator: ObservableObject {
 
 struct RemoteAuthenticationSheet: View {
     let request: RemoteAuthenticationRequest
-    let submit: (NetworkCredential, Bool) -> Void
+    let error: String?
+    let isSubmitting: Bool
+    let submit: (RemoteAuthenticationSubmission) -> Void
     let cancel: () -> Void
     @State private var draft: RemoteAuthenticationDraft
 
-    init(request: RemoteAuthenticationRequest, submit: @escaping (NetworkCredential, Bool) -> Void, cancel: @escaping () -> Void) {
-        self.request = request; self.submit = submit; self.cancel = cancel
+    init(request: RemoteAuthenticationRequest, error: String?, isSubmitting: Bool,
+         submit: @escaping (RemoteAuthenticationSubmission) -> Void, cancel: @escaping () -> Void) {
+        self.request = request; self.error = error; self.isSubmitting = isSubmitting
+        self.submit = submit; self.cancel = cancel
         _draft = State(initialValue: RemoteAuthenticationDraft(endpoint: request.endpoint,
                                                                 preferredUsername: request.preferredUsername,
-                                                                privateKey: request.privateKey))
+                                                                privateKey: request.privateKey,
+                                                                preferredSSHUsername: request.preferredSSHUsername))
     }
 
     var body: some View {
@@ -112,44 +184,64 @@ struct RemoteAuthenticationSheet: View {
                 }
             }
             Divider()
+            Picker(networkText("authenticationMethod"), selection: $draft.method) {
+                Text(networkText("accessTokenOrAppPassword")).tag(RemoteAuthenticationMethod.accessToken)
+                Text(networkText("accountPassword")).tag(RemoteAuthenticationMethod.accountPassword)
+                Text(networkText("sshPrivateKey")).tag(RemoteAuthenticationMethod.sshPrivateKey)
+            }.pickerStyle(.segmented).disabled(isSubmitting)
             VStack(alignment: .leading, spacing: 8) {
                 Text(networkText("username")).font(.caption).foregroundStyle(.secondary)
-                StableTextField(networkText("username"), text: $draft.username).textFieldStyle(.roundedBorder)
+                StableTextField(networkText("username"), text: draft.method == .sshPrivateKey ? $draft.sshUsername : $draft.httpsUsername)
+                    .textFieldStyle(.roundedBorder).disabled(isSubmitting)
             }
-            if request.endpoint.transport == .https {
+            if draft.method == .accessToken {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(networkText("passwordOrToken")).font(.caption).foregroundStyle(.secondary)
-                    SecureField(networkText("passwordOrToken"), text: $draft.secret).textFieldStyle(.roundedBorder)
+                    Text(networkText("accessTokenOrAppPassword")).font(.caption).foregroundStyle(.secondary)
+                    SecureField(networkText("accessTokenOrAppPassword"), text: $draft.token).textFieldStyle(.roundedBorder).disabled(isSubmitting)
+                }
+            } else if draft.method == .accountPassword {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(networkText("accountPassword")).font(.caption).foregroundStyle(.secondary)
+                    SecureField(networkText("accountPassword"), text: $draft.password).textFieldStyle(.roundedBorder).disabled(isSubmitting)
+                    Text(networkText("twoFactorHint")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(networkText("sshPort")).font(.caption).foregroundStyle(.secondary)
+                    StableTextField("22", text: $draft.sshPort).textFieldStyle(.roundedBorder).frame(width: 90).disabled(isSubmitting)
+                }
                 VStack(alignment: .leading, spacing: 8) {
                     Text(networkText("privateKey")).font(.caption).foregroundStyle(.secondary)
                     HStack(spacing: 8) {
                         Text(draft.privateKey?.path ?? networkText("noPrivateKeySelected"))
                             .lineLimit(1).truncationMode(.middle).frame(maxWidth: .infinity, alignment: .leading)
-                        Button(networkText("choosePrivateKey")) { choosePrivateKey() }
+                        Button(networkText("choosePrivateKey")) { choosePrivateKey() }.disabled(isSubmitting)
                     }
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     Text(networkText("keyPassphraseOptional")).font(.caption).foregroundStyle(.secondary)
-                    SecureField(networkText("keyPassphraseOptional"), text: $draft.secret).textFieldStyle(.roundedBorder)
+                    SecureField(networkText("keyPassphraseOptional"), text: $draft.passphrase).textFieldStyle(.roundedBorder).disabled(isSubmitting)
                 }
             }
-            Toggle(networkText("saveCredential"), isOn: $draft.save)
-            Text(networkText(request.endpoint.transport == .https ? "httpsCredentialScope" : "sshCredentialScope"))
+            Text(networkText(draft.method == .sshPrivateKey
+                             ? (request.endpoint.transport == .https ? "sshMigrationScope" : "sshCredentialScope")
+                             : "httpsCredentialScope"))
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let error, !error.isEmpty {
+                Text(error).font(.caption).foregroundStyle(.orange).textSelection(.enabled)
+            }
             Divider()
             HStack {
-                Button(networkText("cancel"), action: cancel).keyboardShortcut(.cancelAction)
+                if isSubmitting { ProgressView().controlSize(.small) }
+                Button(networkText("cancel"), action: cancel).keyboardShortcut(.cancelAction).disabled(isSubmitting)
                 Button(networkText("retry")) {
-                    guard let credential = draft.credential else { return }
-                    submit(credential, draft.save)
-                    draft.secret = ""
-                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(draft.credential == nil)
+                    guard let submission = draft.submission else { return }
+                    submit(submission)
+                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(draft.submission == nil || isSubmitting)
             }.frame(maxWidth: .infinity)
-        }.padding(22).frame(width: 460)
+        }.padding(22).frame(width: 620)
             .interactiveDismissDisabled()
-            .onDisappear { draft.secret = "" }
+            .onDisappear { draft.token = ""; draft.password = ""; draft.passphrase = "" }
     }
 
     private func choosePrivateKey() {

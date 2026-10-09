@@ -139,7 +139,7 @@ private struct LogWindowContent: View {
                         HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch,
                             isLoading: store.loadingHistory, hasMore: store.hasMore,
                             onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy,
-                            onAction: historyAction, onShowChanges: { if let path = store.selectedCommitPath { compare(path) } }, showsDetails: false, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), navigationGeneration: store.historyNavigationGeneration, onJump: jump, authorFilter: $store.historyAuthor)
+                            onAction: historyAction, onShowChanges: { if let path = store.selectedCommitPath { compare(path) } }, showsDetails: false, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), localUnpushedCommitHashes: store.localUnpushedCommitHashes, navigationGeneration: store.historyNavigationGeneration, onJump: jump, authorFilter: $store.historyAuthor)
                             .frame(minWidth: 520, minHeight: 270, idealHeight: 470)
                         VSplitView {
                             commitMetadata.frame(minWidth: 270, minHeight: 145, idealHeight: 230)

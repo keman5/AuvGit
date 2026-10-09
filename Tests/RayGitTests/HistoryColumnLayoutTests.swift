@@ -41,6 +41,29 @@ final class HistoryColumnLayoutTests: XCTestCase {
         XCTAssertEqual(HistoryColumnLayout.compactAuthorNameWidth(measuredWidth: .nan, showsAvatar: true), 72)
     }
 
+    func testCommitMessageIndentTracksActiveGraphLanesWithoutMovingLaterColumns() {
+        let shallow = HistoryColumnLayout.graphMessageWidths(activeLaneCount: 1, maximumLaneCount: 3, maximumGraphWidth: 54, baseMessageWidth: 360)
+        let middle = HistoryColumnLayout.graphMessageWidths(activeLaneCount: 2, maximumLaneCount: 3, maximumGraphWidth: 54, baseMessageWidth: 360)
+        let deep = HistoryColumnLayout.graphMessageWidths(activeLaneCount: 3, maximumLaneCount: 3, maximumGraphWidth: 54, baseMessageWidth: 360)
+
+        XCTAssertEqual(shallow.graph, 18)
+        XCTAssertEqual(middle.graph, 36)
+        XCTAssertEqual(deep.graph, 54)
+        XCTAssertLessThan(shallow.graph, middle.graph)
+        XCTAssertLessThan(middle.graph, deep.graph)
+        XCTAssertEqual(shallow.graph + shallow.message, 414)
+        XCTAssertEqual(middle.graph + middle.message, 414)
+        XCTAssertEqual(deep.graph + deep.message, 414)
+    }
+
+    func testAccessibleGraphGeometryNeverCompressesLanes() {
+        XCTAssertEqual(HistoryColumnLayout.graphWidth(laneCount: 1), 18)
+        XCTAssertEqual(HistoryColumnLayout.graphWidth(laneCount: 4), 72)
+        XCTAssertEqual(HistoryColumnLayout.graphWidth(laneCount: 8), 144)
+        XCTAssertEqual(HistoryColumnLayout.rowHeight(compact: true), 24)
+        XCTAssertEqual(HistoryColumnLayout.rowHeight(compact: false), 28)
+    }
+
 }
 
 @MainActor

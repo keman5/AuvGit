@@ -91,6 +91,10 @@ private struct TerminalHost: NSViewRepresentable {
 /// Scoped to this host's window; compare/settings/sheets keep macOS's window shortcut.
 struct TerminalShortcutMonitor: NSViewRepresentable {
     let toggle: () -> Void
+    static func isToggleShortcut(_ event: NSEvent) -> Bool {
+        event.keyCode == 50 &&
+        event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad]) == .command
+    }
     func makeNSView(context: Context) -> ShortcutView { ShortcutView(toggle: toggle) }
     func updateNSView(_ view: ShortcutView, context: Context) { view.toggle = toggle }
     static func dismantleNSView(_ view: ShortcutView, coordinator: ()) { view.removeMonitor() }
@@ -109,9 +113,7 @@ struct TerminalShortcutMonitor: NSViewRepresentable {
                 // scoped monitor only when its terminal owns the first responder.
                 if let terminal = window.firstResponder as? RepositoryTerminalView,
                    NativeFocusNavigation.leaveEditor(event, from: terminal) { return nil }
-                guard
-                      event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad]) == .command,
-                      event.charactersIgnoringModifiers == "`" else { return event }
+                guard TerminalShortcutMonitor.isToggleShortcut(event) else { return event }
                 self.toggle()
                 return nil
             }

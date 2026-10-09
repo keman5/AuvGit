@@ -7,14 +7,12 @@ struct HistoryKeyboardRegion: NSViewRepresentable {
     let find: () -> Void
     var navigate: (Bool) -> Void = { _ in }
     var showChanges: () -> Void = {}
-    var requiresFocusedRegion = false
     final class RegionView: NSView {
         var shortcuts = KeyboardShortcuts.shared
         var action: (HistoryAction) -> Void = { _ in }
         var find: () -> Void = {}
         var navigate: (Bool) -> Void = { _ in }
         var showChanges: () -> Void = {}
-        var requiresFocusedRegion = false
         private var monitor: Any?
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
         override func viewDidMoveToWindow() {
@@ -31,12 +29,8 @@ struct HistoryKeyboardRegion: NSViewRepresentable {
         func handle(_ event: NSEvent) -> NSEvent? {
             guard let window, window.attachedSheet == nil, event.window === window,
                   !isHiddenOrHasHiddenAncestor else { return event }
+            if Self.terminalOwnsFocus(window.firstResponder) { return event }
             if window.firstResponder is ReadOnlyDiffTextView || window.firstResponder is ComparisonTextView { return event }
-            if requiresFocusedRegion {
-                guard let responder = window.firstResponder as? NSView else { return event }
-                let center = NSPoint(x: responder.visibleRect.midX, y: responder.visibleRect.midY)
-                guard bounds.contains(convert(center, from: responder)) else { return event }
-            }
             let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
             let key = event.charactersIgnoringModifiers?.lowercased()
             if window.firstResponder is NSTextView || window.firstResponder is NSTextField {
@@ -52,7 +46,15 @@ struct HistoryKeyboardRegion: NSViewRepresentable {
                   let selectedAction = command.historyAction else { return event }
             action(selectedAction); return nil
         }
+        private static func terminalOwnsFocus(_ responder: NSResponder?) -> Bool {
+            var view = responder as? NSView
+            while let current = view {
+                if current is RepositoryTerminalView { return true }
+                view = current.superview
+            }
+            return false
+        }
     }
     func makeNSView(context: Context) -> RegionView { RegionView() }
-    func updateNSView(_ view: RegionView, context: Context) { view.action = action; view.find = find; view.navigate = navigate; view.showChanges = showChanges; view.requiresFocusedRegion = requiresFocusedRegion }
+    func updateNSView(_ view: RegionView, context: Context) { view.action = action; view.find = find; view.navigate = navigate; view.showChanges = showChanges }
 }

@@ -7,6 +7,7 @@
 "Stage selected files, or all eligible files when none are selected" = "Stage selected files, or all eligible files when none are selected";
 "Unstage selected files, or all eligible files when none are selected" = "Unstage selected files, or all eligible files when none are selected";
 "Discard selected tracked changes, or all eligible tracked changes when none are selected" = "Discard selected tracked changes, or all eligible tracked changes when none are selected";
-"Choose a commit message template" = "Choose a commit message template";
-"Load configured template" = "Load configured template";
+"Recent commit messages" = "Recent commit messages";
+"No recent commit messages" = "No recent commit messages";
+"Clear commit history" = "Clear commit history";
 "Open in Finder" = "Open in Finder";

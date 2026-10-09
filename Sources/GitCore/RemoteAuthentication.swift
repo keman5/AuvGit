@@ -24,6 +24,20 @@ public struct RemoteEndpoint: Equatable, Hashable, Sendable {
         RemoteCredentialIdentity(transport: transport, host: host, port: port, username: username)
     }
 
+    public func convertingToSSH(username: String, port: Int) -> RemoteEndpoint? {
+        guard transport == .https, Self.validField(username), (1...65535).contains(port),
+              var components = URLComponents(string: remoteURL),
+              components.scheme?.lowercased() == "https", components.host != nil,
+              components.password == nil, components.query == nil, components.fragment == nil,
+              !components.percentEncodedPath.isEmpty else { return nil }
+        components.scheme = "ssh"
+        components.host = host
+        components.user = username
+        components.port = port == 22 ? nil : port
+        guard let value = components.string else { return nil }
+        return Self.parse(value)
+    }
+
     public static func parse(_ value: String) -> RemoteEndpoint? {
         guard !value.isEmpty, !value.hasPrefix("-"), !value.contains("\0"), !value.contains("\n"), !value.contains("\r") else { return nil }
         if let components = URLComponents(string: value), let scheme = components.scheme?.lowercased() {
@@ -59,6 +73,17 @@ public struct RemoteEndpoint: Equatable, Hashable, Sendable {
 public struct RemoteAuthenticationTarget: Equatable, Sendable {
     public let remoteName: String
     public let endpoint: RemoteEndpoint
+    public let usesPushURL: Bool
+
+    public init(remoteName: String, endpoint: RemoteEndpoint, usesPushURL: Bool = false) {
+        self.remoteName = remoteName; self.endpoint = endpoint; self.usesPushURL = usesPushURL
+    }
+}
+
+public struct RemoteSSHMigrationPlan: Equatable, Sendable {
+    public let operation: NetworkOperation
+    public let source: RemoteAuthenticationTarget
+    public let replacement: RemoteEndpoint
 }
 
 public enum NetworkCredential: Sendable {
@@ -166,7 +191,45 @@ public extension GitRepository {
         let arguments = ["remote", "get-url"] + (push ? ["--push"] : []) + [remote]
         let effectiveURL = try await GitProcess.run(at: url, arguments: arguments).text.trimmingCharacters(in: .newlines)
         guard let endpoint = RemoteEndpoint.parse(effectiveURL) else { throw GitError("The configured remote does not use HTTPS or SSH authentication.") }
-        return RemoteAuthenticationTarget(remoteName: remote, endpoint: endpoint)
+        let usesPushURL: Bool
+        if push {
+            let configured = try await GitProcess.run(at: url, arguments: ["config", "--get-all", "remote." + remote + ".pushurl"], allowedCodes: [0, 1])
+            usesPushURL = configured.code == 0 && !configured.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        } else { usesPushURL = false }
+        return RemoteAuthenticationTarget(remoteName: remote, endpoint: endpoint, usesPushURL: usesPushURL)
+    }
+
+    func remoteSSHMigrationPlan(for operation: NetworkOperation, username: String, port: Int) async throws -> RemoteSSHMigrationPlan {
+        let source = try await remoteAuthenticationTarget(for: operation)
+        guard let replacement = source.endpoint.convertingToSSH(username: username, port: port) else {
+            throw GitError("The HTTPS remote cannot be converted to a valid SSH remote.")
+        }
+        return RemoteSSHMigrationPlan(operation: operation, source: source, replacement: replacement)
+    }
+
+    func migrateRemoteToSSH(_ plan: RemoteSSHMigrationPlan, credential: NetworkCredential) async throws {
+        try await migrateRemoteToSSH(plan, credential: credential) { endpoint, credential in
+            let lease = try NetworkCredentialLease(endpoint: endpoint, credential: credential)
+            defer { lease.remove() }
+            _ = try await GitCommandLog.$privateCredentials.withValue(lease.privateValues) {
+                try await GitProcess.run(at: self.url,
+                                         arguments: lease.gitArguments + ["ls-remote", "--heads", endpoint.remoteURL],
+                                         environmentOverrides: lease.environment)
+            }
+        }
+    }
+
+    func migrateRemoteToSSH(_ plan: RemoteSSHMigrationPlan, credential: NetworkCredential,
+                            verify: (RemoteEndpoint, NetworkCredential) async throws -> Void) async throws {
+        guard case let .ssh(username, _, _) = credential,
+              username == plan.replacement.username else { throw GitError("SSH migration requires the selected SSH credential.") }
+        try await verify(plan.replacement, credential)
+        let current = try await remoteAuthenticationTarget(for: plan.operation)
+        guard current == plan.source else { throw GitError("Remote configuration changed during SSH authentication; retry.") }
+        var arguments = ["remote", "set-url"]
+        if current.usesPushURL { arguments.append("--push") }
+        arguments += [current.remoteName, plan.replacement.remoteURL]
+        _ = try await GitProcess.run(at: url, arguments: arguments)
     }
 
     private func remoteConfigurationValue(_ key: String) async throws -> String? {

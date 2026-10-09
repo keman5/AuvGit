@@ -168,8 +168,8 @@ struct NetworkOperationsView: View {
         .onChange(of: store.repositoryURL) { _, _ in authentication.cancel() }
         .onDisappear { task?.cancel(); authentication.cancel() }
         .rayGitSheet(item: $authentication.request) { request in
-            RemoteAuthenticationSheet(request: request, submit: { credential, save in
-                authentication.submit(credential, save: save)
+            RemoteAuthenticationSheet(request: request, error: authentication.submissionError, isSubmitting: authentication.isSubmitting, submit: { submission in
+                authentication.submit(submission)
             }, cancel: { authentication.cancel() })
         }
         .rayGitAlert(item: $preflightPrompt) { prompt in
@@ -249,7 +249,8 @@ struct NetworkOperationsView: View {
             else { runVerified(operation) }
         }
     }
-    private func runVerified(_ operation: NetworkOperation, credential suppliedCredential: NetworkCredential? = nil, saveCredential: Bool = false) {
+    private func runVerified(_ operation: NetworkOperation, credential suppliedCredential: NetworkCredential? = nil,
+                             saveCredential: Bool = false, acceptsMigratedPushIdentity: Bool = false) {
         guard let repository = store.repository, !store.isBusy, task == nil else { return }
         let expected = previewReady ? previewIdentity : nil, expectedRepository = previewRepository
         let name = operation == .fetch ? "Fetch" : operation == .pull ? "Pull" : operation == .push ? "Push" : "Push preview"
@@ -264,9 +265,9 @@ struct NetworkOperationsView: View {
             else { credential = await authentication.savedCredential(for: repository, operation: operation) }
             do { try await authentication.perform(with: credential) { try await GitCommandLog.$operationID.withValue(operationID) { try await GitCommandLog.$userInitiated.withValue(true) { try await GitCommandLog.$progress.withValue(progress) {
                 let identity = try await repository.networkPreviewIdentity()
-                if operation == .push && expected != nil && (expected != identity || expectedRepository != repository.url) { throw GitError(networkText("previewExpired")) }
+                if operation == .push && !acceptsMigratedPushIdentity && expected != nil && (expected != identity || expectedRepository != repository.url) { throw GitError(networkText("previewExpired")) }
                 if operation == .push || operation == .pushPreview {
-                    let forcePreview = try await repository.preparePush(credential: credential, verifyRemote: operation == .pushPreview)
+                    let forcePreview = try await repository.preparePush(credential: credential, verifyRemote: operation == .pushPreview || acceptsMigratedPushIdentity)
                     if let forcePreview {
                         await saveCredentialAfterSuccess(credential, requested: saveCredential, repository: repository, operation: operation)
                         store.finishUserOperation(name, repository: repository, failure: CancellationError())
@@ -303,9 +304,10 @@ struct NetworkOperationsView: View {
                     forcePushPrompt = ForcePushPrompt(repository: repository, preview: preview,
                                                       credential: credential, saveCredential: saveCredential)
                 } else {
-                    _ = await authentication.presentIfNeeded(error: error, repository: repository, operation: operation) { credential, save in
+                    _ = await authentication.presentIfNeeded(error: error, repository: repository, operation: operation) { retry in
                         guard store.repository === repository else { return }
-                        runVerified(operation, credential: credential, saveCredential: save)
+                        runVerified(operation, credential: retry.credential, saveCredential: retry.saveCredential,
+                                    acceptsMigratedPushIdentity: retry.acceptsMigratedPushIdentity)
                     }
                 }
                 store.finishUserOperation(name, repository: repository, failure: error)
@@ -341,9 +343,14 @@ struct NetworkOperationsView: View {
             }
             catch {
                 output += "\n" + GitProgressParser.redact(OperationFailure.message(error, repository: prompt.repository.url))
-                _ = await authentication.presentIfNeeded(error: error, repository: prompt.repository, operation: .push) { credential, save in
+                _ = await authentication.presentIfNeeded(error: error, repository: prompt.repository, operation: .push) { retry in
                     guard store.repository === prompt.repository else { return }
-                    runForcePush(prompt, credential: credential, saveCredential: save)
+                    if retry.requiresFreshForcePushPreparation {
+                        runVerified(.push, credential: retry.credential, saveCredential: retry.saveCredential,
+                                    acceptsMigratedPushIdentity: retry.acceptsMigratedPushIdentity)
+                    } else {
+                        runForcePush(prompt, credential: retry.credential, saveCredential: retry.saveCredential)
+                    }
                 }
                 store.finishUserOperation(name, repository: prompt.repository, failure: error)
             }

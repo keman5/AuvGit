@@ -25,6 +25,28 @@ enum HistoryColumn: String {
 
 /// The compact identity uses only its content width and never exceeds 100 points.
 enum HistoryColumnLayout {
+    static let laneSpacing: CGFloat = 18
+
+    struct GraphMessageWidths {
+        let graph: CGFloat
+        let message: CGFloat
+    }
+
+    static func graphWidth(laneCount: Int) -> CGFloat {
+        CGFloat(max(1, laneCount)) * laneSpacing
+    }
+
+    static func rowHeight(compact: Bool) -> CGFloat { compact ? 24 : 28 }
+
+    static func graphMessageWidths(activeLaneCount: Int, maximumLaneCount: Int, maximumGraphWidth: CGFloat, baseMessageWidth: CGFloat) -> GraphMessageWidths {
+        let maximumLanes = max(1, maximumLaneCount)
+        let activeLanes = min(maximumLanes, max(1, activeLaneCount))
+        let required = graphWidth(laneCount: maximumLanes)
+        let graphBudget = maximumGraphWidth.isFinite ? max(required, maximumGraphWidth) : max(required, HistoryColumn.graph.minimumWidth)
+        let graph = graphWidth(laneCount: activeLanes)
+        return GraphMessageWidths(graph: graph, message: max(0, baseMessageWidth) + graphBudget - graph)
+    }
+
     static func compactDateWidth(measuredWidth: CGFloat) -> CGFloat {
         guard measuredWidth.isFinite else { return 110 }
         return min(110, max(48, ceil(measuredWidth)))

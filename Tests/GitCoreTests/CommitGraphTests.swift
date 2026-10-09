@@ -24,4 +24,11 @@ final class CommitGraphTests: XCTestCase {
         XCTAssertTrue(graph.rows[2].segments.contains { $0.fromLane == 1 && $0.toLane == 0 && $0.toY == 1 })
         XCTAssertTrue(graph.frontier.isEmpty)
     }
+    func testSegmentsRetainTheLineageTheyRender() {
+        let graph = CommitGraph(commits: [commit("merge", ["left", "right"]), commit("left", ["root"]), commit("right", ["root"]), commit("root", [])])
+        let split = graph.rows[0].segments.filter { $0.fromY == 0.5 }
+        XCTAssertEqual(Set(split.map(\.lineageHash)), ["left", "right"])
+        XCTAssertTrue(graph.rows[1].segments.contains { $0.fromLane == 1 && $0.toLane == 1 && $0.lineageHash == "right" })
+        XCTAssertTrue(graph.rows[2].segments.contains { $0.fromLane == 1 && $0.toLane == 0 && $0.lineageHash == "root" })
+    }
 }

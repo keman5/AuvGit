@@ -14,4 +14,6 @@ Selected 01 direction:
 
 > Minimal flat graphic identity: a single bold white branching path with three circular commit nodes, arranged as an asymmetrical elegant Y, on a saturated coral-red rounded square. Precise generous geometry, subtle dimensional tile edge only, virtually flat clean symbol, incredibly legible at 32 pixels.
 
-`AppIcon.png` is a byte-identical copy of the selected source. macOS `sips` generates the 10 standard 16–1024 pixel iconset representations, preserving alpha; `iconutil` creates `AppIcon.icns`. `scripts/build-app.sh` embeds it and sets `CFBundleIconFile` to `AppIcon`.
+`AppIcon.png` preserves the selected red branch artwork while removing disconnected and low-alpha pixels outside the icon body. The cleanup keeps the original pixels inside the retained body mask and clears exterior RGB and alpha together, preventing Finder thumbnails from rendering a gray background or colored fringe.
+
+macOS `sips` generates the 10 standard 16–1024 pixel iconset representations from the cleaned master, preserving alpha; `iconutil` creates `AppIcon.icns`. `scripts/build-app.sh` embeds it and sets `CFBundleIconFile` to `AppIcon`.

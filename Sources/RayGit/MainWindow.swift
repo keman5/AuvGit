@@ -393,8 +393,8 @@ struct MainWindow: View {
         }
         .onDisappear { confirmation?.cancelled?(); confirmation = nil; authentication.cancel() }
         .rayGitSheet(item: $authentication.request) { request in
-            RemoteAuthenticationSheet(request: request, submit: { credential, save in
-                authentication.submit(credential, save: save)
+            RemoteAuthenticationSheet(request: request, error: authentication.submissionError, isSubmitting: authentication.isSubmitting, submit: { submission in
+                authentication.submit(submission)
             }, cancel: { authentication.cancel() })
         }
         .rayGitSheet(item: $pullPrompt) { prompt in
@@ -502,8 +502,8 @@ struct MainWindow: View {
             let name = operation == .pull ? "Pull" : "Fetch"
             store.operation(name, onFailure: { error in
                 Task { @MainActor in
-                    _ = await authentication.presentIfNeeded(error: error, repository: repository, operation: operation) { credential, save in
-                        runToolbarNetwork(operation, credential: credential, saveCredential: save)
+                    _ = await authentication.presentIfNeeded(error: error, repository: repository, operation: operation) { retry in
+                        runToolbarNetwork(operation, credential: retry.credential, saveCredential: retry.saveCredential)
                     }
                 }
             }) { active in
@@ -536,8 +536,8 @@ struct MainWindow: View {
                     prepareRejectedPush(repository, credential: credential, saveCredential: saveCredential)
                 } else {
                     Task { @MainActor in
-                        _ = await authentication.presentIfNeeded(error: error, repository: repository, operation: .push) { credential, save in
-                            executeToolbarPush(repository, credential: credential, saveCredential: save)
+                        _ = await authentication.presentIfNeeded(error: error, repository: repository, operation: .push) { retry in
+                            executeToolbarPush(repository, credential: retry.credential, saveCredential: retry.saveCredential)
                         }
                     }
                 }
@@ -568,8 +568,8 @@ struct MainWindow: View {
             guard store.repository === repository, !store.isBusy else { return }
             store.operation("Push preview", onFailure: { error in
                 Task { @MainActor in
-                    _ = await authentication.presentIfNeeded(error: error, repository: repository, operation: .push) { credential, save in
-                        prepareRejectedPush(repository, credential: credential, saveCredential: save)
+                    _ = await authentication.presentIfNeeded(error: error, repository: repository, operation: .push) { retry in
+                        prepareRejectedPush(repository, credential: retry.credential, saveCredential: retry.saveCredential)
                     }
                 }
             }) { active in
@@ -594,8 +594,12 @@ struct MainWindow: View {
             guard store.repository === prompt.repository, !store.isBusy else { return }
             store.operation(forcePushText("action"), onFailure: { error in
                 Task { @MainActor in
-                    _ = await authentication.presentIfNeeded(error: error, repository: prompt.repository, operation: .push) { credential, save in
-                        runToolbarForcePush(prompt, credential: credential, saveCredential: save)
+                    _ = await authentication.presentIfNeeded(error: error, repository: prompt.repository, operation: .push) { retry in
+                        if retry.requiresFreshForcePushPreparation {
+                            executeToolbarPush(prompt.repository, credential: retry.credential, saveCredential: retry.saveCredential)
+                        } else {
+                            runToolbarForcePush(prompt, credential: retry.credential, saveCredential: retry.saveCredential)
+                        }
                     }
                 }
             }) { active in
@@ -741,8 +745,23 @@ struct MainWindow: View {
                         .disabled(store.repository == nil || aiCommit.isLoading)
                     Divider()
                     Button("Signed-off-by", action: addSignoff)
-                    Button(workflowText("commitTemplate")) { if let repository = store.repository { chooseTemplate(for: repository.url, configure: true) } }
-                    Button(refinementText("Load configured template"), action: loadTemplate)
+                    Menu {
+                        if store.recentCommitMessages.isEmpty {
+                            Text(refinementText("No recent commit messages"))
+                        } else {
+                            ForEach(store.recentCommitMessages, id: \.self) { message in
+                                Button { store.commitMessage = message } label: {
+                                    Text(recentCommitMessageTitle(message)).lineLimit(1)
+                                }
+                            }
+                        }
+                        Divider()
+                        Button(refinementText("Clear commit history"), role: .destructive) {
+                            store.clearRecentCommitMessages()
+                        }.disabled(store.recentCommitMessages.isEmpty)
+                    } label: {
+                        Label(refinementText("Recent commit messages"), systemImage: "clock.arrow.circlepath")
+                    }.disabled(store.repository == nil)
                 } label: { Label(refinementText("More"), systemImage: "ellipsis").frame(minHeight: 24).contentShape(Rectangle()) }
                     .menuIndicator(.hidden).menuStyle(.borderlessButton).fixedSize()
                     .help(refinementText("Commit options")).disabled(store.isBusy)
@@ -768,36 +787,10 @@ struct MainWindow: View {
             if store.repositoryURL == repo.url { store.commitMessage += "\n\nSigned-off-by: " + name + " <" + email + ">" }
         } catch { store.report(error) } }
     }
-    private func loadTemplate() {
-        guard let repo = store.repository else { return }
-        Task { do {
-            let path = try await repo.workflowRead(["config", "--path", "commit.template"]).trimmingCharacters(in: .newlines)
-            guard !path.isEmpty else { chooseTemplate(for: repo.url); return }
-            let expanded = (path as NSString).expandingTildeInPath
-            let url = expanded.hasPrefix("/") ? URL(fileURLWithPath: expanded) : repo.url.appendingPathComponent(expanded)
-            let message = try String(contentsOf: url, encoding: .utf8)
-            if store.repositoryURL == repo.url { store.commitMessage = message }
-        } catch let error as GitError where error.exitCode == 1 {
-            if store.repositoryURL == repo.url { chooseTemplate(for: repo.url) }
-        } catch { store.report(error) } }
-    }
-    private func chooseTemplate(for repositoryURL: URL, configure: Bool = false) {
-        guard store.repositoryURL == repositoryURL else { return }
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true; panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
-        panel.message = refinementText("Choose a commit message template")
-        panel.begin { response in
-            guard response == .OK, let url = panel.url, store.repositoryURL == repositoryURL else { return }
-            do {
-                let message = try String(contentsOf: url, encoding: .utf8)
-                if configure {
-                    store.operation(workflowText("commitTemplate")) { repository in
-                        _ = try await repository.workflowRead(["config", "--local", "commit.template", url.path])
-                        if store.repositoryURL == repositoryURL { store.commitMessage = message }
-                    }
-                } else { store.commitMessage = message }
-            } catch { store.report(error) }
-        }
+    private func recentCommitMessageTitle(_ message: String) -> String {
+        message.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first(where: { !$0.isEmpty }) ?? message
     }
     func statusName(_ status: String) -> String { [" ": "—", "?": mainText("untracked"), "M": mainText("modified"), "A": mainText("added"), "D": mainText("deleted"), "R": mainText("renamed"), "C": mainText("copied"), "U": mainText("conflict"), "T": mainText("type") ][status] ?? status }
     func statusColor(_ status: String) -> Color { switch status { case "?": return .blue; case "A": return .green; case "D": return .red; case "M", "R", "U": return .orange; default: return .secondary } }
@@ -807,7 +800,7 @@ extension MainWindow {
     private func historyPane(compact: Bool) -> some View {
         VStack(spacing: 0) {
             if compact { HStack { Label(interactionText("Log"), systemImage: "clock.arrow.circlepath").font(.system(size: 12, weight: .semibold)); HistorySearchControl(search: $store.historySearch, focusRequest: historySearchFocusRequest).frame(maxWidth: .infinity); HistoryDisplayMenu(showMergedCommits: Binding(get: { store.showMergedCommits }, set: { store.setShowMergedCommits($0) })); Button { if let repo = store.repository { LogPresenter.show(repository: repo) } } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(.plain).help(interactionText("Expand History")) }.padding(.horizontal, 12).frame(height: 36).rayGitChrome() }
-            HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch, isLoading: store.loadingHistory, hasMore: store.hasMore, onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy, onAction: historyAction, onShowChanges: { if let path = store.selectedCommitPath { compareCommitFile(path) } }, keyboardRequiresFocus: true, compact: compact, showsSearch: !compact, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), navigationGeneration: store.historyNavigationGeneration, onJump: jumpToCommit, firstParentGraph: store.followsCurrentBranch && !store.showMergedCommits, onFind: { historySearchFocusRequest = UUID() }, authorFilter: $store.historyAuthor)
+            HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch, isLoading: store.loadingHistory, hasMore: store.hasMore, onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy, onAction: historyAction, onShowChanges: { if let path = store.selectedCommitPath { compareCommitFile(path) } }, compact: compact, showsSearch: !compact, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), localUnpushedCommitHashes: store.localUnpushedCommitHashes, navigationGeneration: store.historyNavigationGeneration, onJump: jumpToCommit, firstParentGraph: store.followsCurrentBranch && !store.showMergedCommits, onFind: { historySearchFocusRequest = UUID() }, authorFilter: $store.historyAuthor)
                 .background(WorkspaceFileFocusRegion(focus: historyFocus).allowsHitTesting(false).accessibilityHidden(true))
         }
     }

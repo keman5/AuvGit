@@ -36,6 +36,14 @@ public actor GitRepository {
         if symbolic.code == 0 { return symbolic.text.trimmingCharacters(in: .newlines) }
         return "Detached " + (try await run(["rev-parse", "--short", "HEAD"])).text.trimmingCharacters(in: .newlines)
     }
+    public func localUnpushedCommitHashes(limit: Int) async throws -> Set<String>? {
+        let upstream = try await run(["rev-parse", "--verify", "@{upstream}"], allowedCodes: [0, 128])
+        guard upstream.code == 0 else { return nil }
+        guard limit > 0 else { return [] }
+        let hash = upstream.text.trimmingCharacters(in: .newlines)
+        let output = try await run(["rev-list", "--max-count=" + String(limit), hash + "..HEAD", "--"])
+        return Set(output.text.split(separator: "\n").map(String.init))
+    }
     public func worktrees() async throws -> [GitWorktree] {
         GitWorktree.parsePorcelain(try await run(["worktree", "list", "--porcelain", "-z"]).data)
     }

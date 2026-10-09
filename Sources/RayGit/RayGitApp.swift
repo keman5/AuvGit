@@ -67,11 +67,19 @@ struct RayGitApp: App {
 
 @MainActor
 final class RepositoryStore: ObservableObject {
+    private struct HistoryMemorySnapshot {
+        let commits: [GitCommit]
+        let loadedCount: Int
+        let hasMore: Bool
+        let localUnpushedCommitHashes: Set<String>?
+    }
+
     @Published var repository: GitRepository?
     @Published var repositoryURL: URL?
     @Published var openRepositories: [String] = []
     @Published var repositoryGroups = UserDefaults.standard.dictionary(forKey: "repositoryGroups") as? [String: String] ?? [:]
     private let persistsSession: Bool
+    let commitHistory: CommitMessageHistory
     private var accessedURL: URL?
     private var fileObserver: RepositoryFileObserver?
     private var filesystemRefresh: Task<Void, Never>?
@@ -88,8 +96,10 @@ final class RepositoryStore: ObservableObject {
     let followsCurrentBranch: Bool
     private let usesCheckedHistoryScope: Bool
     private var lastMainHistoryHead: String?
-    init(persistsSession: Bool = true, followsCurrentBranch: Bool? = nil, usesCheckedHistoryScope: Bool = false) {
+    init(persistsSession: Bool = true, followsCurrentBranch: Bool? = nil, usesCheckedHistoryScope: Bool = false,
+         commitHistoryDefaults: UserDefaults = .standard) {
         self.persistsSession = persistsSession
+        self.commitHistory = CommitMessageHistory(defaults: commitHistoryDefaults)
         self.followsCurrentBranch = followsCurrentBranch ?? persistsSession
         self.usesCheckedHistoryScope = usesCheckedHistoryScope
         Self.stores.add(self)
@@ -132,7 +142,7 @@ final class RepositoryStore: ObservableObject {
         diffTask?.cancel(); diffTask = nil
         repoVersion = UUID(); historyVersion = UUID(); detailVersion = UUID(); diffVersion = UUID()
         accessedURL?.stopAccessingSecurityScopedResource(); accessedURL = nil
-        repository = nil; repositoryURL = nil
+        repository = nil; repositoryURL = nil; localUnpushedCommitHashes = nil; recentCommitMessages = []
     }
     private func captureViewState() -> RepositoryViewState {
         var value = RepositoryViewState()
@@ -157,11 +167,12 @@ final class RepositoryStore: ObservableObject {
     func closeRepositoryTab(_ path: String) {
         guard !isBusy else { return }
         if repositoryURL?.path == path { session.repositories[path] = captureViewState() }
+        historyMemoryCache.removeValue(forKey: path)
         openRepositories.removeAll { $0 == path }
         guard repositoryURL?.path == path else { flushSession(); return }
         fileObserver = nil; filesystemRefresh?.cancel(); repository = nil; repositoryURL = nil
-        files = []; commits = []; branches = []; stashes = []; commitFiles = []; selectedPaths = []; selectedCommit = nil; selectedCommitPath = nil
-        commitMessage = ""; amend = false; accessedURL?.stopAccessingSecurityScopedResource(); accessedURL = nil
+        files = []; commits = []; localUnpushedCommitHashes = nil; branches = []; stashes = []; commitFiles = []; selectedPaths = []; selectedCommit = nil; selectedCommitPath = nil
+        commitMessage = ""; amend = false; recentCommitMessages = []; accessedURL?.stopAccessingSecurityScopedResource(); accessedURL = nil
         let candidates = Array(openRepositories.reversed()); session.activeRepository = candidates.first; flushSession()
         Task {
             for candidate in candidates {
@@ -247,6 +258,7 @@ final class RepositoryStore: ObservableObject {
     @Published var stashes: [GitStash] = []
     @Published var branch = ""
     @Published var commits: [GitCommit] = []
+    @Published var localUnpushedCommitHashes: Set<String>?
     @Published var commitFiles: [GitCommitFile] = []
     @Published var selectedPaths: Set<String> = []
     @Published private(set) var automaticallySelectedPath: String?
@@ -292,6 +304,7 @@ final class RepositoryStore: ObservableObject {
     @Published var checkedHistoryRefs: Set<String>?
     @Published var historyPinnedCommit: String?
     @Published var commitMessage = ""
+    @Published var recentCommitMessages: [String] = []
     @Published var workspaceCommitRequest: WorkspaceCommitRequest?
     @Published var amend = false
     @Published var isBusy = false
@@ -333,6 +346,8 @@ final class RepositoryStore: ObservableObject {
     private var diffTask: Task<Void, Never>?
     private var historyVersion = UUID()
     private var selectFirstHistoryCommit = false
+    private var historyMemoryCache: [String: HistoryMemorySnapshot] = [:]
+    private var historyRestoreDepth: Int?
     private var openingRepositoryPath: String?
     @Published private(set) var pendingRepositoryPath: String?
     var highlightedRepositoryPath: String? { pendingRepositoryPath ?? repositoryURL?.path }
@@ -429,15 +444,19 @@ final class RepositoryStore: ObservableObject {
         repoVersion = UUID(); historyVersion = UUID(); detailVersion = UUID(); diffVersion = UUID()
         diffTask?.cancel(); diffTask = nil
         openingRepositoryPath = url.path
-        if let path = repositoryURL?.path { session.repositories[path] = captureViewState() }
+        if let path = repositoryURL?.path {
+            session.repositories[path] = captureViewState()
+            cacheCurrentHistory(for: path)
+        }
         flushSession()
         isRestoringViewState = true
         isBusy = true; errorMessage = nil; latestOperationKey = nil; setStatus("Opening repository…")
         fileObserver = nil; filesystemRefresh?.cancel(); searchTask?.cancel()
         repository = nil; repositoryURL = nil
-        files = []; branches = []; branch = ""; commits = []; commitFiles = []; stashes = []
+        files = []; branches = []; branch = ""; commits = []; localUnpushedCommitHashes = nil; commitFiles = []; stashes = []
+        historyLoadedCount = 0; hasMore = false; historyRestoreDepth = nil
         selectedPaths = []; automaticallySelectedPath = nil; initialWorkspaceSelectionReady = false; selectedCommit = nil; selectedCommitPath = nil
-        commitMessage = ""; amend = false
+        commitMessage = ""; amend = false; recentCommitMessages = []
         clearDiff(); setDiffTitle("Select a file to view changes")
         loadingHistory = false
         do {
@@ -462,12 +481,14 @@ final class RepositoryStore: ObservableObject {
             diffTask?.cancel(); diffTask = nil
             repoVersion = UUID(); diffVersion = UUID(); detailVersion = UUID(); historyVersion = UUID()
             repository = repo; repositoryURL = root
+            recentCommitMessages = commitHistory.messages(for: root)
             fileObserver = nil; filesystemRefresh?.cancel()
             async let gitDirectoryRead = repo.workflowRead(["rev-parse", "--absolute-git-dir"])
             async let commonPathRead = repo.workflowRead(["rev-parse", "--git-common-dir"])
             lastObservedState = nil; lastHistoryState = nil; lastMainHistoryHead = nil; checkedHistoryRefs = nil; historyPinnedCommit = nil
             let restoredView = session.repositories[root.path] ?? session.repositories[url.path] ?? defaultViewState()
             applyViewState(restoredView)
+            restoreCachedHistory(for: root.path)
             if followsCurrentBranch { selectFirstHistoryCommit = true; selectedCommit = nil; selectedCommitPath = nil; historyNavigationGeneration = UUID() }
             openingRepositoryPath = nil; isBusy = false
             async let refreshed: Void = refresh()
@@ -666,6 +687,23 @@ final class RepositoryStore: ObservableObject {
         historyRef = nil; historyPath = nil; selectedCommit = nil; selectedCommitPath = nil; commitFiles = []
         selectFirstHistoryCommit = true; historyNavigationGeneration = UUID()
     }
+    private func cacheCurrentHistory(for path: String) {
+        guard !commits.isEmpty || historyLoadedCount > 0 else { return }
+        historyMemoryCache[path] = HistoryMemorySnapshot(
+            commits: commits,
+            loadedCount: historyLoadedCount,
+            hasMore: hasMore,
+            localUnpushedCommitHashes: localUnpushedCommitHashes
+        )
+    }
+    private func restoreCachedHistory(for path: String) {
+        guard let snapshot = historyMemoryCache[path] else { return }
+        commits = snapshot.commits
+        historyLoadedCount = snapshot.loadedCount
+        hasMore = snapshot.hasMore
+        localUnpushedCommitHashes = snapshot.localUnpushedCommitHashes
+        historyRestoreDepth = snapshot.loadedCount
+    }
     func setShowMergedCommits(_ value: Bool) {
         guard showMergedCommits != value else { return }
         showMergedCommits = value
@@ -693,18 +731,27 @@ final class RepositoryStore: ObservableObject {
     }
     func loadHistory(reset: Bool) async {
         guard let repository else { return }
+        if !reset, loadingHistory { return }
         let version = UUID(); historyVersion = version; loadingHistory = true
         let skip = reset ? 0 : historyLoadedCount
+        let requestedCount = reset ? max(RayGitPreferences.historyPageSize, historyRestoreDepth ?? 0) : RayGitPreferences.historyPageSize
         do {
             let stashHashes: [String]
             if followsCurrentBranch { stashHashes = stashes.map(\.hash) }
             else if historyPinnedCommit == nil, historyStashHash == nil, historyRef?.hasPrefix("refs/tags/") != true {
                 stashHashes = HistoryBranchScope.selectedStashHashes(checkedHistoryRefs ?? [HistoryBranchScope.allStashes], stashes: stashes)
             } else { stashHashes = [] }
-            let rows = try await repository.log(limit: RayGitPreferences.historyPageSize, skip: skip, search: historySearch, path: followsCurrentBranch ? nil : historyPath, ref: followsCurrentBranch ? "HEAD" : (historyPinnedCommit ?? historyRef), author: historyAuthor, firstParent: followsCurrentBranch && !showMergedCommits, refs: followsCurrentBranch || historyPinnedCommit != nil || historyStashHash != nil || historyRef?.hasPrefix("refs/tags/") == true ? nil : checkedHistoryRefs.map { HistoryBranchScope.revisionRefs($0, branches: branches, stashes: stashes) }, stashHashes: stashHashes, includeRecyclable: !followsCurrentBranch && historyPinnedCommit == nil && historyStashHash == nil && historyRef?.hasPrefix("refs/tags/") != true && checkedHistoryRefs?.contains(HistoryBranchScope.recyclable) == true)
+            let rows = try await repository.log(limit: requestedCount + 1, skip: skip, search: historySearch, path: followsCurrentBranch ? nil : historyPath, ref: followsCurrentBranch ? "HEAD" : (historyPinnedCommit ?? historyRef), author: historyAuthor, firstParent: followsCurrentBranch && !showMergedCommits, refs: followsCurrentBranch || historyPinnedCommit != nil || historyStashHash != nil || historyRef?.hasPrefix("refs/tags/") == true ? nil : checkedHistoryRefs.map { HistoryBranchScope.revisionRefs($0, branches: branches, stashes: stashes) }, stashHashes: stashHashes, includeRecyclable: !followsCurrentBranch && historyPinnedCommit == nil && historyStashHash == nil && historyRef?.hasPrefix("refs/tags/") != true && checkedHistoryRefs?.contains(HistoryBranchScope.recyclable) == true)
             guard historyVersion == version else { return }
-            let updatedCommits = reset ? rows : commits + rows.filter { row in !commits.contains(where: { $0.hash == row.hash }) }
-            if commits != updatedCommits { commits = updatedCommits }; historyLoadedCount = skip + rows.count; hasMore = rows.count == RayGitPreferences.historyPageSize
+            let page = Array(rows.prefix(requestedCount))
+            let updatedCommits = reset ? page : commits + page.filter { row in !commits.contains(where: { $0.hash == row.hash }) }
+            let unpushed = followsCurrentBranch ? try await repository.localUnpushedCommitHashes(limit: max(1, updatedCommits.count)) : nil
+            guard historyVersion == version else { return }
+            if commits != updatedCommits { commits = updatedCommits }
+            historyLoadedCount = skip + page.count
+            hasMore = rows.count > requestedCount
+            if reset { historyRestoreDepth = nil }
+            if followsCurrentBranch { localUnpushedCommitHashes = unpushed }
             if reset, selectFirstHistoryCommit {
                 selectFirstHistoryCommit = false; selectedCommit = rows.first?.hash
                 await loadCommitFiles()
@@ -714,6 +761,7 @@ final class RepositoryStore: ObservableObject {
                 if !followsCurrentBranch, checkedHistoryRefs == nil || historyStashHash != nil, let selected = try? await repository.log(limit: 1, ref: selectedCommit).first, historyVersion == version { commits.append(selected) }
                 else if !isRestoringViewState { self.selectedCommit = nil; commitFiles = []; selectedCommitPath = nil }
             }
+            cacheCurrentHistory(for: repository.url.path)
         } catch { if !Task.isCancelled, !(error is CancellationError), historyVersion == version { report(error) } }
         if historyVersion == version { loadingHistory = false }
     }

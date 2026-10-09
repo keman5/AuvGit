@@ -14,6 +14,25 @@ enum HistoryAction: String, CaseIterable {
 
 func historyActionText(_ key: String) -> String { L10n.text(key, table: "HistoryActions") }
 
+struct HistoryPaginationGate {
+    let prefetchDistance: Int
+    private var lastRequestedCount: Int?
+
+    init(prefetchDistance: Int) {
+        self.prefetchDistance = max(1, prefetchDistance)
+    }
+
+    mutating func shouldRequestMore(visibleIndex: Int, commitCount: Int, hasMore: Bool, isLoading: Bool) -> Bool {
+        guard hasMore, !isLoading, commitCount > 0,
+              visibleIndex >= max(0, commitCount - prefetchDistance),
+              lastRequestedCount != commitCount else { return false }
+        lastRequestedCount = commitCount
+        return true
+    }
+
+    mutating func reset() { lastRequestedCount = nil }
+}
+
 struct HistoryPane: View {
     let commits: [GitCommit]
     @Binding var selection: String?
@@ -25,11 +44,11 @@ struct HistoryPane: View {
     var isBusy: Bool = false
     var onAction: (HistoryAction, GitCommit) -> Void = { _, _ in }
     var onShowChanges: () -> Void = {}
-    var keyboardRequiresFocus = false
     var compact: Bool = false
     var showsSearch: Bool = true
     var showsDetails: Bool = true
     var remoteBranchNames: Set<String> = []
+    var localUnpushedCommitHashes: Set<String>? = nil
     var navigationGeneration: UUID? = nil
     var onJump: (String) -> Void = { _ in }
     var firstParentGraph: Bool = false
@@ -50,11 +69,13 @@ struct HistoryPane: View {
     @State private var messageWidth: CGFloat = 360
     @State private var hashWidth: CGFloat = 75
     @State private var dateWidth: CGFloat = 150
+    @State private var paginationGate = HistoryPaginationGate(prefetchDistance: 10)
 
     var body: some View {
         GeometryReader { geometry in
         let visible = commits
         let graph = graphCache.graph(commits: visible, firstParent: firstParentGraph)
+        let graphStyles = graphCache.styles(commits: visible, remoteBranchNames: remoteBranchNames, localUnpushedHashes: localUnpushedCommitHashes)
         let showColumns = !compact && (showAvatars || showNames)
         let compactNameWidth = compact && showNames ? graphCache.compactNameWidth(commits: visible, showsAvatar: showAvatars) : 0
         let compactDateWidth = compact ? graphCache.compactDateWidth(commits: visible) : 0
@@ -79,7 +100,8 @@ struct HistoryPane: View {
             VStack(spacing: 0) {
             if !compact {
             HStack(spacing: 8) {
-                columnHeader(historyText("history.graph"), column: .graph, width: $graphColumnWidth)
+                columnHeader(historyText("history.graph"), column: .graph, width: $graphColumnWidth,
+                             minimumWidth: HistoryColumnLayout.graphWidth(laneCount: graph.laneCount))
                 columnHeader(historyText("history.message"), column: .message, width: $messageWidth)
                 if showColumns {
                     if showNames { columnHeader(historyText("history.author"), column: .author, width: $authorWidth) }
@@ -100,20 +122,29 @@ struct HistoryPane: View {
                 ScrollViewReader { proxy in
                 List(selection: $selection) {
                     ForEach(Array(visible.enumerated()), id: \.element.hash) { index, commit in
+                        let row = graph.rows[index]
+                        let rowWidths = HistoryColumnLayout.graphMessageWidths(
+                            activeLaneCount: row.laneCount,
+                            maximumLaneCount: graph.laneCount,
+                            maximumGraphWidth: graphWidth(graph),
+                            baseMessageWidth: compact ? 220 : messageWidth
+                        )
                         HStack(spacing: compact ? 4 : 8) {
-                            CommitGraphCell(row: graph.rows[index], laneCount: graph.laneCount, selected: selection == commit.hash)
-                                .frame(width: graphWidth(graph), height: compact ? 22 : 28).clipped()
+                            CommitGraphCell(row: row, styles: graphStyles, selected: selection == commit.hash)
+                                .frame(width: rowWidths.graph, height: HistoryColumnLayout.rowHeight(compact: compact)).clipped()
                             HStack(spacing: 5) {
-                                ForEach(visibleRefs(commit, compact: compact), id: \.self) { ref in
-                                    Text(ref).font(.system(size: 10, weight: .medium))
+                                ForEach(visibleRefs(commit, compact: compact, styles: graphStyles), id: \.self) { ref in
+                                    let tint = graphStyles.referenceStyle(for: ref, commitHash: commit.hash).color.color
+                                    Text(referenceLabel(ref)).font(.system(size: 10, weight: .medium))
                                         .padding(.horizontal, 5).padding(.vertical, 2)
-                                        .foregroundStyle(selection == commit.hash ? Color.white : (isRemoteRef(ref) ? RayGitStyle.blue : Color.primary))
-                                        .background((selection == commit.hash ? Color.black : (isRemoteRef(ref) ? RayGitStyle.blue : Color.secondary)).opacity(selection == commit.hash ? 0.20 : 0.12), in: RoundedRectangle(cornerRadius: 4))
+                                        .foregroundStyle(tint)
+                                        .background(selection == commit.hash ? Color.white.opacity(0.92) : tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 4))
+                                        .overlay { RoundedRectangle(cornerRadius: 4).stroke(tint.opacity(0.8), lineWidth: 0.8) }
                                         .lineLimit(1).frame(maxWidth: compact ? 90 : 120, alignment: .leading)
                                         .help(ref)
                                 }
                                 Text(commit.subject).lineLimit(1).help(commit.subject)
-                            }.frame(width: compact ? 220 : messageWidth, alignment: .leading).clipped()
+                            }.frame(width: rowWidths.message, alignment: .leading).clipped()
                             if showColumns {
                                 HStack(spacing: 5) {
                                     if showAvatars { CommitAvatar(email: commit.authorEmail, size: 18).frame(width: 18, height: 18).clipped() }
@@ -142,8 +173,13 @@ struct HistoryPane: View {
                             .listRowInsets(EdgeInsets())
                             .accessibilityElement(children: .combine)
                             .accessibilityLabel(historyText("history.commitAccessibility", commit.subject, commit.author, commit.shortHash))
+                            .onAppear {
+                                if paginationGate.shouldRequestMore(visibleIndex: index, commitCount: visible.count, hasMore: hasMore, isLoading: isLoading) {
+                                    onLoadMore()
+                                }
+                            }
                     }
-                }.listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, compact ? 22 : RayGitStyle.rowHeight)
+                }.listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, HistoryColumnLayout.rowHeight(compact: compact))
                     .contextMenu(forSelectionType: String.self) { hashes in
                         if let hash = hashes.first, let commit = commits.first(where: { $0.hash == hash }) {
                             Button(sidebarRefinementText("viewLog")) { onAction(.viewLog, commit) }.configuredShortcut(.viewLog, using: shortcuts)
@@ -167,6 +203,7 @@ struct HistoryPane: View {
                         if let hash = hashes.first, let commit = commits.first(where: { $0.hash == hash }) { onAction(.show, commit) }
                     }
                     .onChange(of: navigationGeneration) { _, _ in pendingNavigationScroll = true; scrollAfterNavigation(proxy) }
+                    .onChange(of: visible.first?.hash) { _, _ in paginationGate.reset() }
                     .onChange(of: selection) { _, _ in scrollAfterNavigation(proxy) }
                     .onChange(of: commits) { _, _ in scrollAfterNavigation(proxy) }
                     .onAppear { scrollAfterNavigation(proxy) }
@@ -174,16 +211,7 @@ struct HistoryPane: View {
             }
             }.frame(width: max(geometry.size.width, compact
                 ? graphWidth(graph) + 220 + compactIdentityWidth + compactDateWidth + 75 + 24 + CGFloat(3 + (showAvatars || showNames ? 1 : 0)) * 4
-                : graphColumnWidth + messageWidth + (showColumns ? displayedAuthorWidth : 0) + dateWidth + hashWidth + 24 + CGFloat(showColumns ? 4 : 3) * 8), alignment: .leading)
-            }
-            if hasMore {
-                Divider()
-                Button(action: onLoadMore) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.down.circle")
-                        Text(isLoading ? historyText("history.loadingMore") : historyText("history.loadMore"))
-                    }
-                }.disabled(isLoading).padding(8)
+                : graphWidth(graph) + messageWidth + (showColumns ? displayedAuthorWidth : 0) + dateWidth + hashWidth + 24 + CGFloat(showColumns ? 4 : 3) * 8), alignment: .leading)
             }
             if !compact, showsDetails, let commit = commits.first(where: { $0.hash == selection }) {
                 Divider()
@@ -208,7 +236,7 @@ struct HistoryPane: View {
                 guard let target = HistoryCommitNavigation.target(commits: commits, selection: selection, child: child) else { return }
                 pendingNavigationScroll = true
                 selection = target
-            }, showChanges: onShowChanges, requiresFocusedRegion: keyboardRequiresFocus))
+            }, showChanges: onShowChanges))
         }
     }
     private func scrollAfterNavigation(_ proxy: ScrollViewProxy) {
@@ -216,12 +244,13 @@ struct HistoryPane: View {
         pendingNavigationScroll = false
         DispatchQueue.main.async { proxy.scrollTo(selection, anchor: .top) }
     }
-    private func isRemoteRef(_ ref: String) -> Bool {
-        remoteBranchNames.contains(ref) || ref.hasPrefix("refs/remotes/")
-    }
-    private func visibleRefs(_ commit: GitCommit, compact: Bool) -> [String] {
-        let values = commit.refs.filter { (showRemoteLabels || !isRemoteRef($0)) && (showTagLabels || !$0.hasPrefix("tag: ")) }
+    private func visibleRefs(_ commit: GitCommit, compact: Bool, styles: HistoryGraphStylePlan) -> [String] {
+        let values = commit.refs.filter { (showRemoteLabels || !styles.isRemoteReference($0)) && (showTagLabels || !styles.isTagReference($0)) }
         return compact ? Array(values.prefix(1)) : values
+    }
+    private func referenceLabel(_ reference: String) -> String {
+        if reference.hasPrefix("tag: ") { return "tag " + String(reference.dropFirst(5)) }
+        return reference.replacingOccurrences(of: " -> ", with: " → ")
     }
     private var searchControl: some View { HistorySearchControl(search: $search, focusRequest: searchFocusRequest) }
     private var filterControls: some View {
@@ -230,9 +259,15 @@ struct HistoryPane: View {
             HStack(spacing: 6) { Image(systemName: "number").foregroundStyle(.secondary); StableTextField(workflowText("Commit hash"), text: $jumpHash, onSubmit: { onJump(jumpHash) }, rounded: false) }.padding(.horizontal, 8).frame(height: 24).rayGitInputSurface().frame(width: 110)
         }
     }
-    private func graphWidth(_ graph: CommitGraph) -> CGFloat { compact ? min(80, CGFloat(max(0, graph.laneCount - 1)) * 14 + 14) : graphColumnWidth }
-    private func columnHeader(_ title: String, column: HistoryColumn, width: Binding<CGFloat>) -> some View {
-        HistoryColumnHeader(title: title, column: column, width: width)
+    private func graphWidth(_ graph: CommitGraph) -> CGFloat {
+        max(compact ? HistoryColumnLayout.laneSpacing : graphColumnWidth,
+            HistoryColumnLayout.graphWidth(laneCount: graph.laneCount))
+    }
+    private func columnHeader(_ title: String, column: HistoryColumn, width: Binding<CGFloat>, minimumWidth: CGFloat = 0) -> some View {
+        HistoryColumnHeader(title: title, column: column, width: Binding(
+            get: { max(minimumWidth, width.wrappedValue) },
+            set: { width.wrappedValue = max(minimumWidth, $0) }
+        ))
     }
 }
 
@@ -249,6 +284,10 @@ private final class HistoryGraphCache: ObservableObject {
     private var commits: [GitCommit] = []
     private var firstParent = false
     private var cachedGraph: CommitGraph?
+    private var colorCommits: [GitCommit] = []
+    private var colorRemoteBranchNames: Set<String> = []
+    private var colorLocalUnpushedHashes: Set<String>?
+    private var cachedStyles: HistoryGraphStylePlan?
     private var measuredAuthors: [String] = []
     private var measuredNameWidth: CGFloat = 0
     private var measuredDates: [Date] = []
@@ -282,6 +321,16 @@ private final class HistoryGraphCache: ObservableObject {
         self.firstParent = firstParent
         cachedGraph = graph
         return graph
+    }
+
+    func styles(commits: [GitCommit], remoteBranchNames: Set<String>, localUnpushedHashes: Set<String>?) -> HistoryGraphStylePlan {
+        if let cachedStyles, colorCommits == commits, colorRemoteBranchNames == remoteBranchNames, colorLocalUnpushedHashes == localUnpushedHashes { return cachedStyles }
+        let styles = HistoryGraphStylePlan(commits: commits, remoteBranchNames: remoteBranchNames, localUnpushedHashes: localUnpushedHashes)
+        colorCommits = commits
+        colorRemoteBranchNames = remoteBranchNames
+        colorLocalUnpushedHashes = localUnpushedHashes
+        cachedStyles = styles
+        return styles
     }
 }
 
@@ -379,22 +428,45 @@ final class HistoryResizeHandleView: NSView {
 
 private struct CommitGraphCell: View {
     let row: CommitGraph.Row
-    let laneCount: Int
+    let styles: HistoryGraphStylePlan
     var selected = false
     var body: some View {
         Canvas { context, size in
-            let spacing = min(14, (size.width - 8) / CGFloat(max(1, laneCount)))
+            let spacing = HistoryColumnLayout.laneSpacing
+            let halo = selected ? RayGitStyle.blue : RayGitStyle.canvas
             for segment in row.segments {
                 var path = Path()
-                let start = CGPoint(x: 7 + CGFloat(segment.fromLane) * spacing, y: size.height * segment.fromY)
-                let end = CGPoint(x: 7 + CGFloat(segment.toLane) * spacing, y: size.height * segment.toY)
+                let start = CGPoint(x: spacing / 2 + CGFloat(segment.fromLane) * spacing, y: size.height * segment.fromY)
+                let end = CGPoint(x: spacing / 2 + CGFloat(segment.toLane) * spacing, y: size.height * segment.toY)
                 path.move(to: start)
                 path.addCurve(to: end, control1: CGPoint(x: start.x, y: (start.y + end.y) / 2), control2: CGPoint(x: end.x, y: (start.y + end.y) / 2))
-                context.stroke(path, with: .color(selected ? .white.opacity(0.85) : Color.secondary.opacity(0.55)), lineWidth: 1.5)
+                let style = styles.lineStyle(for: segment.lineageHash)
+                context.stroke(path, with: .color(halo), style: StrokeStyle(lineWidth: style.lineWidth + 4, lineCap: .round, lineJoin: .round))
+                context.stroke(path, with: .color(style.color.color), style: StrokeStyle(
+                    lineWidth: style.lineWidth,
+                    lineCap: .round,
+                    lineJoin: .round,
+                    dash: style.dashPattern.map { CGFloat($0) },
+                    dashPhase: CGFloat(style.variant * 2)
+                ))
             }
-            let point = CGRect(x: 3 + CGFloat(row.nodeLane) * spacing, y: size.height / 2 - 4, width: 8, height: 8)
-            context.fill(Path(ellipseIn: point), with: .color(selected ? RayGitStyle.blue : RayGitStyle.canvas))
-            context.stroke(Path(ellipseIn: point), with: .color(selected ? .white : Color.secondary.opacity(0.75)), lineWidth: 1.5)
+            let node = styles.nodeStyle(for: row.hash)
+            let color = node.color.color
+            let point = CGRect(x: spacing / 2 - 5 + CGFloat(row.nodeLane) * spacing,
+                               y: size.height / 2 - 5, width: 10, height: 10)
+            context.fill(Path(ellipseIn: point.insetBy(dx: -2.5, dy: -2.5)), with: .color(halo))
+            switch node.kind {
+            case .ordinary:
+                context.fill(Path(ellipseIn: point), with: .color(color))
+            case .merge:
+                context.stroke(Path(ellipseIn: point), with: .color(color), lineWidth: 2.5)
+                context.fill(Path(ellipseIn: point.insetBy(dx: 3, dy: 3)), with: .color(color))
+            case .remoteOnly:
+                context.stroke(Path(ellipseIn: point), with: .color(color), lineWidth: 2.5)
+            }
+            if node.isHead {
+                context.stroke(Path(ellipseIn: point.insetBy(dx: -3.5, dy: -3.5)), with: .color(color), lineWidth: 2)
+            }
         }.accessibilityHidden(true)
     }
 }
