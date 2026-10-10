@@ -3,12 +3,14 @@ import SwiftUI
 
 /// History commands belong to their window; native text editing keeps copy and Return.
 struct HistoryKeyboardRegion: NSViewRepresentable {
+    var paneScoped = false
     let action: (HistoryAction) -> Void
     let find: () -> Void
     var navigate: (Bool) -> Void = { _ in }
     var showChanges: () -> Void = {}
     final class RegionView: NSView {
         var shortcuts = KeyboardShortcuts.shared
+        var paneScoped = false
         var action: (HistoryAction) -> Void = { _ in }
         var find: () -> Void = {}
         var navigate: (Bool) -> Void = { _ in }
@@ -29,6 +31,11 @@ struct HistoryKeyboardRegion: NSViewRepresentable {
         func handle(_ event: NSEvent) -> NSEvent? {
             guard let window, window.attachedSheet == nil, event.window === window,
                   !isHiddenOrHasHiddenAncestor else { return event }
+            if paneScoped {
+                guard let responder = window.firstResponder as? NSView else { return event }
+                let visible = responder.visibleRect
+                guard !visible.isEmpty, bounds.contains(convert(NSPoint(x: visible.midX, y: visible.midY), from: responder)) else { return event }
+            }
             if Self.terminalOwnsFocus(window.firstResponder) { return event }
             if window.firstResponder is ReadOnlyDiffTextView || window.firstResponder is ComparisonTextView { return event }
             let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
@@ -37,6 +44,11 @@ struct HistoryKeyboardRegion: NSViewRepresentable {
                 if (key == "c" && modifiers == .command) || (key == "\r" && modifiers.isEmpty) { return event }
                 if shortcuts.binding(.selectChildCommit).matches(event) || shortcuts.binding(.selectParentCommit).matches(event) { return event }
                 if [.checkout, .rebase, .useCommitMessage, .showChanges].contains(where: { shortcuts.binding($0).matches(event) }) { return event }
+            }
+            if shortcuts.binding(.copyMessage).matches(event) {
+                guard let responder = window.firstResponder as? NSView,
+                      bounds.contains(convert(NSPoint(x: responder.visibleRect.midX, y: responder.visibleRect.midY), from: responder)) else { return event }
+                action(.copyMessage); return nil
             }
             if shortcuts.binding(.showChanges).matches(event) { showChanges(); return nil }
             if shortcuts.binding(.selectChildCommit).matches(event) { navigate(true); return nil }
@@ -56,5 +68,5 @@ struct HistoryKeyboardRegion: NSViewRepresentable {
         }
     }
     func makeNSView(context: Context) -> RegionView { RegionView() }
-    func updateNSView(_ view: RegionView, context: Context) { view.action = action; view.find = find; view.navigate = navigate; view.showChanges = showChanges }
+    func updateNSView(_ view: RegionView, context: Context) { view.paneScoped = paneScoped; view.action = action; view.find = find; view.navigate = navigate; view.showChanges = showChanges }
 }

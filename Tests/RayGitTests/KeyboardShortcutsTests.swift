@@ -46,7 +46,7 @@ final class KeyboardShortcutsTests: XCTestCase {
             XCTAssertTrue(fresh.isValid(.init(key: key, modifiers: modifiers), for: .stage))
         }
         // Existing RayGit actions still own their chords in overlapping scopes.
-        XCTAssertFalse(fresh.isValid(.init(key: "e", modifiers: 1), for: .stage))
+        XCTAssertFalse(fresh.isValid(.init(key: "Down", modifiers: 1), for: .stage))
         XCTAssertTrue(fresh.isValid(.init(key: "g", modifiers: 1), for: .stage), "Files and checkout history/branch scopes are disjoint")
         XCTAssertEqual(fresh.binding(.refresh).displayString, "F5")
         defaults.set("r", forKey: "shortcut.refresh")
@@ -79,7 +79,8 @@ final class KeyboardShortcutsTests: XCTestCase {
         XCTAssertEqual(shortcuts.binding(.commit), shortcuts.binding(.compareNextConflict))
         XCTAssertEqual(shortcuts.binding(.comparePreviousChange), .init(key: "F6", modifiers: 2))
         XCTAssertEqual(shortcuts.binding(.compareNextChange), .init(key: "F6", modifiers: 0))
-        XCTAssertEqual(shortcuts.binding(.renameFile), shortcuts.binding(.renameBranch))
+        XCTAssertEqual(shortcuts.binding(.renameFile), .init(key: "Return", modifiers: 0))
+        XCTAssertEqual(shortcuts.binding(.renameBranch), .init(key: "F2", modifiers: 0))
         XCTAssertEqual(shortcuts.binding(.renameStash), shortcuts.binding(.renameBranch))
         XCTAssertEqual(shortcuts.binding(.findObject), .init(key: "p", modifiers: 1))
         XCTAssertEqual(shortcuts.binding(.activateFiles), .init(key: "3", modifiers: 5))
@@ -100,13 +101,26 @@ final class KeyboardShortcutsTests: XCTestCase {
         for command in ShortcutCommand.allCases { XCTAssertEqual(shortcuts.binding(command), command.defaultBinding) }
     }
 
+    func testCopyMessageDefaultAndOldHashBindingMigration() throws {
+        let name = "KeyboardShortcutsTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(try JSONEncoder().encode(ShortcutBinding(key: "c", modifiers: 1)), forKey: "shortcut.binding.copyHash")
+        let shortcuts = KeyboardShortcuts(defaults: defaults)
+        XCTAssertEqual(shortcuts.binding(.copyMessage), .init(key: "c", modifiers: 1))
+        XCTAssertEqual(shortcuts.binding(.copyHash), .init(key: "c", modifiers: 3))
+        XCTAssertEqual(ShortcutCommand.copyMessage.historyAction, .copyMessage)
+        defaults.set(try JSONEncoder().encode(ShortcutBinding(key: "b", modifiers: 5)), forKey: "shortcut.binding.copyHash")
+        XCTAssertEqual(KeyboardShortcuts(defaults: defaults).binding(.copyHash), .init(key: "b", modifiers: 5))
+    }
+
     func testDisabledChordReuseReenableAndPersistence() throws {
         let name = "KeyboardShortcutsTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let shortcuts = KeyboardShortcuts(defaults: defaults)
-        XCTAssertTrue(shortcuts.setEnabled(false, for: .copyHash))
-        let disabled = shortcuts.binding(.copyHash)
+        XCTAssertTrue(shortcuts.setEnabled(false, for: .copyMessage))
+        let disabled = shortcuts.binding(.copyMessage)
         XCTAssertFalse(disabled.isAssigned)
         XCTAssertTrue(disabled.hasAssignedKey)
         XCTAssertEqual(disabled.displayString, "⌘C")
@@ -114,16 +128,16 @@ final class KeyboardShortcutsTests: XCTestCase {
         XCTAssertFalse(disabled.matches(event))
         XCTAssertTrue(shortcuts.set(.init(key: "c", modifiers: 1), for: .reset))
         XCTAssertTrue(shortcuts.binding(.reset).matches(event))
-        XCTAssertFalse(shortcuts.setEnabled(true, for: .copyHash))
+        XCTAssertFalse(shortcuts.setEnabled(true, for: .copyMessage))
         let reloaded = KeyboardShortcuts(defaults: defaults)
-        XCTAssertEqual(reloaded.binding(.copyHash), disabled)
+        XCTAssertEqual(reloaded.binding(.copyMessage), disabled)
         XCTAssertEqual(reloaded.binding(.reset), .init(key: "c", modifiers: 1))
         XCTAssertTrue(reloaded.setEnabled(false, for: .reset))
-        XCTAssertTrue(reloaded.setEnabled(true, for: .copyHash))
-        XCTAssertEqual(reloaded.binding(.copyHash), ShortcutCommand.copyHash.defaultBinding)
+        XCTAssertTrue(reloaded.setEnabled(true, for: .copyMessage))
+        XCTAssertEqual(reloaded.binding(.copyMessage), ShortcutCommand.copyMessage.defaultBinding)
         let legacy = try JSONDecoder().decode(ShortcutBinding.self, from: Data(#"{"key":"c","modifiers":1}"#.utf8))
         XCTAssertTrue(legacy.enabled)
-        XCTAssertEqual(legacy, ShortcutCommand.copyHash.defaultBinding)
+        XCTAssertEqual(legacy, ShortcutCommand.copyMessage.defaultBinding)
     }
 
     func testExplicitRefreshOverrideAndCanonicalKeysSurviveReload() throws {
@@ -140,7 +154,7 @@ final class KeyboardShortcutsTests: XCTestCase {
         XCTAssertEqual(KeyboardShortcuts(defaults: defaults).binding(.refresh), .init(key: "r", modifiers: 1))
         XCTAssertFalse(shortcuts.set(.init(key: "C", modifiers: 1), for: .refresh))
         let decoded = try JSONDecoder().decode(ShortcutBinding.self, from: Data(#"{"key":"C","modifiers":1}"#.utf8))
-        XCTAssertEqual(decoded, ShortcutCommand.copyHash.defaultBinding)
+        XCTAssertEqual(decoded, ShortcutCommand.copyMessage.defaultBinding)
         XCTAssertFalse(ShortcutBinding.supportsKey(String(UnicodeScalar(NSF1FunctionKey)!)))
         XCTAssertFalse(ShortcutBinding.supportsKey("ab"))
         XCTAssertFalse(ShortcutBinding.supportsKey("👩‍💻"))

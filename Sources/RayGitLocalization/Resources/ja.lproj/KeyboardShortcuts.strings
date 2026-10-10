@@ -90,3 +90,8 @@
 "Clear Shortcut" = "ショートカットをクリア";
 "Letter shortcuts require Command or Control. Native text editing remains available in text fields." = "文字のショートカットには Command または Control が必要です。テキスト欄では標準の編集操作を使用できます。";
 "Shortcut conflicts with another enabled action or needs Command/Control." = "別の有効な操作と競合しているか、Command/Control が必要です。";
+
+"Select All Files" = "すべてのファイルを選択";
+"Copy Files" = "ファイルをコピー";
+
+"Copy Commit Message" = "コミットメッセージをコピー";

@@ -6,7 +6,7 @@ func sidebarRefinementText(_ key: String, _ arguments: CVarArg...) -> String {
     L10n.text(key, table: "SidebarRefinement", arguments: arguments)
 }
 
-enum SidebarAction { case openRepository, revealRepository, removeRecent, checkout, history, rename, delete, copy, stashShow, stashApply, stashDrop, merge, stopTracking, setTracking }
+enum SidebarAction { case openRepository, revealRepository, removeRecent, checkout, createLocalBranch, history, rename, delete, copy, stashShow, stashApply, stashDrop, merge, stopTracking, setTracking }
 
 private struct RepositoryRowButtonStyle: ButtonStyle {
     var selected: Bool
@@ -108,6 +108,9 @@ struct RepositorySidebar: View {
                                     Button(interactionText("Check Out…")) { onAction(.checkout, target) }.disabled(store.isBusy)
                                 }
                                 Button(interactionText("Log")) { onAction(.history, (item.hasPrefix("remote:") ? "refs/remotes/" : "refs/heads/") + target) }.disabled(store.isBusy)
+                                if item.hasPrefix("remote:") {
+                                    Button(sidebarRefinementText("Create Local Branch…")) { onAction(.createLocalBranch, target) }.disabled(store.isBusy)
+                                }
                                 Button(sidebarRefinementText("Merge into Current Branch")) { onAction(.merge, (item.hasPrefix("remote:") ? "refs/remotes/" : "refs/heads/") + target) }.disabled(store.isBusy || (!item.hasPrefix("remote:") && target == store.branch))
                                 Button(sidebarRefinementText("Stop Tracking Remote Branch")) { onAction(.stopTracking, item.hasPrefix("remote:") ? "refs/remotes/" + target : target) }.disabled(store.isBusy)
                                 if item.hasPrefix("branch:") {
@@ -154,8 +157,13 @@ struct RepositorySidebar: View {
         renameStash = reference
     }
     private func handleShortcut(_ event: NSEvent) -> Bool {
-        guard !store.isBusy, let item = branchSelection, let separator = item.firstIndex(of: ":") else { return false }
+        guard let item = branchSelection, let separator = item.firstIndex(of: ":") else { return false }
         let target = String(item[item.index(after: separator)...])
+        if ShortcutBinding(key: "c", modifiers: 1).matches(event) {
+            onAction(.copy, item.hasPrefix("stash:") ? store.stashes.first { $0.ref == target }?.subject ?? target : target)
+            return true
+        }
+        guard !store.isBusy else { return false }
         func matches(_ command: ShortcutCommand) -> Bool { shortcuts.binding(command).matches(event) }
         if item.hasPrefix("stash:") {
             if matches(.renameStash) { prepareStashRename(target); return true }
@@ -194,7 +202,7 @@ struct RepositorySidebar: View {
         let hasPush = ahead > 0, hasPull = behind > 0, hasConflict = conflicts > 0
         let symbol = hasConflict ? "exclamationmark.triangle.fill" : hasPush && hasPull ? "arrow.up.arrow.down.circle" : hasPull ? "arrow.down.circle" : hasPush ? "arrow.up.circle" : "folder"
         let status = hasConflict ? sidebarRefinementText("conflicts", conflicts) : hasPush && hasPull ? sidebarRefinementText("pushPull", ahead, behind) : hasPull ? sidebarRefinementText("pull", behind) : hasPush ? sidebarRefinementText("push", ahead) : path
-        return Button { if store.canOpenRepository { onAction(.openRepository, path) } } label: {
+        return Button { focusedRepository = path; if store.canOpenRepository { onAction(.openRepository, path) } } label: {
             HStack(spacing: 6) {
                 Image(systemName: "folder").font(.system(size: 13)).frame(width: 20, height: 19)
                     .overlay(alignment: .bottomTrailing) {
@@ -218,6 +226,11 @@ struct RepositorySidebar: View {
         }.buttonStyle(RepositoryRowButtonStyle(selected: active, allowsSelection: store.canOpenRepository)).help(path).transaction { $0.animation = nil }
             .accessibilityAddTraits(active ? .isSelected : [])
             .focusable().focused($focusedRepository, equals: path).id(path)
+            .onKeyPress("c", phases: .down) { press in
+                guard press.modifiers == .command else { return .ignored }
+                onAction(.copy, URL(fileURLWithPath: path).lastPathComponent)
+                return .handled
+            }
             .onKeyPress(.return) { guard store.canOpenRepository else { return .handled }; onAction(.openRepository, path); return .handled }
             .frame(maxWidth: .infinity)
             .contentShape(RoundedRectangle(cornerRadius: 7))

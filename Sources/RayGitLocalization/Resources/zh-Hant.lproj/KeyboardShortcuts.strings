@@ -90,3 +90,8 @@
 "Clear Shortcut" = "清除快捷鍵";
 "Letter shortcuts require Command or Control. Native text editing remains available in text fields." = "字母快捷鍵需要 Command 或 Control。文字欄位保留原生文字編輯操作。";
 "Shortcut conflicts with another enabled action or needs Command/Control." = "快捷鍵與另一項已啟用操作衝突，或需要 Command/Control。";
+
+"Select All Files" = "全選檔案";
+"Copy Files" = "複製檔案";
+
+"Copy Commit Message" = "複製提交資訊";

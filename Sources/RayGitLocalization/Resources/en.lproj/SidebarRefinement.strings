@@ -16,3 +16,4 @@
 "Changes Saved in Stash" = "Changes Saved in Stash";
 "Auto Stash Retained" = "Local changes were automatically saved in stash %@. The stash is retained; apply it when you are ready.";
 "Merge Branch Message" = "Merge %@ into the current branch %@?";
+"Create Local Branch…" = "Create Local Branch…";

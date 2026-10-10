@@ -16,3 +16,4 @@
 "Changes Saved in Stash" = "更改已儲存至貯藏";
 "Auto Stash Retained" = "本機更改已自動儲存至貯藏 %@。貯藏已保留，可在需要時套用。";
 "Merge Branch Message" = "將 %@ 合併到目前分支 %@？";
+"Create Local Branch…" = "建立本機分支…";

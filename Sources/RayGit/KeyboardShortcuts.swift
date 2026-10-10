@@ -10,8 +10,8 @@ enum ShortcutScope: String, CaseIterable {
 }
 
 enum ShortcutCommand: String, CaseIterable {
-    case open, refresh, stage, unstage, commit, viewLog, reset, resetAdvanced, copyHash, createBranch
-    case createTag, show, find, refreshAlternate, clone, filterFiles, selectCommittable, copyPath, copyRelativePath
+    case open, refresh, stage, unstage, commit, viewLog, reset, resetAdvanced, copyHash, copyMessage, createBranch
+    case createTag, show, find, refreshAlternate, clone, filterFiles, selectCommittable, selectAllFiles, copyFiles, copyPath, copyRelativePath
     case selectChildCommit, selectParentCommit, showUnversionedFiles, showIgnoredFiles, pull, fetch
     case push, editFile, ignore, renameFile, useCommitMessage
     case discard, deleteFile, stash, applyStash, renameStash, checkout, rebase, renameBranch
@@ -41,7 +41,8 @@ enum ShortcutCommand: String, CaseIterable {
         .viewLog: ("View Log", "l", 1, [.workspace, .history]),
         .reset: ("Hard Reset", "r", 1, [.history]),
         .resetAdvanced: ("Advanced Reset", "r", 3, [.history]),
-        .copyHash: ("Copy Commit Hash", "c", 1, [.history]),
+        .copyHash: ("Copy Commit Hash", "c", 3, [.history]),
+        .copyMessage: ("Copy Commit Message", "c", 1, [.history]),
         .createBranch: ("Create Branch", "F7", 0, [.workspace, .history]),
         .createTag: ("Create Tag", "F7", 2, [.workspace, .history]),
         .show: ("Commit Details", "Return", 0, [.history]),
@@ -50,7 +51,9 @@ enum ShortcutCommand: String, CaseIterable {
         .clone: ("Clone Repository", "o", 3, [.workspace]),
         .filterFiles: ("Filter Files", "f", 1, [.files]),
         .selectCommittable: ("Select Committable Files", "a", 5, [.files]),
-        .copyPath: ("Copy Path", "c", 9, [.files]),
+        .selectAllFiles: ("Select All Files", "a", 1, [.files]),
+        .copyFiles: ("Copy Files", "c", 1, [.files]),
+        .copyPath: ("Copy Path", "c", 5, [.files]),
         .copyRelativePath: ("Copy Relative Path", "c", 3, [.files]),
         .selectChildCommit: ("Select Child Commit", "Up", 4, [.history]),
         .selectParentCommit: ("Select Parent Commit", "Down", 4, [.history]),
@@ -59,12 +62,12 @@ enum ShortcutCommand: String, CaseIterable {
         .pull: ("Pull", "PageDown", 1, [.workspace]),
         .fetch: ("Fetch", "PageDown", 3, [.workspace]),
         .push: ("Push", "PageUp", 1, [.workspace]),
-        .editFile: ("Edit File", "e", 1, [.files]),
+        .editFile: ("Edit File", "Down", 1, [.files]),
         .ignore: ("Ignore", "i", 1, [.files]),
-        .renameFile: ("Move or Rename File", "F2", 0, [.files]),
+        .renameFile: ("Move or Rename File", "Return", 0, [.files]),
         .useCommitMessage: ("Use Message for Commit", "k", 3, [.history]),
         .discard: ("Discard", "z", 1, [.files]),
-        .deleteFile: ("Delete File", "Backspace", 0, [.files]),
+        .deleteFile: ("Delete File", "Backspace", 1, [.files]),
         .stash: ("Stash All", "s", 1, [.workspace]),
         .applyStash: ("Apply Stash", "s", 3, [.workspace, .stash]),
         .renameStash: ("Rename Stash", "F2", 0, [.stash]),
@@ -108,6 +111,7 @@ enum ShortcutCommand: String, CaseIterable {
         case .reset: return .reset
         case .resetAdvanced: return .resetAdvanced
         case .copyHash: return .copyHash
+        case .copyMessage: return .copyMessage
         case .createBranch: return .createBranch
         case .createTag: return .createTag
         case .show: return .show
@@ -172,7 +176,7 @@ struct ShortcutBinding: Codable, Equatable {
         return value
     }
     func matches(_ event: NSEvent) -> Bool {
-        isAssigned && event.charactersIgnoringModifiers?.lowercased() == String(character).lowercased()
+        isAssigned && ((key == "Return" && [36, 76].contains(event.keyCode)) || event.charactersIgnoringModifiers?.lowercased() == String(character).lowercased())
             && event.modifierFlags.intersection([.command, .shift, .option, .control]) == eventModifiers
     }
 }
@@ -193,6 +197,9 @@ final class KeyboardShortcuts: ObservableObject {
                let value = try? JSONDecoder().decode(ShortcutBinding.self, from: data) {
                 bindings[command] = value
             }
+        }
+        if binding(.copyHash) == .init(key: "c", modifiers: 1) {
+            bindings[.copyHash] = ShortcutCommand.copyHash.defaultBinding
         }
         // Only migrate legacy payloads; enabled-aware preferences are deliberate assignments.
         let refreshData = defaults.data(forKey: "shortcut.binding.refresh")

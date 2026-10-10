@@ -100,6 +100,29 @@ final class GitRepositoryTests: XCTestCase {
         XCTAssertTrue(detachedHistory.contains { $0.subject == "Detached only" })
     }
 
+    func testCreateLocalBranchAtRemotePreservesCheckoutAndDraft() async throws {
+        let (url, repo) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let file = url.appendingPathComponent("sample.txt")
+        try "remote\n".write(to: file, atomically: true, encoding: .utf8)
+        try await repo.stage(paths: ["sample.txt"]); try await repo.commit(message: "Remote tip")
+        let remote = try await GitProcess.run(at: url, arguments: ["rev-parse", "HEAD"])
+        let remoteHash = remote.text.trimmingCharacters(in: .newlines)
+        _ = try await GitProcess.run(at: url, arguments: ["update-ref", "refs/remotes/origin/feature/nested", remoteHash])
+        try "local\n".write(to: file, atomically: true, encoding: .utf8)
+        try await repo.stage(paths: ["sample.txt"]); try await repo.commit(message: "Different local tip")
+        try "draft\n".write(to: file, atomically: true, encoding: .utf8)
+
+        try await repo.createBranch(name: "feature/nested", startPoint: "refs/remotes/origin/feature/nested")
+        let created = try await GitProcess.run(at: url, arguments: ["rev-parse", "refs/heads/feature/nested"])
+        XCTAssertEqual(created.text.trimmingCharacters(in: .newlines), remoteHash)
+        let current = try await repo.currentBranch()
+        XCTAssertEqual(current, "main")
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "draft\n")
+        do { try await repo.createBranch(name: "feature/nested", startPoint: "refs/remotes/origin/feature/nested"); XCTFail("Existing branch must not be overwritten") } catch { }
+        do { try await repo.createBranch(name: "--force", startPoint: "refs/remotes/origin/feature/nested"); XCTFail("Option-shaped branch must be rejected") } catch { }
+    }
+
     func testLocalRemoteFetchPullPushAndDivergence() async throws {
         let (url, repo) = try await fixture()
         let remote = url.appendingPathComponent("remote.git")

@@ -58,6 +58,38 @@ final class WorkspaceTableMouseTests: XCTestCase {
         }
     }
     func testBaselineTableMouseSelection() async throws { try await exercise(production: false) }
+    func testFinderMultipleSelectionAndVisibleSelectAll() async throws {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 400), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let selection = Selection(), focus = WorkspaceFileFocus()
+        let host = NSHostingView(rootView: Fixture(selection: selection, focus: focus, production: true))
+        window.contentView = host
+        for _ in 0..<20 { host.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(10)) }
+        let table = try XCTUnwrap(findTable(host))
+        XCTAssertTrue(table.allowsMultipleSelection)
+        XCTAssertTrue(table.allowsEmptySelection)
+        func click(_ row: Int, flags: NSEvent.ModifierFlags) async throws {
+            let rect = table.rect(ofRow: row)
+            let point = table.convert(NSPoint(x: rect.minX + 55, y: rect.midY), to: nil)
+            let hit = try XCTUnwrap(window.contentView?.hitTest(point))
+            let down = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: flags, timestamp: 1, windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+            let up = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseUp, location: point, modifierFlags: flags, timestamp: 1.1, windowNumber: window.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0))
+            NSApplication.shared.postEvent(up, atStart: true)
+            hit.mouseDown(with: down)
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        try await click(2, flags: .command)
+        XCTAssertEqual(selection.paths, ["a", "c"])
+        try await click(0, flags: .command)
+        XCTAssertEqual(selection.paths, ["c"])
+        try await click(0, flags: .shift)
+        XCTAssertEqual(selection.paths, ["a", "b", "c"])
+        table.selectAll(nil)
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(selection.paths, ["a", "b", "c"])
+    }
     func testWorkspaceRowHeightRemainsCompactAcrossFileListReplacement() async throws {
         _ = NSApplication.shared
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 400), styleMask: [.borderless], backing: .buffered, defer: false)

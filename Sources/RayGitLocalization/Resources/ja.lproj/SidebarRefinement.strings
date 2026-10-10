@@ -16,3 +16,4 @@
 "Changes Saved in Stash" = "変更をスタッシュに保存しました";
 "Auto Stash Retained" = "ローカル変更をスタッシュ %@ に自動保存しました。スタッシュは保持されています。必要なときに適用してください。";
 "Merge Branch Message" = "%@ を現在のブランチ %@ にマージしますか？";
+"Create Local Branch…" = "ローカルブランチを作成…";

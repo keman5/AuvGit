@@ -215,6 +215,7 @@ private struct LogWindowContent: View {
                     }
                 }
             }.listStyle(.sidebar).scrollContentBackground(.hidden).font(.system(size: 12))
+                .onCopyCommand(perform: copyReference)
                 .onChange(of: store.historyNavigationGeneration) { _, _ in refSearch = ""; highlightedReference = referenceSelection; proxy.scrollTo(referenceSelection, anchor: .center) }
                 .onChange(of: store.branches) { _, _ in proxy.scrollTo(referenceSelection, anchor: .center) }
                 .onChange(of: tags.map(\.name)) { _, _ in proxy.scrollTo(referenceSelection, anchor: .center) }
@@ -224,6 +225,13 @@ private struct LogWindowContent: View {
         }.background(RayGitStyle.sidebar)
     }
     private var referenceSelection: String { store.historyStashRef ?? HistoryReference.canonical(store.historyRef, branches: store.branches) ?? "" }
+    private func copyReference() -> [NSItemProvider] {
+        guard let reference = highlightedReference else { return [] }
+        let branch = store.branches.first { HistoryBranchScope.branchRef($0) == reference }?.name
+        let tag = tags.first { "refs/tags/" + $0.name == reference }?.name
+        let stash = store.stashes.first { HistoryBranchScope.stashRef($0) == reference }?.subject
+        return [NSItemProvider(object: (branch ?? tag ?? stash ?? reference) as NSString)]
+    }
     private func referenceRows(remote: Bool) -> some View {
         ForEach(store.branches.filter { $0.isRemote == remote && (refSearch.isEmpty || $0.name.localizedCaseInsensitiveContains(refSearch)) }) { branch in
             let ref = HistoryBranchScope.branchRef(branch)

@@ -5,6 +5,35 @@ import GitCore
 
 @MainActor
 final class HistoryKeyboardShortcutsTests: XCTestCase {
+    func testEmbeddedHistoryLeavesFileShortcutsToTheFocusedTable() throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let region = HistoryKeyboardRegion.RegionView(frame: NSRect(x: 0, y: 0, width: 200, height: 300))
+        region.paneScoped = true
+        window.contentView!.addSubview(region)
+        let files = NSTableView(frame: NSRect(x: 0, y: 0, width: 200, height: 300))
+        files.addTableColumn(NSTableColumn(identifier: .init("file")))
+        let scroll = NSScrollView(frame: NSRect(x: 250, y: 0, width: 200, height: 300))
+        scroll.documentView = files
+        window.contentView!.addSubview(scroll)
+        window.orderFront(nil)
+        XCTAssertTrue(window.makeFirstResponder(files))
+        var calls = 0
+        region.action = { _ in calls += 1 }; region.find = { calls += 1 }; region.showChanges = { calls += 1 }
+        let inputs: [(String, NSEvent.ModifierFlags)] = [("c", .command), ("\r", []), ("f", .command)]
+        for (characters, flags) in inputs {
+            let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: window.windowNumber, context: nil, characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: 0))
+            XCTAssertNotNil(region.handle(event))
+        }
+        XCTAssertEqual(calls, 0)
+        scroll.setFrameOrigin(.zero)
+        for (characters, flags) in inputs {
+            let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: window.windowNumber, context: nil, characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: 0))
+            XCTAssertNil(region.handle(event))
+        }
+        XCTAssertEqual(calls, 3)
+    }
     func testGraphNavigationUsesRelationshipsRatherThanAdjacentRows() {
         func commit(_ hash: String, _ parents: [String]) -> GitCommit {
             GitCommit(hash: hash, parents: parents, author: "A", date: .distantPast, subject: hash, body: "", refs: [])
@@ -56,7 +85,7 @@ final class HistoryKeyboardShortcutsTests: XCTestCase {
         XCTAssertNil(region.handle(try key(String(UnicodeScalar(NSF7FunctionKey)!), .shift)))
         XCTAssertNil(region.handle(try key("\r", [])))
         XCTAssertNil(region.handle(try key("f")))
-        XCTAssertEqual(actions, [.reset, .resetAdvanced, .copyHash, .viewLog, .createBranch, .createTag, .show]); XCTAssertEqual(finds, 1)
+        XCTAssertEqual(actions, [.reset, .resetAdvanced, .copyMessage, .viewLog, .createBranch, .createTag, .show]); XCTAssertEqual(finds, 1)
         XCTAssertNotNil(region.handle(try key("r", [.command, .option])))
         let editor = NSTextView(frame: region.frame); content.addSubview(editor)
         XCTAssertTrue(window.makeFirstResponder(editor))
@@ -83,6 +112,7 @@ final class HistoryKeyboardShortcutsTests: XCTestCase {
         otherScroll.documentView = other; content.addSubview(otherScroll)
         XCTAssertTrue(window.makeFirstResponder(other))
         XCTAssertTrue(window.firstResponder === other)
+        XCTAssertNotNil(region.handle(try key("c")), "Reference lists must retain their own copy command")
         XCTAssertNil(region.handle(try key("r")))
         XCTAssertTrue(window.makeFirstResponder(nil))
         XCTAssertNil(region.handle(try key("l")))
@@ -151,6 +181,7 @@ final class HistoryKeyboardShortcutsTests: XCTestCase {
         XCTAssertNil(region.handle(try key("b", [.command, .option])))
         XCTAssertEqual(actions.last, .copyHash)
         XCTAssertEqual(actions.count, count + 1)
+        XCTAssertTrue(region.shortcuts.setEnabled(false, for: .copyMessage))
         XCTAssertTrue(region.shortcuts.set(.init(key: "c", modifiers: 1), for: .copyHash))
         XCTAssertNil(region.handle(try key("c")))
         XCTAssertTrue(window.makeFirstResponder(editor))

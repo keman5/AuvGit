@@ -5,7 +5,7 @@ import RayGitLocalization
 
 enum FileAction {
     case compare, open, reveal, history, stage, unstage, discard
-    case copyName, copyPath, copyRelativePath, stageAll, unstageAll, rename, ignore, trash
+    case copyName, copyFiles, copyPath, copyRelativePath, stageAll, unstageAll, rename, ignore, trash
 }
 struct FilePaneShortcutRequest {
     let id = UUID()
@@ -309,6 +309,8 @@ private struct WorkspaceTableDensity: NSViewRepresentable {
             }
         }
         private func apply(to table: NSTableView) {
+            if !table.allowsMultipleSelection { table.allowsMultipleSelection = true }
+            if !table.allowsEmptySelection { table.allowsEmptySelection = true }
             // SwiftUI installs automatic sizing from hosting-cell fitting heights.
             // A rowHeight alone is ignored while that mode is enabled.
             if let scroll = table.enclosingScrollView { scroll.autohidesScrollers = true }

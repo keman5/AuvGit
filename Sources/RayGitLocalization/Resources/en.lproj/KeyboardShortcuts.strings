@@ -90,3 +90,8 @@
 "Clear Shortcut" = "Clear Shortcut";
 "Letter shortcuts require Command or Control. Native text editing remains available in text fields." = "Letter shortcuts require Command or Control. Native text editing remains available in text fields.";
 "Shortcut conflicts with another enabled action or needs Command/Control." = "Shortcut conflicts with another enabled action or needs Command/Control.";
+
+"Select All Files" = "Select All Files";
+"Copy Files" = "Copy Files";
+
+"Copy Commit Message" = "Copy Commit Message";

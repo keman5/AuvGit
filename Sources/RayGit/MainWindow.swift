@@ -818,6 +818,11 @@ extension MainWindow {
             if store.isBusy { return true }
             let selection = store.selectedPaths
             switch command {
+            case .selectAllFiles:
+                if let shortcutWindow, fileFocus.focus(in: shortcutWindow) {
+                    (shortcutWindow.firstResponder as? NSTableView)?.selectAll(nil)
+                }
+            case .copyFiles: fileAction(.copyFiles, selection)
             case .filterFiles, .showUnversionedFiles, .showIgnoredFiles: fileShortcutRequest = FilePaneShortcutRequest(command: command)
             case .selectCommittable: store.selectedPaths = WorkspaceFileActionTargets.paths(for: .stage, files: store.files, selection: [])
             case .copyPath: fileAction(.copyPath, selection)
@@ -944,6 +949,11 @@ extension MainWindow {
                 }
             }
         case .copyName: copyText(ordered.map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: "\n"))
+        case .copyFiles:
+            let urls = ordered.map { root.appendingPathComponent($0) }.filter { FileManager.default.fileExists(atPath: $0.path) }
+            guard !urls.isEmpty else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.writeObjects(urls as [NSURL])
         case .copyPath: copyText(paths.sorted().map { root.appendingPathComponent($0).path }.joined(separator: "\n"))
         case .copyRelativePath: copyText(ordered.joined(separator: "\n"))
         }
@@ -980,6 +990,10 @@ extension MainWindow {
         case .removeRecent: store.recentPaths.removeAll { $0 == value }; UserDefaults.standard.set(store.recentPaths, forKey: "recentRepositories")
         case .copy: copyText(value)
         case .history: store.showHistory(path: nil, ref: value)
+        case .createLocalBranch:
+            askName(interactionText("Create Branch at %@", value), initial: String(value.split(separator: "/", maxSplits: 1).last ?? "")) { name in
+                store.operation(sidebarRefinementText("Create Local Branch…")) { try await $0.createBranch(name: name, startPoint: "refs/remotes/" + value) }
+            }
         case .checkout:
             store.switchBranch(to: value) { stash in
                 confirmation = PendingAction(title: sidebarRefinementText("Changes Saved in Stash"), message: sidebarRefinementText("Auto Stash Retained", String(stash.prefix(12))), action: {}, informational: true)

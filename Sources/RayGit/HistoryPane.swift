@@ -196,7 +196,7 @@ struct HistoryPane: View {
                             }
                             Divider()
                             Button(historyActionText("copyHash")) { onAction(.copyHash, commit) }.configuredShortcut(.copyHash, using: shortcuts)
-                            Button(historyActionText("copyMessage")) { onAction(.copyMessage, commit) }
+                            Button(historyActionText("copyMessage")) { onAction(.copyMessage, commit) }.configuredShortcut(.copyMessage, using: shortcuts)
                             Button(shortcutText("Use Message for Commit")) { onAction(.useCommitMessage, commit) }.configuredShortcut(.useCommitMessage, using: shortcuts)
                         }
                     } primaryAction: { hashes in
@@ -227,7 +227,7 @@ struct HistoryPane: View {
                     .accessibilityLabel(historyText("history.details"))
             }
         }.background(RayGitStyle.canvas)
-            .background(HistoryKeyboardRegion(action: { action in
+            .background(HistoryKeyboardRegion(paneScoped: compact, action: { action in
                 guard let commit = commits.first(where: { $0.hash == selection }), !action.isMutation || !isBusy else { return }
                 onAction(action, commit)
             }, find: {

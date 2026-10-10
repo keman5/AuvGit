@@ -4,6 +4,45 @@ import XCTest
 
 @MainActor
 final class WorkspaceKeyboardShortcutsTests: XCTestCase {
+    func testFinderShortcutsStayInFileScopeAndPreserveTextEditing() throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let region = WorkspaceKeyboardRegion.RegionView(frame: window.contentView!.bounds)
+        window.contentView!.addSubview(region)
+        let suite = "FinderShortcuts.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        region.shortcuts = KeyboardShortcuts(defaults: defaults)
+        var fileFocus = true
+        var commands: [ShortcutCommand] = []
+        region.action = { command in
+            guard fileFocus else { return false }
+            commands.append(command); return true
+        }
+        let inputs: [(UInt16, String, NSEvent.ModifierFlags, ShortcutCommand)] = [
+            (0, "a", .command, .selectAllFiles), (8, "c", .command, .copyFiles),
+            (36, "\n", [], .renameFile), (76, "\u{3}", [], .renameFile), (125, "\u{f701}", .command, .editFile),
+            (51, "\u{7f}", .command, .deleteFile), (8, "c", [.command, .option], .copyPath)
+        ]
+        let editor = NSTextView(frame: region.frame)
+        window.contentView!.addSubview(editor)
+        for (code, characters, flags, command) in inputs {
+            let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: window.windowNumber, context: nil, characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code))
+            window.makeFirstResponder(nil)
+            fileFocus = true
+            XCTAssertNil(region.handle(event))
+            XCTAssertEqual(commands.last, command)
+            let count = commands.count
+            fileFocus = false
+            XCTAssertNotNil(region.handle(event))
+            XCTAssertEqual(commands.count, count)
+            fileFocus = true
+            XCTAssertTrue(window.makeFirstResponder(editor))
+            XCTAssertNotNil(region.handle(event))
+            XCTAssertEqual(commands.count, count)
+        }
+    }
     func testWorkspaceKeysStayInTheirWindowAndPreserveNativeEditing() throws {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
         let other = NSWindow(contentRect: window.frame, styleMask: [.titled], backing: .buffered, defer: false)
@@ -51,6 +90,8 @@ final class WorkspaceKeyboardShortcutsTests: XCTestCase {
         XCTAssertTrue(region.shortcuts.setEnabled(true, for: .discard))
         XCTAssertNil(region.handle(try key(window)))
         XCTAssertEqual(commands, [.discard, .discard])
+        XCTAssertFalse(region.shortcuts.set(.init(key: "c", modifiers: 1), for: .copyPath), "Copy Files owns the Finder copy shortcut until disabled")
+        XCTAssertTrue(region.shortcuts.setEnabled(false, for: .copyFiles))
         XCTAssertTrue(region.shortcuts.set(.init(key: "c", modifiers: 1), for: .copyPath))
         let copy = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: window.windowNumber, context: nil, characters: "c", charactersIgnoringModifiers: "c", isARepeat: false, keyCode: 0))
         XCTAssertNil(region.handle(copy))
