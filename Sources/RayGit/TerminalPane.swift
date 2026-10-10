@@ -93,7 +93,7 @@ struct TerminalShortcutMonitor: NSViewRepresentable {
     let toggle: () -> Void
     static func isToggleShortcut(_ event: NSEvent) -> Bool {
         event.keyCode == 50 &&
-        event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad]) == .command
+        event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad]) == .control
     }
     func makeNSView(context: Context) -> ShortcutView { ShortcutView(toggle: toggle) }
     func updateNSView(_ view: ShortcutView, context: Context) { view.toggle = toggle }

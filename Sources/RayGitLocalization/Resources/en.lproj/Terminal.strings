@@ -1,5 +1,5 @@
 "title" = "Terminal";
-"toggle" = "Toggle Terminal (⌘`)";
+"toggle" = "Toggle Terminal (⌃`)";
 "hide" = "Hide Terminal (keep session running)";
 "close" = "Close Terminal Session (stop shell and jobs)";
 "closeSession" = "Close session: %@";

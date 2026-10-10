@@ -1,11 +1,26 @@
 #!/bin/zsh
 set -euo pipefail
 cd "${0:A:h:h}"
+# Compile the native icon so macOS 26+ does not wrap the legacy icns in a gray tile.
+ICON_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/raygit-app-icon.XXXXXX")"
+trap 'rm -rf -- "$ICON_BUILD_DIR"' EXIT
+xcrun actool Resources/AppIcon.icon \
+  --compile "$ICON_BUILD_DIR" \
+  --app-icon AppIcon \
+  --platform macosx \
+  --minimum-deployment-target 14.0 \
+  --target-device mac \
+  --output-partial-info-plist "$ICON_BUILD_DIR/icon-info.plist"
+if [[ ! -s "$ICON_BUILD_DIR/Assets.car" ]]; then
+  print -u2 "Missing compiled application icon: $ICON_BUILD_DIR/Assets.car"
+  exit 1
+fi
 swift build --build-system native -c release
 BUILD_BIN_PATH="$(swift build --build-system native -c release --show-bin-path)"
 APP="$PWD/.artifacts/RayGit.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+cp "$ICON_BUILD_DIR/Assets.car" "$APP/Contents/Resources/Assets.car"
 cp Resources/THIRD_PARTY_NOTICES.txt "$APP/Contents/Resources/THIRD_PARTY_NOTICES.txt"
 cp "$BUILD_BIN_PATH/RayGit" "$APP/Contents/MacOS/RayGit"
 RESOURCE_BUNDLE="$BUILD_BIN_PATH/RayGit_RayGitLocalization.bundle"
@@ -29,6 +44,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleIconFile</key><string>AppIcon</string>
+<key>CFBundleIconName</key><string>AppIcon</string>
 <key>CFBundleExecutable</key><string>RayGit</string>
 <key>CFBundleIdentifier</key><string>dev.raygit.mac</string>
 <key>CFBundleName</key><string>RayGit</string>
@@ -43,4 +59,6 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </dict></plist>
 PLIST
 codesign --force --sign - "$APP"
+# Reusing the bundle directory otherwise leaves Finder's cached icon unchanged.
+touch "$APP/Contents/Resources" "$APP/Contents" "$APP"
 print "Built $APP"

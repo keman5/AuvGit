@@ -126,6 +126,8 @@ final class KeyboardShortcutsTests: XCTestCase {
         XCTAssertEqual(disabled.displayString, "⌘C")
         let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: 0, context: nil, characters: "c", charactersIgnoringModifiers: "c", isARepeat: false, keyCode: 0))
         XCTAssertFalse(disabled.matches(event))
+        XCTAssertFalse(shortcuts.set(.init(key: "c", modifiers: 1), for: .reset), "Window-wide reset overlaps Finder copy as well as history copy")
+        XCTAssertTrue(shortcuts.setEnabled(false, for: .copyFiles))
         XCTAssertTrue(shortcuts.set(.init(key: "c", modifiers: 1), for: .reset))
         XCTAssertTrue(shortcuts.binding(.reset).matches(event))
         XCTAssertFalse(shortcuts.setEnabled(true, for: .copyMessage))

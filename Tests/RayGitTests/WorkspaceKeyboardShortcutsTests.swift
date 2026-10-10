@@ -4,6 +4,60 @@ import XCTest
 
 @MainActor
 final class WorkspaceKeyboardShortcutsTests: XCTestCase {
+    func testWindowCommandsWorkOutsideHistoryAndWhileEditing() throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let region = WorkspaceKeyboardRegion.RegionView(frame: window.contentView!.bounds)
+        window.contentView!.addSubview(region)
+        let suite = "WindowShortcuts.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        region.shortcuts = KeyboardShortcuts(defaults: defaults)
+        var commands: [ShortcutCommand] = []
+        region.action = { commands.append($0); return true }
+        func key(_ command: ShortcutCommand) throws -> NSEvent {
+            let binding = region.shortcuts.binding(command)
+            return try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: binding.eventModifiers, timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, characters: String(binding.character),
+                charactersIgnoringModifiers: String(binding.character), isARepeat: false, keyCode: 0))
+        }
+        for command in [ShortcutCommand.reset, .resetAdvanced] {
+            XCTAssertNil(region.handle(try key(command)))
+        }
+        XCTAssertEqual(commands, [.reset, .resetAdvanced])
+        let editor = NSTextView(frame: region.frame)
+        window.contentView!.addSubview(editor)
+        XCTAssertTrue(window.makeFirstResponder(editor))
+        for command in [ShortcutCommand.reset, .resetAdvanced, .refresh, .commit, .clone, .pull, .fetch, .push] {
+            XCTAssertNil(region.handle(try key(command)), command.rawValue)
+        }
+        XCTAssertEqual(commands, [.reset, .resetAdvanced, .reset, .resetAdvanced, .refresh, .commit, .clone, .pull, .fetch, .push])
+        let count = commands.count
+        for command in [ShortcutCommand.copyFiles, .selectAllFiles, .discard, .stash] {
+            XCTAssertNotNil(region.handle(try key(command)))
+        }
+        XCTAssertEqual(commands.count, count)
+        let comparison = ReadOnlyDiffTextView(frame: region.frame)
+        window.contentView!.addSubview(comparison)
+        XCTAssertTrue(window.makeFirstResponder(comparison))
+        XCTAssertNotNil(region.handle(try key(.reset)), "Comparison keeps its Find and Replace shortcut")
+        XCTAssertNotNil(region.handle(try key(.resetAdvanced)))
+        let terminal = TerminalSession(directory: FileManager.default.temporaryDirectory).view
+        window.contentView!.addSubview(terminal)
+        XCTAssertTrue(window.makeFirstResponder(terminal))
+        XCTAssertNotNil(region.handle(try key(.reset)))
+        XCTAssertNotNil(region.handle(try key(.resetAdvanced)))
+        XCTAssertEqual(commands.count, count)
+        window.makeFirstResponder(editor)
+        let sheet = NSWindow(contentRect: window.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.beginSheet(sheet)
+        XCTAssertNotNil(region.handle(try key(.resetAdvanced)))
+        XCTAssertNotNil(region.handle(try key(.refresh)))
+        XCTAssertEqual(commands.count, count)
+        window.endSheet(sheet)
+    }
+
     func testFinderShortcutsStayInFileScopeAndPreserveTextEditing() throws {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false

@@ -193,7 +193,7 @@ struct ComparisonEditor: NSViewRepresentable {
                 NotificationCenter.default.removeObserver(self)
                 NotificationCenter.default.addObserver(self, selector: #selector(windowFocusChanged), name: NSWindow.didBecomeKeyNotification, object: nil)
                 NotificationCenter.default.addObserver(self, selector: #selector(windowFocusChanged), name: NSWindow.didResignKeyNotification, object: nil)
-                let focusedID = panes.first(where: { $0.text === active || $0.text === split.window?.firstResponder })?.id
+                let focusedID = panes.first(where: { $0.text === split.window?.firstResponder })?.id
                 split.subviews.forEach { $0.removeFromSuperview() }
                 panes = value.columns.map { column in
                     let pane = paneCache[column.id] ?? Pane(column: column)
@@ -242,7 +242,6 @@ struct ComparisonEditor: NSViewRepresentable {
                     if pane.preservesUndo {
                         pane.text.replaceAsUndoableEdit(column.text)
                         active = pane.text
-                        pane.text.window?.makeFirstResponder(pane.text)
                     } else { pane.text.string = column.text }
                     let length = (column.text as NSString).length
                     pane.text.setSelectedRange(NSRange(location: min(selected.location, length), length: 0))

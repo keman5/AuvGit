@@ -39,8 +39,8 @@ enum ShortcutCommand: String, CaseIterable {
         .unstage: ("Unstage", "t", 3, [.files]),
         .commit: ("Commit", "k", 1, [.workspace]),
         .viewLog: ("View Log", "l", 1, [.workspace, .history]),
-        .reset: ("Hard Reset", "r", 1, [.history]),
-        .resetAdvanced: ("Advanced Reset", "r", 3, [.history]),
+        .reset: ("Hard Reset", "r", 1, [.workspace, .history]),
+        .resetAdvanced: ("Advanced Reset", "r", 3, [.workspace, .history]),
         .copyHash: ("Copy Commit Hash", "c", 3, [.history]),
         .copyMessage: ("Copy Commit Message", "c", 1, [.history]),
         .createBranch: ("Create Branch", "F7", 0, [.workspace, .history]),
@@ -94,6 +94,14 @@ enum ShortcutCommand: String, CaseIterable {
     ]
     var title: String { Self.definitions[self]!.title }
     var scopes: Set<ShortcutScope> { Self.definitions[self]!.scopes }
+    var worksWhileEditingText: Bool {
+        switch self {
+        case .activateRepositories, .activateBranches, .activateFiles, .activateChanges, .activateHistory, .activateCommit, .activateOutput,
+             .findObject, .refresh, .refreshAlternate, .commit, .viewLog, .showLogWindow, .clone, .createBranch, .createTag,
+             .pull, .fetch, .push, .reset, .resetAdvanced: return true
+        default: return false
+        }
+    }
     var defaultBinding: ShortcutBinding {
         let value = Self.definitions[self]!
         return .init(key: value.key, modifiers: value.modifiers)

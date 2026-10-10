@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 final class TerminalAppearanceTests: XCTestCase {
-    func testTerminalToggleUsesPhysicalGraveKeyWithExactCommandModifier() throws {
+    func testTerminalToggleUsesPhysicalGraveKeyWithExactControlModifier() throws {
         func event(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, characters: String) throws -> NSEvent {
             try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers,
                                           timestamp: 0, windowNumber: 0, context: nil,
@@ -12,10 +12,13 @@ final class TerminalAppearanceTests: XCTestCase {
                                           isARepeat: false, keyCode: keyCode))
         }
 
-        XCTAssertTrue(TerminalShortcutMonitor.isToggleShortcut(try event(keyCode: 50, modifiers: .command, characters: "§")))
-        XCTAssertTrue(TerminalShortcutMonitor.isToggleShortcut(try event(keyCode: 50, modifiers: [.command, .capsLock], characters: "~")))
-        XCTAssertFalse(TerminalShortcutMonitor.isToggleShortcut(try event(keyCode: 50, modifiers: [.command, .shift], characters: "`")))
-        XCTAssertFalse(TerminalShortcutMonitor.isToggleShortcut(try event(keyCode: 0, modifiers: .command, characters: "`")))
+        XCTAssertTrue(TerminalShortcutMonitor.isToggleShortcut(try event(keyCode: 50, modifiers: .control, characters: "§")))
+        XCTAssertTrue(TerminalShortcutMonitor.isToggleShortcut(try event(keyCode: 50, modifiers: [.control, .capsLock], characters: "~")))
+        XCTAssertFalse(TerminalShortcutMonitor.isToggleShortcut(try event(keyCode: 50, modifiers: .command, characters: "`")))
+        XCTAssertFalse(TerminalShortcutMonitor.isToggleShortcut(try event(keyCode: 50, modifiers: [.control, .shift], characters: "`")))
+        XCTAssertFalse(TerminalShortcutMonitor.isToggleShortcut(try event(keyCode: 50, modifiers: [.control, .option], characters: "`")))
+        XCTAssertFalse(TerminalShortcutMonitor.isToggleShortcut(try event(keyCode: 50, modifiers: [.control, .command], characters: "`")))
+        XCTAssertFalse(TerminalShortcutMonitor.isToggleShortcut(try event(keyCode: 0, modifiers: .control, characters: "`")))
     }
 
     func testAttachmentAndAppearanceChangesKeepTerminalColorsReadable() {

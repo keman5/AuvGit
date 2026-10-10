@@ -234,6 +234,7 @@ struct RepositorySidebar: View {
             .onKeyPress(.return) { guard store.canOpenRepository else { return .handled }; onAction(.openRepository, path); return .handled }
             .frame(maxWidth: .infinity)
             .contentShape(RoundedRectangle(cornerRadius: 7))
+            .contextRowFocus()
             .contextMenu {
                 Button(interactionText("Open Repository")) { onAction(.openRepository, path) }.disabled(!store.canOpenRepository)
                 Button(L10n.text("Refresh Repository")) {

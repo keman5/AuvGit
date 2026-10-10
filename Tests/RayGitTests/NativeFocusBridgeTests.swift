@@ -75,7 +75,8 @@ final class NativeFocusBridgeTests: XCTestCase {
         }
         let reachable = candidates(content)
         XCTAssertEqual(reachable.count, 2, "Only the two enabled actions should participate in the loop")
-        sheet.makeFirstResponder(sheet); sheet.selectNextKeyView(nil)
+        XCTAssertTrue(sheet.firstResponder === sheet)
+        NSApplication.shared.sendEvent(tabEvent(in: sheet))
         let first = try XCTUnwrap(sheet.firstResponder as? NSView)
         XCTAssertTrue(reachable.contains { $0 === first })
         sheet.selectNextKeyView(nil)
@@ -115,8 +116,8 @@ final class NativeFocusBridgeTests: XCTestCase {
         drain(content)
         let source = try XCTUnwrap(fields(content).first { $0.accessibilityLabel() == workflowText("Clone URL or local path") })
         XCTAssertTrue(sheet.canBecomeKey, "Styling must preserve the sheet's keyboard eligibility")
-        XCTAssertTrue(ownsFocus(source, sheet), "Real sheet must retain its initial URL focus after styling")
-        sheet.makeFirstResponder(sheet)
+        XCTAssertTrue(sheet.firstResponder === sheet, "Opening a sheet must leave controls unfocused")
+        XCTAssertEqual(source.focusRingType, .none)
         sheet.sendEvent(tabEvent(in: sheet))
         XCTAssertTrue(ownsFocus(source, sheet), "First real Tab must enter the loop when the sheet owns first responder")
         sheet.sendEvent(tabEvent(in: sheet))
@@ -135,7 +136,7 @@ final class NativeFocusBridgeTests: XCTestCase {
             )
         }
     }
-    func testComparisonSearchWaitsForWindowBeforeConsumingInitialFocus() throws {
+    func testComparisonSearchWaitsForTabAfterAttachingToWindow() throws {
         _ = NSApplication.shared
         let host = NSHostingView(rootView: ComparisonSearchPopover(options: .constant(ComparisonSearchOptions()),
             replacement: .constant(""), matchCount: 0, onNavigate: { _ in }))
@@ -146,7 +147,9 @@ final class NativeFocusBridgeTests: XCTestCase {
         defer { window.close() }
         drain(host)
         let query = try XCTUnwrap(fields(host).first { $0.accessibilityLabel() == comparisonSearchText("Find") })
-        XCTAssertTrue(ownsFocus(query, window), "Creating search before its presentation must not consume initial focus")
+        XCTAssertFalse(ownsFocus(query, window))
+        window.sendEvent(tabEvent(in: window))
+        XCTAssertTrue(ownsFocus(query, window), "First Tab enters search after its presentation attaches")
     }
     func testComparisonPopoverDoesNotRebindParentScope() throws {
         _ = NSApplication.shared
@@ -171,6 +174,8 @@ final class NativeFocusBridgeTests: XCTestCase {
             (view as? NativeFocusBridge.RootView).map { [$0] } ?? view.subviews.flatMap(roots)
         }
         XCTAssertTrue(roots(host).contains { $0.scope !== scope }, "Interactive popover must own a scope instead of inheriting the parent")
+        XCTAssertFalse(ownsFocus(query, popupWindow))
+        NSApplication.shared.sendEvent(tabEvent(in: popupWindow))
         XCTAssertTrue(ownsFocus(query, popupWindow))
         popover.close(); drain(parentHost)
         let parentField = try XCTUnwrap(fields(parentHost).first)
@@ -205,7 +210,7 @@ final class NativeFocusBridgeTests: XCTestCase {
         }
         XCTAssertTrue(roots(try XCTUnwrap(popup.contentView)).contains { $0.scope !== parentScope })
     }
-    func testComparisonSearchDisabledInitialTargetRetriesAfterEnable() throws {
+    func testComparisonSearchEnabledTargetStillWaitsForTab() throws {
         _ = NSApplication.shared
         let model = Model(); model.disabled = true
         let host = NSHostingView(rootView: SearchFixture(model: model))
@@ -216,7 +221,9 @@ final class NativeFocusBridgeTests: XCTestCase {
         XCTAssertFalse(query.isEnabled)
         XCTAssertFalse(ownsFocus(query, window))
         model.disabled = false; drain(host)
-        XCTAssertTrue(ownsFocus(query, window), "Initial request stays pending while its field is disabled")
+        XCTAssertFalse(ownsFocus(query, window), "Enabling a field must not focus it automatically")
+        window.sendEvent(tabEvent(in: window))
+        XCTAssertTrue(ownsFocus(query, window))
         let after = try XCTUnwrap(fields(host).first { $0.accessibilityLabel() == "After" })
         window.makeFirstResponder(after); model.text = "update"; drain(host)
         XCTAssertTrue(ownsFocus(after, window), "An acknowledged initial request must not steal focus")
@@ -316,6 +323,7 @@ final class NativeFocusBridgeTests: XCTestCase {
     func testDynamicInsertionAndNewTokenMoveFocusOnce() throws {
         let model = Model(), (window, host) = hosted(model)
         defer { window.close() }
+        window.sendEvent(tabEvent(in: window))
         let destination = try XCTUnwrap(fields(host).first { $0.accessibilityLabel() == "Destination" })
         window.makeFirstResponder(destination)
         model.usernameVisible = true; model.request = UUID()
@@ -350,6 +358,8 @@ final class NativeFocusBridgeTests: XCTestCase {
         let (window, host) = hosted(model)
         defer { window.close() }
         let source = try XCTUnwrap(fields(host).first { $0.accessibilityLabel() == "Source" })
+        XCTAssertFalse(ownsFocus(source, window))
+        window.sendEvent(tabEvent(in: window))
         XCTAssertTrue(ownsFocus(source, window))
         // Native fields dispatch Tab through their field editor and editing
         // delegate, which selects the next key view relative to the owner.
@@ -367,6 +377,7 @@ final class NativeFocusBridgeTests: XCTestCase {
         let first = Model(), second = Model()
         let (windowA, hostA) = hosted(first), (windowB, hostB) = hosted(second)
         defer { windowA.close(); windowB.close() }
+        windowA.sendEvent(tabEvent(in: windowA))
         let destinationB = try XCTUnwrap(fields(hostB).first { $0.accessibilityLabel() == "Destination" })
         windowB.makeFirstResponder(destinationB)
         first.usernameVisible = true; first.request = UUID(); drain(hostA)
@@ -451,10 +462,12 @@ final class NativeFocusBridgeTests: XCTestCase {
         drain(panelHost)
         parent.usernameVisible = true; parent.request = UUID(); drain(host)
         let source = try XCTUnwrap(fields(panelHost).first { $0.accessibilityLabel() == "Source" })
+        XCTAssertFalse(ownsFocus(source, panel))
+        panel.sendEvent(tabEvent(in: panel))
         XCTAssertTrue(ownsFocus(source, panel))
         XCTAssertFalse(ownsFocus(try XCTUnwrap(fields(host).first { $0.accessibilityLabel() == "Username" }), window))
     }
-    func testDeferredParentRequestResumesWhenSheetCloses() throws {
+    func testDeferredParentRequestWaitsForTabAfterSheetCloses() throws {
         let parent = Model(), sheet = Model()
         let (window, host) = hosted(parent), (panel, panelHost) = hosted(sheet)
         defer { if window.attachedSheet != nil { window.endSheet(panel) }; panel.close(); window.close() }
@@ -463,9 +476,11 @@ final class NativeFocusBridgeTests: XCTestCase {
         let username = try XCTUnwrap(fields(host).first { $0.accessibilityLabel() == "Username" })
         XCTAssertFalse(ownsFocus(username, window))
         window.endSheet(panel); drain(host)
-        XCTAssertTrue(ownsFocus(username, window), "A parent request must resume after the child presentation ends")
+        XCTAssertFalse(ownsFocus(username, window), "Closing a sheet must not focus a parent control")
+        window.sendEvent(tabEvent(in: window))
+        XCTAssertTrue(ownsFocus(username, window))
     }
-    func testClonePresentationFocusesSourceOnceWithoutStealingOnUpdate() throws {
+    func testClonePresentationWaitsForTabWithoutStealingFocusOnUpdate() throws {
         _ = NSApplication.shared
         let defaults = UserDefaults.standard
         let draft = defaults.object(forKey: RepositoryCreationDraft.preference)
@@ -479,7 +494,9 @@ final class NativeFocusBridgeTests: XCTestCase {
         defer { window.close() }
         drain(host)
         let source = try XCTUnwrap(fields(host).first { $0.placeholderString == workflowText("Clone URL or local path") || $0.accessibilityLabel() == workflowText("Clone URL or local path") })
-        XCTAssertTrue(ownsFocus(source, window), "Opening clone should focus its source")
+        XCTAssertFalse(ownsFocus(source, window), "Opening clone must leave its source unfocused")
+        window.sendEvent(tabEvent(in: window))
+        XCTAssertTrue(ownsFocus(source, window))
         XCTAssertTrue(window.autorecalculatesKeyViewLoop, "The presentation should enable native key-view recalculation")
         let destination = try XCTUnwrap(fields(host).first { $0.accessibilityLabel() == workflowText("Destination folder") })
         window.makeFirstResponder(destination)

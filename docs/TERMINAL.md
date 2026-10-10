@@ -1,6 +1,6 @@
 # Embedded project terminal
 
-Press **Command + backtick (`)** in a project window, or click the terminal icon in the status bar. The terminal opens below the project with a draggable split divider and receives keyboard focus. Press the shortcut again to hide it; opening it again restores the same running shell and scrollback. The activity log has its own adjacent list icon.
+Press **Control + backtick (`)** in a project window, or click the terminal icon in the status bar. The terminal opens below the project with a draggable split divider and receives keyboard focus. Press the shortcut again to hide it; opening it again restores the same running shell and scrollback. The activity log has its own adjacent list icon.
 
 Each project window owns up to eight sessions, keyed by the repository's canonical path. Switching repositories changes the attached terminal view and preserves the previous repository's session. Keystrokes are checked against the currently selected repository before reaching the PTY, including while SwiftUI is switching views. The initial working directory is passed directly to `forkpty`/`exec`, so spaces and shell metacharacters in paths are never interpolated into commands. The account's configured shell starts as an interactive login shell; its normal startup files and environment apply. A user's startup file may change its own working directory.
 
@@ -10,7 +10,7 @@ The down-chevron hides the panel without stopping jobs. The X closes its session
 
 Closing the window releases its sessions. Application termination synchronously signals the owned shell/descendants, including the foreground process group, before the application exits. Normal session closure allows a short grace period before escalation. Cleanup checks Darwin kernel process start times before each signal so PID reuse is not treated as ownership. This covers terminal-owned processes present at cleanup; intentionally detached daemons that have reparented and left the terminal's process groups have their own lifecycle.
 
-The shortcut monitor belongs only to the project window, ignores attached sheets and does not intercept settings or comparison windows. It consumes Command + backtick before macOS window cycling. Shift, Option and Control combinations retain their normal behavior. Language changes rebuild localized window content below `MainWindow` while retaining its session owner and running shells.
+The shortcut monitor belongs only to the project window, ignores attached sheets and does not intercept settings or comparison windows. It recognizes Control + the physical backtick key regardless of keyboard layout. Command + backtick retains macOS window cycling; combinations with additional Shift, Option or Command modifiers retain their normal behavior. Language changes rebuild localized window content below `MainWindow` while retaining its session owner and running shells.
 
 The panel has a 210-point minimum height and a preferred height of 280 points, with a draggable divider. The terminal is labelled as an accessibility text area so VoiceOver can locate it. SwiftTerm 1.20's macOS accessibility service is a stub and its `screenReaderMode` option has no active implementation; reading terminal text through VoiceOver remains an upstream limitation. RayGit does not add rich-text accessibility probing.
 

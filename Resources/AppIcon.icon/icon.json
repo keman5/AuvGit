@@ -1,0 +1,22 @@
+{
+  "fill": {
+    "solid": "extended-srgb:0.98,0.20,0.18,1"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "artwork.png",
+          "name": "Original RayGit artwork",
+          "position": {
+            "scale": 1.18,
+            "translation-in-points": [0, 0]
+          }
+        }
+      ]
+    }
+  ],
+  "supported-platforms": {
+    "squares": ["macOS"]
+  }
+}

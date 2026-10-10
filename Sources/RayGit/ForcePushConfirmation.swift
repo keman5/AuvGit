@@ -31,7 +31,6 @@ struct PullOperationConfirmation: View {
     let hint: LocalNetworkPreflight?
     let cancel: () -> Void
     let execute: (NetworkOperation) -> Void
-    @FocusState private var pullFocused: Bool
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(L10n.text("pullTitle", table: "Main")).font(.headline)
@@ -39,13 +38,11 @@ struct PullOperationConfirmation: View {
             HStack {
                 Spacer()
                 Button(L10n.text("cancel", table: "Network"), action: cancel).keyboardShortcut(.cancelAction)
-                Button(L10n.text("pull", table: "Network")) { execute(.pull) }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent).focused($pullFocused)
+                Button(L10n.text("pull", table: "Network")) { execute(.pull) }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
                 Button(L10n.text("fetch", table: "Network")) { execute(.fetch) }
                 Spacer()
             }
         }.padding(24).frame(width: 360)
-            .defaultFocus($pullFocused, true)
-            .onAppear { DispatchQueue.main.async { pullFocused = true } }
     }
 }
 

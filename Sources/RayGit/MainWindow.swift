@@ -810,7 +810,8 @@ extension MainWindow {
         if fromMenu, command == .stage || command == .unstage {
             performToolbarCommand(command.rawValue); return true
         }
-        if historyFocus.hasFileFocus, let action = command.historyAction, let commit = store.commits.first(where: { $0.hash == store.selectedCommit }) {
+        if historyFocus.hasFileFocus || command == .reset || command == .resetAdvanced,
+           let action = command.historyAction, let commit = store.commits.first(where: { $0.hash == store.selectedCommit }) {
             historyAction(action, commit); return true
         }
         if command.scopes.contains(.files) {

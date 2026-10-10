@@ -33,6 +33,7 @@ struct ShortcutRecorder: NSViewRepresentable {
         var onChange: ((ShortcutBinding) -> Void)?
         private var keyMonitor: Any?
         private var recording = false
+        var isRecording: Bool { recording }
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             if let keyMonitor { NSEvent.removeMonitor(keyMonitor); self.keyMonitor = nil }
@@ -71,7 +72,7 @@ struct ShortcutRecorder: NSViewRepresentable {
             if let captured = recordedShortcut(event, preserving: value) { onChange?(captured); window?.makeFirstResponder(nil) }
         }
         override func draw(_ dirtyRect: NSRect) {
-            let focused = window?.firstResponder === self
+            let focused = window?.firstResponder === self && NativeFocusAppearance.isVisible(in: window)
             let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 5, yRadius: 5)
             NSColor.textBackgroundColor.setFill(); shape.fill()
             (focused ? NSColor.keyboardFocusIndicatorColor : NSColor.separatorColor).setStroke(); shape.lineWidth = focused ? 2 : 1; shape.stroke()

@@ -1,10 +1,14 @@
 import AppKit
 import SwiftUI
+import Combine
 
-/// One coordinator per presentation. AppKit owns the key-view order; requests
-/// only choose an initial target or explicitly move focus after an insertion.
+/// One coordinator per presentation. AppKit owns the key-view order. Initial
+/// targets wait for Tab; insertion requests run only during keyboard navigation.
 @MainActor
 final class NativeFocusCoordinator: ObservableObject {
+    @Published private(set) var showsKeyboardFocus = false
+    private var appearance: NativeFocusAppearance?
+    private var appearanceSubscription: AnyCancellable?
     private final class Target {
         weak var view: NSView?
         var initial: Bool
@@ -16,7 +20,6 @@ final class NativeFocusCoordinator: ObservableObject {
     }
     private var targets: [ObjectIdentifier: Target] = [:]
     private weak var window: NSWindow?
-    private var initialApplied = false
     private var pending: DispatchWorkItem?
     private var shouldRecalculateLoop = false
     private var entryResponder: EntryResponder?
@@ -56,6 +59,18 @@ final class NativeFocusCoordinator: ObservableObject {
         let changedWindow = self.window !== window
         if changedWindow { removeEntryResponder() }
         self.window = window
+        if changedWindow {
+            appearance = NativeFocusAppearance.forWindow(window)
+            appearanceSubscription = appearance?.$isVisible.sink { [weak self] visible in
+                guard self?.showsKeyboardFocus != visible else { return }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.showsKeyboardFocus = self.appearance?.isVisible ?? false
+                }
+            }
+        }
+        appearance?.navigationScope = self
+        appearance?.apply()
         window.autorecalculatesKeyViewLoop = true
         if entryResponder == nil {
             let responder = EntryResponder(scope: self)
@@ -81,17 +96,30 @@ final class NativeFocusCoordinator: ObservableObject {
         let removed = targets.removeValue(forKey: ObjectIdentifier(view)) != nil
         schedule(recalculatingLoop: removed)
     }
-    func cancel() { pending?.cancel(); pending = nil; removeEntryResponder() }
+    func cancel() {
+        pending?.cancel(); pending = nil; removeEntryResponder()
+        appearanceSubscription = nil; appearance = nil
+        window = nil
+    }
     private func removeEntryResponder() {
         entryResponder?.unlink(from: window)
         entryResponder?.scope = nil; entryResponder = nil
     }
-    private func enterKeyViewLoop(backwards: Bool) -> Bool {
+    func enterKeyViewLoop(backwards: Bool) -> Bool {
         guard let window, window.firstResponder === window, window.attachedSheet == nil else { return false }
+        appearance?.beginNavigation()
         window.recalculateKeyViewLoop()
-        if let view = targets.values.first(where: { $0.initial && $0.view.map { isAvailable($0, in: window) } == true })?.view {
-            if window.makeFirstResponder(view) { initialApplied = true; return true }
+        let available = targets.values.filter { $0.view.map { isAvailable($0, in: window) } == true }
+        if !backwards, let target = available.first(where: { $0.request != nil && $0.request != $0.acknowledged })
+            ?? available.first(where: { $0.initial }), let view = target.view, window.makeFirstResponder(view) {
+            target.acknowledged = target.request
+            return true
         }
+        // NSWindow.selectNextKeyView cannot always enter a SwiftUI button loop
+        // when the window itself owns first responder. Start at its content.
+        if let content = window.contentView,
+           let view = backwards ? content.previousValidKeyView : content.nextValidKeyView,
+           window.makeFirstResponder(view) { return true }
         if backwards { window.selectPreviousKeyView(nil) } else { window.selectNextKeyView(nil) }
         return window.firstResponder !== window
     }
@@ -109,16 +137,13 @@ final class NativeFocusCoordinator: ObservableObject {
     private func refresh() {
         guard let window else { return }
         if shouldRecalculateLoop { window.recalculateKeyViewLoop(); shouldRecalculateLoop = false }
+        appearance?.apply()
         targets = targets.filter { $0.value.view != nil }
-        guard window.attachedSheet == nil else { return }
+        guard window.attachedSheet == nil, appearance?.isVisible == true, window.firstResponder !== window else { return }
         let available = targets.values.filter { $0.view.map { isAvailable($0, in: window) } == true }
         if let target = available.first(where: { $0.request != nil && $0.request != $0.acknowledged }), let view = target.view,
            window.makeFirstResponder(view) {
             target.acknowledged = target.request
-            initialApplied = true
-        } else if let view = available.first(where: { $0.initial })?.view {
-            window.initialFirstResponder = view
-            if !initialApplied, window.makeFirstResponder(view) { initialApplied = true }
         }
     }
     private func isAvailable(_ view: NSView, in window: NSWindow) -> Bool {
@@ -155,7 +180,11 @@ private struct NativeFocusRoot: ViewModifier {
     @StateObject private var scope = NativeFocusCoordinator()
     @ViewBuilder func body(content: Content) -> some View {
         if reusingParent && inherited != nil { content }
-        else { content.environment(\.nativeFocusScope, scope).background(NativeFocusBridge(scope: scope).frame(width: 0, height: 0)) }
+        else {
+            content.environment(\.nativeFocusScope, scope)
+                .focusEffectDisabled(!scope.showsKeyboardFocus)
+                .background(NativeFocusBridge(scope: scope).frame(width: 0, height: 0))
+        }
     }
 }
 extension View {

@@ -39,9 +39,18 @@ struct WorkspaceKeyboardRegion: NSViewRepresentable {
         func handle(_ event: NSEvent) -> NSEvent? {
             guard let window, event.window === window, window.attachedSheet == nil, !isHiddenOrHasHiddenAncestor else { return event }
             let textEditing = window.firstResponder is NSTextView || window.firstResponder is NSTextField
-            let focusCommands: Set<ShortcutCommand> = [.activateRepositories, .activateBranches, .activateFiles, .activateChanges, .activateHistory, .activateCommit, .activateOutput, .findObject]
             for command in ShortcutCommand.allCases where (command.scopes.contains(.workspace) || command.scopes.contains(.files)) && shortcuts.binding(command).matches(event) {
-                if textEditing && !focusCommands.contains(command) { continue }
+                if textEditing && !command.worksWhileEditingText { continue }
+                if command == .reset || command == .resetAdvanced {
+                    if window.firstResponder is ReadOnlyDiffTextView || window.firstResponder is ComparisonTextView { continue }
+                    var view = window.firstResponder as? NSView
+                    var terminalOwnsFocus = false
+                    while let current = view {
+                        if current is RepositoryTerminalView { terminalOwnsFocus = true; break }
+                        view = current.superview
+                    }
+                    if terminalOwnsFocus { continue }
+                }
                 if action(command) { return nil }
             }
             return event
