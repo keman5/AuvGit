@@ -1,6 +1,12 @@
 #!/bin/zsh
 set -euo pipefail
 cd "${0:A:h:h}"
+INSTALL_APP=true
+case "${1:-}" in
+  "") ;;
+  --no-install) INSTALL_APP=false ;;
+  *) print -u2 "Usage: $0 [--no-install]"; exit 1 ;;
+esac
 # Compile the native icon so macOS 26+ does not wrap the legacy icns in a gray tile.
 ICON_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/raygit-app-icon.XXXXXX")"
 trap 'rm -rf -- "$ICON_BUILD_DIR"' EXIT
@@ -62,3 +68,31 @@ codesign --force --sign - "$APP"
 # Reusing the bundle directory otherwise leaves Finder's cached icon unchanged.
 touch "$APP/Contents/Resources" "$APP/Contents" "$APP"
 print "Built $APP"
+if $INSTALL_APP; then
+  LOCAL_APP="/Applications/RayGit.app"
+  codesign --verify --strict "$APP"
+  swift - "$LOCAL_APP" <<'SWIFT'
+import AppKit
+let appURL = URL(fileURLWithPath: CommandLine.arguments[1]).standardizedFileURL
+let apps = NSRunningApplication.runningApplications(withBundleIdentifier: "dev.raygit.mac")
+    .filter { $0.bundleURL?.standardizedFileURL == appURL }
+for app in apps where !app.isTerminated {
+    guard app.terminate() else {
+        fputs("RayGit could not quit. Quit it before rebuilding.\n", stderr)
+        exit(1)
+    }
+}
+let deadline = Date().addingTimeInterval(15)
+while apps.contains(where: { !$0.isTerminated }) && Date() < deadline {
+    RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+}
+guard apps.allSatisfy({ $0.isTerminated }) else {
+    fputs("RayGit is still running. Local application was not replaced.\n", stderr)
+    exit(1)
+}
+SWIFT
+  ditto "$APP" "$LOCAL_APP"
+  codesign --verify --strict "$LOCAL_APP"
+  cmp "$APP/Contents/MacOS/RayGit" "$LOCAL_APP/Contents/MacOS/RayGit"
+  print "Installed $LOCAL_APP"
+fi

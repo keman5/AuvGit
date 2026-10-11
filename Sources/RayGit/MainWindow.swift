@@ -37,7 +37,7 @@ struct MainWindow: View {
     @StateObject private var aiCommit = AICommitController()
     @State private var showActivity = false
     @State private var showTools = false
-    @State private var fileTree = false
+    @State var fileTree = false
     @State private var showCreate = false
     @State private var createClone: Bool?
     @State private var blamePath: String?
@@ -58,7 +58,6 @@ struct MainWindow: View {
         let repositoryURL: URL
     }
     @Environment(\.colorScheme) private var toolbarColorScheme
-    @Environment(\.scenePhase) private var scenePhase
     struct PendingAction: Identifiable {
         let id = UUID()
         let title: String
@@ -66,6 +65,7 @@ struct MainWindow: View {
         let action: () -> Void
         var cancelled: (() -> Void)? = nil
         var informational = false
+        var permanentlyDelete: (() -> Void)? = nil
     }
     private var windowContent: some View {
         VStack(spacing: 0) {
@@ -95,8 +95,9 @@ struct MainWindow: View {
                 Divider().frame(height: 14)
                 Button { showActivity = true } label: {
                     Text(store.footerStatus).lineLimit(1).truncationMode(.tail)
-                        .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading).contentShape(Rectangle())
+                        .frame(minHeight: 24, alignment: .leading).contentShape(Rectangle())
                 }.buttonStyle(.plain).help(store.footerStatus).accessibilityLabel(refinementText("Open operation log") + ": " + store.footerStatus)
+                Spacer(minLength: 0)
                 if let fraction = store.visibleProgress?.fraction, store.isBusy {
                     ProgressView(value: fraction).frame(width: 90)
                     Text("\(Int(fraction * 100))%").monospacedDigit()
@@ -113,11 +114,26 @@ struct MainWindow: View {
         .background(TerminalShortcutMonitor { terminals.toggle(for: store.repositoryURL, store: store) }.frame(width: 0, height: 0))
         .background(WorkspaceKeyboardRegion(action: { workspaceShortcut($0) }, onWindow: { shortcutWindow = $0 }, menuAction: { workspaceShortcut($0, fromMenu: true) }).allowsHitTesting(false).accessibilityHidden(true))
     }
-    private var toolbarContent: some View {
+    @ViewBuilder private var toolbarContent: some View {
+        if usesBorderlessToolbar { installedContent }
+        else if EightPointWindowShell.usesBorderlessMode {
+            // The bootstrap window owns the scene, but only the visible shell renders workspace panels.
+            Color.clear.frame(minWidth: 1000, minHeight: 680)
+                .background(TitlebarToolbarSupport(shellContent: makeShellContent).frame(width: 0, height: 0))
+        }
+        else { nativeToolbarContent }
+    }
+    private func makeShellContent(_ model: BorderlessToolbarModel) -> NSView {
+        NSHostingView(rootView: MainWindow(store: store, usesBorderlessToolbar: true, shellToolbarModel: model).nativeFocusRoot())
+    }
+    private var installedContent: some View {
         // Recreate localized descendants without recreating MainWindow's session owner.
         windowContent.id(languageCode)
-            .background(TitlebarToolbarSupport(shellContent: { model in NSHostingView(rootView: MainWindow(store: store, usesBorderlessToolbar: true, shellToolbarModel: model).nativeFocusRoot()) }, hidesNativeToolbar: usesBorderlessToolbar, shellWindowTitle: usesBorderlessToolbar ? (store.highlightedRepositoryPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "RayGit") : nil).frame(width: 0, height: 0))
+            .background(TitlebarToolbarSupport(shellContent: makeShellContent, hidesNativeToolbar: usesBorderlessToolbar, shellWindowTitle: usesBorderlessToolbar ? (store.highlightedRepositoryPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "RayGit") : nil).frame(width: 0, height: 0))
             .modifier(ToolbarWindowTitleRemoval())
+    }
+    private var nativeToolbarContent: some View {
+        installedContent
             // Version the customization identity: the old AppKit-injected identifiers
             // cannot be restored into SwiftUI's item storage. Keep other preferences intact.
             .toolbar(id: "RayGit.mainToolbar.design.v7") {
@@ -140,7 +156,7 @@ struct MainWindow: View {
                 }.compactMainToolbarItem()
                 ToolbarItem(id: "discard") {
                     Button { performToolbarCommand("discard") } label: { toolbarLabel(refinementText("Discard"), systemImage: "arrow.uturn.backward") }
-                        .buttonStyle(ToolbarRowButtonStyle(height: 28, minimumWidth: 32)).controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).help(refinementText("Discard selected tracked changes, or all eligible tracked changes when none are selected")).disabled(!toolbarCanDiscard)
+                        .buttonStyle(ToolbarRowButtonStyle(height: 28, minimumWidth: 32)).controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).help(refinementText("Discard selected unstaged changes, or all eligible changes when none are selected")).disabled(!toolbarCanDiscard)
                 }.compactMainToolbarItem()
                 ToolbarItem(id: "stash") {
                     Button { performToolbarCommand("stash") } label: { toolbarLabel(mainText("stash"), systemImage: "archivebox") }
@@ -331,10 +347,10 @@ struct MainWindow: View {
     private func toolbarTargets(_ action: FileAction) -> Set<String> {
         WorkspaceFileActionTargets.paths(for: action, files: store.files, selection: toolbarSelection)
     }
-    private var toolbarReady: Bool { store.repository != nil && !store.isBusy }
-    private var toolbarCanStage: Bool { toolbarReady && !toolbarTargets(.stage).isEmpty }
-    private var toolbarCanUnstage: Bool { toolbarReady && !toolbarTargets(.unstage).isEmpty }
-    private var toolbarCanDiscard: Bool { toolbarReady && !toolbarTargets(.discard).isEmpty }
+    private var toolbarReady: Bool { store.repository != nil && store.workspaceStatusFailure == nil && !store.isBusy }
+    private var toolbarCanStage: Bool { toolbarReady && WorkspaceFileActionTargets.hasEligibleTarget(for: .stage, files: store.files, selection: toolbarSelection) }
+    private var toolbarCanUnstage: Bool { toolbarReady && WorkspaceFileActionTargets.hasEligibleTarget(for: .unstage, files: store.files, selection: toolbarSelection) }
+    private var toolbarCanDiscard: Bool { toolbarReady && WorkspaceFileActionTargets.hasEligibleTarget(for: .discard, files: store.files, selection: toolbarSelection) }
     private var handlesStoreEvents: Bool { usesBorderlessToolbar || !EightPointWindowShell.usesBorderlessMode }
 
     private var observedContent: some View {
@@ -371,7 +387,7 @@ struct MainWindow: View {
             guard handlesStoreEvents else { return }
             authentication.cancel()
             aiCommit.cancel()
-            store.workspaceCommitRequest = nil
+            if store.workspaceCommitRequest != nil { store.workspaceCommitRequest = nil }
             aiScopeRepository = nil
             if let directory, terminals.visible { terminals.show(for: directory, store: store) }
             else if directory == nil, store.pendingRepositoryPath == nil { terminals.hide() }
@@ -380,18 +396,32 @@ struct MainWindow: View {
             if handlesStoreEvents, path == nil, store.repositoryURL == nil { terminals.hide() }
         }
         .onChange(of: store.openRepositories) { _, paths in if handlesStoreEvents { terminals.retainRepositories(paths) } }
-        .onChange(of: scenePhase) { _, phase in if handlesStoreEvents, phase == .active { Task { await store.refreshIfChanged() } } }
+    }
+    private var repositoryAvailabilityContent: some View {
+        Color.clear.frame(width: 0, height: 0).rayGitAlert(item: Binding(get: { handlesStoreEvents ? store.unavailableRepository : nil }, set: { store.unavailableRepository = $0 })) { request in
+            RayGitAlert(title: sidebarRefinementText("Project is unavailable"),
+                message: sidebarRefinementText("Remove missing project message", request.path), buttons: [
+                    RayGitAlertButton(mainText("cancel"), role: .cancel) { store.unavailableRepository = nil },
+                    RayGitAlertButton(sidebarRefinementText("Remove from project list")) { store.removeRecentRepository(request.path) }
+                ])
+        }
     }
     var body: some View {
-        observedContent.rayGitAlert(item: $confirmation) { action in
-            RayGitAlert(title: action.title, message: action.message, buttons: action.informational ? [
+        observedContent
+        .onDisappear { confirmation?.cancelled?(); confirmation = nil; authentication.cancel() }
+        .background {
+        repositoryAvailabilityContent.rayGitAlert(item: $confirmation) { action in
+            RayGitAlert(title: action.title, message: action.message, buttons: action.permanentlyDelete != nil ? [
+                RayGitAlertButton(fileContextText("permanentlyDelete"), role: .destructive) { confirmation = nil; action.permanentlyDelete?() },
+                RayGitAlertButton(mainText("cancel"), role: .cancel) { confirmation = nil },
+                RayGitAlertButton(fileContextText("moveToTrash")) { confirmation = nil; action.action() }
+            ] : action.informational ? [
                 RayGitAlertButton(mainText("close")) { confirmation = nil }
             ] : [
                 RayGitAlertButton(mainText("cancel"), role: .cancel) { confirmation = nil; action.cancelled?() },
                 RayGitAlertButton(mainText("continue")) { confirmation = nil; action.action() }
             ])
         }
-        .onDisappear { confirmation?.cancelled?(); confirmation = nil; authentication.cancel() }
         .rayGitSheet(item: $authentication.request) { request in
             RemoteAuthenticationSheet(request: request, error: authentication.submissionError, isSubmitting: authentication.isSubmitting, submit: { submission in
                 authentication.submit(submission)
@@ -426,14 +456,14 @@ struct MainWindow: View {
                         let upstream = selectedUpstream; trackingBranch = nil; trackingRepository = nil
                         store.operation(sidebarRefinementText("Set Tracking Branch…")) { try await $0.setUpstream(branch: branch, remoteBranch: upstream) }
                     }.keyboardShortcut(.defaultAction).disabled(selectedUpstream.isEmpty || store.isBusy)
-                }.frame(maxWidth: .infinity)
+                }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
             }.padding(24).frame(width: 360)
         }
         .rayGitSheet(item: $namePrompt) { prompt in
             VStack(alignment: .leading, spacing: 18) {
                 Text(prompt.title).font(.headline)
                 StableTextField(interactionText("Name"), text: $promptValue, onSubmit: { submitName(prompt) }).textFieldStyle(.roundedBorder)
-                HStack { Button(mainText("cancel")) { namePrompt = nil }; Button(mainText("continue")) { submitName(prompt) }.buttonStyle(.borderedProminent).disabled(promptValue.trimmingCharacters(in: .whitespaces).isEmpty) }.frame(maxWidth: .infinity)
+                HStack { Button(mainText("cancel")) { namePrompt = nil }; Button(mainText("continue")) { submitName(prompt) }.buttonStyle(RayGitDialogButtonStyle(prominent: true)).disabled(promptValue.trimmingCharacters(in: .whitespaces).isEmpty) }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
             }.padding(20).frame(width: 360)
         }
         .rayGitSheet(isPresented: $showWorkspaceSearch) { WorkspaceSearchSheet(store: store) }
@@ -454,7 +484,7 @@ struct MainWindow: View {
         .rayGitSheet(isPresented: $showCreate) { CreateRepositorySheet(store: store, initialClone: createClone) }
         .rayGitSheet(isPresented: Binding(get: { blamePath != nil }, set: { if !$0 { blamePath = nil } })) {
             if let repository = store.repository, let path = blamePath {
-                VStack { StructuredHistoryView(repository: repository, blamePath: path, revision: "HEAD"); Button(workflowText("Close")) { blamePath = nil }.keyboardShortcut(.cancelAction) }.padding().frame(width: 1000, height: 700)
+                VStack { StructuredHistoryView(repository: repository, blamePath: path, revision: "HEAD"); Button(workflowText("Close")) { blamePath = nil }.buttonStyle(RayGitDialogButtonStyle()).keyboardShortcut(.cancelAction) }.padding().frame(width: 1000, height: 700)
             }
         }
         .rayGitSheet(item: $resetRequest) { HistoryResetSheet(store: store, request: $0) }
@@ -482,9 +512,10 @@ struct MainWindow: View {
                             if prompt.action == .cherryPick { try await repository.cherryPick(hash: prompt.commit.hash, mainline: selected) }
                             else { try await repository.revert(hash: prompt.commit.hash, mainline: selected) }
                         }
-                    }.buttonStyle(.borderedProminent)
-                }.frame(maxWidth: .infinity)
+                    }.buttonStyle(RayGitDialogButtonStyle(prominent: true))
+                }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
             }.padding(20).frame(width: 360)
+        }
         }
     }
     private func mainText(_ key: String, _ args: CVarArg...) -> String { L10n.text(key, table: "Main", arguments: args) }
@@ -630,15 +661,18 @@ struct MainWindow: View {
     }
     var workspace: some View {
         WorkspacePaneSplit(
+            holdsPreviousPresentation: store.pendingRepositoryPath.map { $0 != store.repositoryURL?.path } ?? false,
             compact: terminals.visible,
             files: filesPane,
             diff: diffPane,
-            footer: WorkspaceFooterSplit(history: historyPane(compact: true), commit: commitPane)
+            history: historyPane(compact: true),
+            commit: commitPane
         ).frame(minHeight: terminals.visible ? 422 : 432, maxHeight: .infinity)
             .frame(maxWidth: .infinity)
     }
     var filesPane: some View {
-        WorkspaceFilesPane(files: store.files, automaticallySelectedPath: store.automaticallySelectedPath, initialSelectionReady: store.initialWorkspaceSelectionReady, selection: $store.selectedPaths, filter: $store.fileFilter, treeMode: $fileTree, isBusy: store.isBusy, onAction: fileAction, treeContent: { paths in workspaceTreeContent(paths) }, repository: store.repository, fileFocus: fileFocus, shortcutRequest: fileShortcutRequest)
+        WorkspaceFilesPane(files: store.files, statusFailure: store.workspaceStatusFailure == nil ? nil : store.error, automaticallySelectedPath: store.automaticallySelectedPath, initialSelectionReady: store.initialWorkspaceSelectionReady, selection: $store.selectedPaths, filter: $store.fileFilter, treeMode: $fileTree, isBusy: store.isBusy || store.workspaceStatusFailure != nil, onAction: fileAction, treeContent: { paths in workspaceTreeContent(paths) }, repository: store.repository, fileFocus: fileFocus, shortcutRequest: fileShortcutRequest)
+            .onChange(of: fileTree) { _, visible in if handlesStoreEvents { store.showsWorkspaceTree = visible } }
     }
     private func workspaceTreeContent(_ paths: Set<String>?) -> some View {
         Group {
@@ -646,14 +680,13 @@ struct MainWindow: View {
                 WorkspaceTree(repository: repository, openFile: { path in
                     ComparePresenter.show(title: path, repository: repository, target: .worktree(path: path, untracked: store.files.first(where: { $0.path == path })?.isUntracked ?? false))
                 }, visiblePaths: paths, selection: $store.selectedPaths, changedPaths: Set(store.files.map(\.path)), primaryAction: { path in
-                    guard !store.isBusy else { return }
+                    guard !store.isBusy, store.repositoryURL == repository.url else { return }
                     if RayGitPreferences.doubleClick == "stage", let file = store.files.first(where: { $0.path == path }), !file.isConflict {
                         fileAction(file.isUnstaged ? .stage : .unstage, [path])
                     } else { fileAction(.compare, [path]) }
-                }, isBusy: store.isBusy, setBusy: { store.isBusy = $0 }, files: store.files, onAction: { action, targets in
+                }, isBusy: store.isBusy, permitsMutation: { store.pendingRepositoryPath == nil && !store.isBusy && store.repositoryURL == repository.url }, setBusy: { store.isBusy = $0 }, files: store.files, refreshID: store.filesGeneration, onAction: { action, targets in
                     guard store.repositoryURL == repository.url else { return }; fileAction(action, targets)
                 })
-                .id(repository.url.path + store.filesGeneration.uuidString)
             }
         }
     }
@@ -707,8 +740,7 @@ struct MainWindow: View {
                 Toggle(mainText("amend"), isOn: $store.amend).toggleStyle(.checkbox).font(.caption)
                 Spacer()
                 Button {
-                    if store.amend { confirm(mainText("amend"), mainText("amendMessage")) { store.commit() } }
-                    else { store.commit() }
+                    store.commit()
                 } label: { Text(mainText("commit")) }
                     .buttonStyle(.borderedProminent)
                     .disabled(!store.canCommit)
@@ -767,7 +799,7 @@ struct MainWindow: View {
                     .help(refinementText("Commit options")).disabled(store.isBusy)
             }
             CommitMessageEditor(text: $store.commitMessage, focused: Binding(get: { commitFocused }, set: { commitFocused = $0 }), placeholder: mainText("commitPlaceholder"))
-                .rayGitInputSurface().frame(minHeight: 80)
+                .rayGitInputSurface().frame(minHeight: 80).disabled(store.pendingRepositoryPath != nil)
 
         }
     }
@@ -889,6 +921,7 @@ extension MainWindow {
         ComparePresenter.show(title: "\(String(hash.prefix(8))) / \(path)", repository: repository, target: .commit(hash: hash, path: path))
     }
     private func fileAction(_ action: FileAction, _ paths: Set<String>) {
+        guard store.pendingRepositoryPath == nil else { return }
         guard let repository = store.repository, let root = store.repositoryURL else { return }
         let files = store.files.filter { paths.contains($0.path) }
         let ordered = paths.sorted()
@@ -910,16 +943,16 @@ extension MainWindow {
             let eligible = WorkspaceFileActionTargets.paths(for: .stage, files: store.files, selection: paths)
             let targets = store.files.filter { eligible.contains($0.path) }.flatMap { [$0.path] + ($0.originalPath.map { [$0] } ?? []) }
             guard !targets.isEmpty else { return }
-            store.operation("暂存") { try await $0.stage(paths: targets) }
+            store.operation("暂存", refreshFilesOnly: true) { try await $0.stage(paths: targets) }
         case .unstage, .unstageAll:
             let eligible = WorkspaceFileActionTargets.paths(for: .unstage, files: store.files, selection: paths)
             let targets = store.files.filter { eligible.contains($0.path) }.flatMap { [$0.path] + ($0.originalPath.map { [$0] } ?? []) }
             guard !targets.isEmpty else { return }
-            store.operation("取消暂存") { try await $0.unstage(paths: targets) }
+            store.operation("取消暂存", refreshFilesOnly: true) { try await $0.unstage(paths: targets) }
         case .discard:
             let targets = WorkspaceFileActionTargets.paths(for: .discard, files: store.files, selection: paths).sorted()
             guard !targets.isEmpty else { return }
-            confirm(interactionText("Discard Working Tree Changes"), interactionText("Discard Message") + "\n\n" + targets.joined(separator: "\n")) { store.operation(interactionText("Discard…")) { try await $0.discardWorktree(paths: targets) } }
+            confirm(interactionText("Discard Working Tree Changes"), interactionText("Discard Workspace Message") + "\n\n" + DialogAppearance.fileListSummary(targets)) { store.operation(interactionText("Discard…"), refreshFilesOnly: true) { try await $0.discardWorkspace(paths: targets) } }
         case .rename:
             guard !store.isBusy, ordered.count == 1, let path = ordered.first else { return }
             askName(fileContextText("rename"), initial: path) { destination in
@@ -937,7 +970,7 @@ extension MainWindow {
             }
         case .trash:
             guard !store.isBusy, !ordered.isEmpty else { return }
-            confirm(fileContextText("trash"), fileContextText("trashMessage") + "\n\n" + ordered.joined(separator: "\n")) {
+            confirmation = PendingAction(title: fileContextText("deleteTitle"), message: String(format: fileContextText("deleteCount"), ordered.count)) {
                 guard store.repositoryURL == root, !store.isBusy else { return }
                 store.operation(fileContextText("trash")) { repo in
                     guard repo.url == root else { return }
@@ -947,6 +980,13 @@ extension MainWindow {
                         records.append(try await repo.trashWorkspaceFile(path: path))
                         UserDefaults.standard.set(try JSONEncoder().encode(records), forKey: key)
                     }
+                }
+            }
+            confirmation?.permanentlyDelete = {
+                guard store.repositoryURL == root, !store.isBusy else { return }
+                store.operation(fileContextText("permanentlyDelete")) { repo in
+                    guard repo.url == root else { return }
+                    for path in ordered { try await repo.permanentlyDeleteWorkspaceFile(path: path) }
                 }
             }
         case .copyName: copyText(ordered.map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: "\n"))
@@ -988,7 +1028,7 @@ extension MainWindow {
         switch action {
         case .openRepository: store.requestOpen(URL(fileURLWithPath: value))
         case .revealRepository: NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: value)])
-        case .removeRecent: store.recentPaths.removeAll { $0 == value }; UserDefaults.standard.set(store.recentPaths, forKey: "recentRepositories")
+        case .removeRecent: store.removeRecentRepository(value)
         case .copy: copyText(value)
         case .history: store.showHistory(path: nil, ref: value)
         case .createLocalBranch:
@@ -1019,11 +1059,13 @@ extension MainWindow {
 }
 
 /// Own this split directly so SwiftUI's equal distribution cannot overwrite its dividers.
-private struct WorkspacePaneSplit<Files: View, Diff: View, Footer: View>: NSViewRepresentable {
+private struct WorkspacePaneSplit<Files: View, Diff: View, History: View, Commit: View>: NSViewRepresentable {
+    let holdsPreviousPresentation: Bool
     let compact: Bool
     let files: Files
     let diff: Diff
-    let footer: Footer
+    let history: History
+    let commit: Commit
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> WorkspaceSplitView {
@@ -1032,31 +1074,54 @@ private struct WorkspacePaneSplit<Files: View, Diff: View, Footer: View>: NSView
         return split
     }
     func updateNSView(_ split: WorkspaceSplitView, context: Context) {
-        context.coordinator.update(self)
+        split.holdsPreviousPresentation = holdsPreviousPresentation
+        // Do not lay out the old project again while the target snapshot is being read.
+        if !holdsPreviousPresentation { context.coordinator.update(self) }
         split.compact = compact
     }
-    final class Coordinator {
-        let fileHost: NSHostingView<AnyView>
-        let diffHost: NSHostingView<AnyView>
-        let footerHost: NSHostingView<AnyView>
-        var hosts: [NSView] { [fileHost, diffHost, footerHost] }
+    @MainActor final class Coordinator {
+        let files: NSHostingView<AnyView>
+        let diff: NSHostingView<AnyView>
+        let footer: HistoryCommitSplitView
+        let history: NSHostingView<AnyView>
+        let commit: NSHostingView<AnyView>
+        var hosts: [NSView] { [files, diff, footer] }
         init(_ model: WorkspacePaneSplit) {
-            fileHost = NSHostingView(rootView: Self.focusRoot(model.files))
-            diffHost = NSHostingView(rootView: Self.focusRoot(model.diff))
-            footerHost = NSHostingView(rootView: Self.focusRoot(model.footer))
-            // Pane sizes belong to the split; SwiftUI content may expand inside each one.
-            fileHost.sizingOptions = []; diffHost.sizingOptions = []; footerHost.sizingOptions = []
+            files = NSHostingView(rootView: Self.focusRoot(model.files))
+            diff = NSHostingView(rootView: Self.focusRoot(model.diff))
+            history = NSHostingView(rootView: Self.focusRoot(model.history))
+            commit = NSHostingView(rootView: Self.focusRoot(model.commit))
+            footer = HistoryCommitSplitView()
+            footer.addArrangedSubview(history)
+            footer.addArrangedSubview(commit)
+            files.sizingOptions = []; diff.sizingOptions = []; history.sizingOptions = []; commit.sizingOptions = []
         }
         func update(_ model: WorkspacePaneSplit) {
-            fileHost.rootView = Self.focusRoot(model.files)
-            diffHost.rootView = Self.focusRoot(model.diff)
-            footerHost.rootView = Self.focusRoot(model.footer)
+            files.rootView = Self.focusRoot(model.files)
+            diff.rootView = Self.focusRoot(model.diff)
+            history.rootView = Self.focusRoot(model.history)
+            commit.rootView = Self.focusRoot(model.commit)
         }
-        private static func focusRoot<V: View>(_ view: V) -> AnyView { AnyView(view.controlSize(.small).nativeFocusRoot()) }
+        private static func focusRoot<V: View>(_ view: V) -> AnyView {
+            AnyView(view.controlSize(.small).nativeFocusRoot().transaction { $0.animation = nil; $0.disablesAnimations = true })
+        }
     }
 }
 
 final class WorkspaceSplitView: NSSplitView, NSSplitViewDelegate {
+    var holdsPreviousPresentation = false {
+        didSet {
+            if holdsPreviousPresentation && !oldValue { window?.makeFirstResponder(self) }
+            setAccessibilityEnabled(!holdsPreviousPresentation)
+        }
+    }
+    override var acceptsFirstResponder: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        holdsPreviousPresentation && bounds.contains(convert(point, from: superview)) ? self : super.hitTest(point)
+    }
+    override func keyDown(with event: NSEvent) {
+        if !holdsPreviousPresentation { super.keyDown(with: event) }
+    }
     var compact: Bool {
         didSet { if compact != oldValue, initialized { distribute(fileHeight: subviews[0].frame.height, footerHeight: subviews[2].frame.height) } }
     }
@@ -1102,8 +1167,8 @@ final class WorkspaceSplitView: NSSplitView, NSSplitViewDelegate {
         let heights = [file, diff, footer]
         var y: CGFloat = 0
         for (view, height) in zip(subviews, heights) {
-            view.frame = NSRect(x: 0, y: y, width: bounds.width, height: height)
-            view.needsLayout = true
+            let frame = NSRect(x: 0, y: y, width: bounds.width, height: height)
+            if view.frame != frame { view.frame = frame; view.needsLayout = true }
             y += height + dividerThickness
         }
     }

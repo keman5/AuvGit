@@ -67,7 +67,7 @@ enum ShortcutCommand: String, CaseIterable {
         .renameFile: ("Move or Rename File", "Return", 0, [.files]),
         .useCommitMessage: ("Use Message for Commit", "k", 3, [.history]),
         .discard: ("Discard", "z", 1, [.files]),
-        .deleteFile: ("Delete File", "Backspace", 1, [.files]),
+        .deleteFile: ("Delete File", "Backspace", 0, [.files]),
         .stash: ("Stash All", "s", 1, [.workspace]),
         .applyStash: ("Apply Stash", "s", 3, [.workspace, .stash]),
         .renameStash: ("Rename Stash", "F2", 0, [.stash]),
@@ -205,6 +205,13 @@ final class KeyboardShortcuts: ObservableObject {
                let value = try? JSONDecoder().decode(ShortcutBinding.self, from: data) {
                 bindings[command] = value
             }
+        }
+        if !defaults.bool(forKey: "shortcut.deleteFile.backspaceMigrated") {
+            if binding(.deleteFile) == .init(key: "Backspace", modifiers: 1) {
+                bindings[.deleteFile] = ShortcutCommand.deleteFile.defaultBinding
+                defaults.set(try? JSONEncoder().encode(ShortcutCommand.deleteFile.defaultBinding), forKey: "shortcut.binding.deleteFile")
+            }
+            defaults.set(true, forKey: "shortcut.deleteFile.backspaceMigrated")
         }
         if binding(.copyHash) == .init(key: "c", modifiers: 1) {
             bindings[.copyHash] = ShortcutCommand.copyHash.defaultBinding

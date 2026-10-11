@@ -4,6 +4,11 @@ import RayGitLocalization
 
 struct OperationLogView: View {
     @ObservedObject var store: RepositoryStore
+    @ObservedObject private var commandRecords: RepositoryCommandRecords
+    init(store: RepositoryStore) {
+        self.store = store
+        commandRecords = store.commandRecords
+    }
     @Environment(\.dismiss) private var dismiss
     @State private var expanded = Set<UUID>()
     @State private var activeDetail: UUID?
@@ -12,7 +17,7 @@ struct OperationLogView: View {
     private func text(_ key: String) -> String { L10n.text(key, table: "OperationLog") }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack { Text(text("Operation log")).font(.headline); Button(text("Close")) { dismiss() }.keyboardShortcut(.cancelAction) }.frame(maxWidth: .infinity)
+            HStack { Text(text("Operation log")).font(.headline); Button(text("Close")) { dismiss() }.keyboardShortcut(.cancelAction) }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
             if let error = store.error { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red).textSelection(.enabled) }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
@@ -51,7 +56,7 @@ struct OperationLogView: View {
             if let exportError { Text(exportError).foregroundStyle(.red).textSelection(.enabled) }
         }.rayGitSheet(item: $fullRecord) { record in
             VStack(alignment: .leading, spacing: 12) {
-                HStack { Text(text("Full sanitized output")).font(.headline); Button(text("Close")) { fullRecord = nil } }.frame(maxWidth: .infinity)
+                HStack { Text(text("Full sanitized output")).font(.headline); Button(text("Close")) { fullRecord = nil } }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
                 OperationLogTextView(content: detailText(record, full: true), focused: true, onFocus: {})
             }.padding(20).frame(width: 900, height: 600)
         }.buttonBorderShape(.roundedRectangle(radius: 6)).padding(20).frame(width: 760, height: 510)

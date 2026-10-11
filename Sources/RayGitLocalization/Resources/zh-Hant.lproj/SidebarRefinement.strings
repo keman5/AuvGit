@@ -17,3 +17,6 @@
 "Auto Stash Retained" = "本機更改已自動儲存至貯藏 %@。貯藏已保留，可在需要時套用。";
 "Merge Branch Message" = "將 %@ 合併到目前分支 %@？";
 "Create Local Branch…" = "建立本機分支…";
+"Project is unavailable" = "專案已不存在";
+"Remove missing project message" = "專案目錄或 Git 資料已不存在。是否從專案列表中移除？\n\n%@\n\n僅移除列表記錄。";
+"Remove from project list" = "從專案列表移除";

@@ -11,3 +11,5 @@
 "No recent commit messages" = "最近のコミットメッセージはありません";
 "Clear commit history" = "コミット履歴を消去";
 "Open in Finder" = "Finder で開く";
+
+"Discard selected unstaged changes, or all eligible changes when none are selected" = "選択した未ステージ変更を破棄します。未選択の場合は対象となるすべての変更を破棄します";

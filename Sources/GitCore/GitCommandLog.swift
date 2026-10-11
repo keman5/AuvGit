@@ -156,6 +156,9 @@ public enum GitFailureSummary {
         if text.contains("git-lfs") || text.contains("git lfs") { return "Git LFS operation failed" }
         if text.contains("no space left") || text.contains("disk full") { return "Disk is full" }
         if text.contains("not a git repository") { return "Not a Git repository" }
+        if text.contains("unknown index entry format") || text.contains("unsupported ce_mode") || text.contains("index file corrupt") || text.contains("index file smaller than expected") || text.contains("bad signature") && text.contains("index") {
+            return "Git index is corrupt; workspace changes are unavailable."
+        }
         if text.contains("could not read username") || text.contains("authentication failed") || text.contains("askpass") { return "Authentication required" }
         if text.contains("permission denied (publickey)") { return "SSH authentication failed" }
         if text.contains("no upstream branch") || text.contains("no tracking information") { return "No upstream branch configured" }

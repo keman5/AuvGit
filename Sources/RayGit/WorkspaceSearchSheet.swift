@@ -15,7 +15,7 @@ struct WorkspaceSearchSheet: View {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 StableTextField(designWorkspaceText("Search files, commits, branches…"), text: $query, rounded: false, initialFocus: true)
                 Button(designWorkspaceText("Close")) { dismiss() }
-            }.padding(16)
+            }.buttonStyle(RayGitDialogButtonStyle()).padding(16)
             Divider()
             List {
                 Section(designWorkspaceText("Files")) {

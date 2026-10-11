@@ -66,7 +66,10 @@ struct DiffPane: View {
             }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 4).rayGitChrome()
             Divider()
             if let preview { StaticComparisonView(snapshot: preview, showsControls: false) }
-            else if text.isEmpty { RayGitEmptyState(title: diffText("diff.empty"), systemImage: "checkmark.circle") }
+            else if text.isEmpty {
+                if isLoading { ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity) }
+                else { RayGitEmptyState(title: diffText("diff.empty"), systemImage: "checkmark.circle") }
+            }
             else {
                 if diff.isBinary { Label(diffText("diff.binary"), systemImage: "doc.zipper").font(.caption).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(Color.orange.opacity(0.1)) }
                 if diff.isTruncated { Text(diffText("diff.truncated", 20000)).font(.caption).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(Color.orange.opacity(0.15)) }
@@ -193,8 +196,8 @@ struct DiffTextSurface: NSViewRepresentable {
             view.textContainerInset = NSSize(width: 8, height: 8)
             scroll.documentView = view; stack.addArrangedSubview(scroll)
             context.coordinator.scrolls.append(scroll)
-            context.coordinator.observers.append(NotificationCenter.default.addObserver(forName: NSTextView.didChangeSelectionNotification, object: view, queue: .main) { [weak coordinator = context.coordinator, weak view] _ in
-                guard let coordinator, let view else { return }
+            context.coordinator.observers.append(NotificationCenter.default.addObserver(forName: NSTextView.didChangeSelectionNotification, object: nil, queue: .main) { [weak coordinator = context.coordinator] notification in
+                guard let coordinator, let view = notification.object as? NSTextView, coordinator.scrolls.contains(where: { $0.documentView === view }) else { return }
                 coordinator.highlightCurrentRow(in: view)
             })
             scroll.contentView.postsBoundsChangedNotifications = true
@@ -204,6 +207,9 @@ struct DiffTextSurface: NSViewRepresentable {
             })
         }
         return stack
+    }
+    static func dismantleNSView(_ stack: NSStackView, coordinator: Coordinator) {
+        coordinator.cacheAndDetachActiveDocument()
     }
     func updateNSView(_ stack: NSStackView, context: Context) {
         let coordinator = context.coordinator
@@ -219,20 +225,22 @@ struct DiffTextSurface: NSViewRepresentable {
         let style = "\(compact)|\(additionColor)|\(deletionColor)|\(modificationColor)|\(fontName)|\(syntaxHighlight)|\(characterDiff)|\(tabWidth)|\(showWhitespace)"
         let changedStyle = coordinator.style != style
         coordinator.style = style
-        if changedStyle || changedDocument || coordinator.split != sideBySide || coordinator.dark != dark || coordinator.lineNumbers != lineNumbers || coordinator.fontSize != fontSize {
+        var restored = false
+        if changedStyle || changedDocument || coordinator.split != sideBySide || coordinator.dark != dark || coordinator.lineNumbers != lineNumbers || coordinator.fontSize != fontSize || coordinator.wraps != wraps {
             coordinator.syncing = true
+            restored = coordinator.activateDocument(.init(source: signature, identity: documentIdentity, languagePath: languagePath, style: style, split: sideBySide, dark: dark, lineNumbers: lineNumbers, fontSize: fontSize, wraps: wraps))
             coordinator.lineNumbers = lineNumbers; coordinator.fontSize = fontSize
-            coordinator.lastAlignedSignature = nil
+            if !restored { coordinator.lastAlignedSignature = nil }
             coordinator.signature = signature; coordinator.split = sideBySide; coordinator.dark = dark
-            let documents = render()
-            coordinator.hunkRanges = documents.ranges
-            coordinator.hunkKinds = diff.hunks.indices.map { index in
+            let documents = restored ? nil : render()
+            if let documents { coordinator.hunkRanges = documents.ranges }
+            if !restored { coordinator.hunkKinds = diff.hunks.indices.map { index in
                 let start = diff.hunks[index].lineIndex
                 let end = index + 1 < diff.hunks.count ? diff.hunks[index + 1].lineIndex : diff.lines.count
                 let rows = diff.lines[start..<end]
                 let additions = rows.contains { $0.kind == .addition }, deletions = rows.contains { $0.kind == .deletion }
                 return additions && !deletions ? .addition : deletions && !additions ? .deletion : .modification
-            }
+            } }
             coordinator.scrolls[1].isHidden = !sideBySide
             for (index, scroll) in coordinator.scrolls.enumerated() {
                 let view = scroll.documentView as! NSTextView
@@ -240,7 +248,7 @@ struct DiffTextSurface: NSViewRepresentable {
                 view.layoutManager?.showsInvisibleCharacters = showWhitespace
                 let selection = view.selectedRange()
                 let position = scroll.contentView.bounds.origin
-                view.textStorage?.setAttributedString(documents.text[index])
+                if let documents { view.textStorage?.setAttributedString(documents.text[index]) }
                 let length = (view.string as NSString).length
                 view.setSelectedRange(changedDocument && scrollsToFirstChange ? NSRange(location: 0, length: 0) : NSRange(location: min(selection.location, length), length: min(selection.length, max(0, length - selection.location))))
                 scroll.contentView.scroll(to: changedDocument && scrollsToFirstChange ? .zero : position)
@@ -251,6 +259,7 @@ struct DiffTextSurface: NSViewRepresentable {
         coordinator.syncing = true
         for scroll in coordinator.scrolls {
             guard let view = scroll.documentView as? NSTextView else { continue }
+            scroll.hasHorizontalScroller = !wraps
             if coordinator.wraps != wraps {
                 let position = scroll.contentView.bounds.origin
                 view.isHorizontallyResizable = !wraps
@@ -258,13 +267,13 @@ struct DiffTextSurface: NSViewRepresentable {
                 view.textContainer?.widthTracksTextView = wraps
                 view.textContainer?.containerSize = NSSize(width: wraps ? max(1, scroll.contentSize.width) : CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
                 if wraps { view.setFrameSize(NSSize(width: scroll.contentSize.width, height: view.frame.height)) }
-                scroll.hasHorizontalScroller = !wraps
                 scroll.contentView.scroll(to: position)
             }
         }
         coordinator.syncing = false
         coordinator.wraps = wraps
         coordinator.alignWrappedRows()
+        if restored { coordinator.refreshOverviews() }
         if coordinator.searchOptions != searchOptions {
             coordinator.searchOptions = searchOptions
             coordinator.matches = []
@@ -386,6 +395,80 @@ struct DiffTextSurface: NSViewRepresentable {
         return ([left, right], ranges)
     }
     final class Coordinator {
+        struct DocumentKey: Hashable {
+            let source: String
+            let identity: String
+            let languagePath: String
+            let style: String
+            let split: Bool
+            let dark: Bool
+            let lineNumbers: Bool
+            let fontSize: CGFloat
+            let wraps: Bool
+        }
+        private struct NativeDocument {
+            let key: DocumentKey
+            let views: [NSTextView]
+            let positions: [NSPoint]
+            let hunkRanges: [[NSRange]]
+            let hunkKinds: [ComparisonOverviewMarker.Kind]
+            let alignedSignature: String?
+            let alignedWidths: [CGFloat]
+            let alignedWrap: Bool?
+            var cost: Int { views.reduce(0) { $0 + ($1.textStorage?.length ?? 0) } }
+        }
+        private var activeDocument: DocumentKey?
+        private static var documents: [NativeDocument] = []
+        static func clearDocumentCache() { documents.removeAll() }
+        func cacheAndDetachActiveDocument() {
+            guard let activeDocument else { return }
+            let entry = NativeDocument(key: activeDocument, views: scrolls.compactMap { $0.documentView as? NSTextView }, positions: scrolls.map { $0.contentView.bounds.origin }, hunkRanges: hunkRanges, hunkKinds: hunkKinds, alignedSignature: lastAlignedSignature, alignedWidths: lastAlignedWidths, alignedWrap: lastAlignedWrap)
+            Self.documents.removeAll { $0.key == activeDocument }
+            if entry.views.count == 2, entry.cost <= 2_000_000 { Self.documents.append(entry) }
+            scrolls.forEach { $0.documentView = nil }
+            self.activeDocument = nil
+            trimDocumentCache()
+        }
+        private func trimDocumentCache() {
+            while Self.documents.count > 4 || Self.documents.reduce(0, { $0 + $1.cost }) > 2_000_000 { Self.documents.removeFirst() }
+        }
+        /// Keep TextKit's glyphs and line fragments, rather than rebuilding them on every return.
+        /// Only detached documents enter the bounded cache; live surfaces never share a text view.
+        @discardableResult
+        func activateDocument(_ key: DocumentKey) -> Bool {
+            if activeDocument == key { return false }
+            if let activeDocument {
+                let entry = NativeDocument(key: activeDocument, views: scrolls.compactMap { $0.documentView as? NSTextView }, positions: scrolls.map { $0.contentView.bounds.origin }, hunkRanges: hunkRanges, hunkKinds: hunkKinds, alignedSignature: lastAlignedSignature, alignedWidths: lastAlignedWidths, alignedWrap: lastAlignedWrap)
+                Self.documents.removeAll { $0.key == activeDocument }
+                if entry.cost <= 2_000_000 { Self.documents.append(entry) }
+            }
+            let cached = Self.documents.firstIndex { $0.key == key }.map { Self.documents.remove(at: $0) }
+            activeDocument = key
+            if let cached {
+                for (index, scroll) in scrolls.enumerated() {
+                    scroll.documentView = cached.views[index]
+                    scroll.contentView.scroll(to: cached.positions[index])
+                }
+                hunkRanges = cached.hunkRanges; hunkKinds = cached.hunkKinds
+                lastAlignedSignature = cached.alignedSignature; lastAlignedWidths = cached.alignedWidths; lastAlignedWrap = cached.alignedWrap
+                wraps = cached.alignedWrap
+            } else if Self.documents.last?.views.first === scrolls.first?.documentView {
+                // The outgoing text systems are cached; install fresh ones before editing.
+                for scroll in scrolls {
+                    let view = ReadOnlyDiffTextView()
+                    view.isEditable = false; view.isSelectable = true; view.isRichText = false; view.allowsUndo = false
+                    view.isHorizontallyResizable = true; view.isVerticallyResizable = true
+                    view.minSize = .zero; view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+                    view.textContainer?.widthTracksTextView = false
+                    view.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+                    view.textContainerInset = NSSize(width: 8, height: 8)
+                    scroll.documentView = view
+                }
+                wraps = nil
+            }
+            trimDocumentCache()
+            return cached != nil
+        }
         var style = ""
         var scrolls: [NSScrollView] = [], observers: [NSObjectProtocol] = []
         var syncing = false, split = true, dark = false
@@ -450,7 +533,7 @@ struct DiffTextSurface: NSViewRepresentable {
             syncing = false
             highlightCurrentRow(in: view)
         }
-        private func refreshOverviews() {
+        func refreshOverviews() {
             for (column, scroll) in scrolls.enumerated() {
                 guard let scroll = scroll as? ComparisonOverviewScrollView, let view = scroll.documentView as? NSTextView,
                       let layout = view.layoutManager, let container = view.textContainer else { continue }
@@ -483,6 +566,7 @@ struct DiffTextSurface: NSViewRepresentable {
         func alignWrappedRows() {
             guard !aligning else { return }
             let widths = scrolls.map { $0.contentSize.width }
+            guard widths.allSatisfy({ $0 > 2 * 8 }) else { return }
             guard lastAlignedSignature != signature || lastAlignedWidths != widths || lastAlignedWrap != wraps else { return }
             lastAlignedSignature = signature; lastAlignedWidths = widths; lastAlignedWrap = wraps
             aligning = true

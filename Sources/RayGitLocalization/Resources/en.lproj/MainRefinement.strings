@@ -11,3 +11,5 @@
 "No recent commit messages" = "No recent commit messages";
 "Clear commit history" = "Clear commit history";
 "Open in Finder" = "Open in Finder";
+
+"Discard selected unstaged changes, or all eligible changes when none are selected" = "Discard selected unstaged changes, or all eligible changes when none are selected";

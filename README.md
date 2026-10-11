@@ -11,7 +11,9 @@ swift test
 ./scripts/build-app.sh
 ```
 
-双击 `.artifacts/RayGit.app`，点击“打开仓库”。也可从终端运行：
+构建成功后会正常退出正在运行的本地 RayGit，并替换 `/Applications/RayGit.app`；退出失败时停止替换。使用 `./scripts/build-app.sh --no-install` 可仅生成构建产物。
+
+双击 `/Applications/RayGit.app`，点击“打开仓库”。也可从终端运行：
 
 ```sh
 swift run RayGit --repo /absolute/path/to/repository

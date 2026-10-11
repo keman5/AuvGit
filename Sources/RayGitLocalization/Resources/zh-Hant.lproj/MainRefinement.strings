@@ -11,3 +11,5 @@
 "No recent commit messages" = "暫無最近提交訊息";
 "Clear commit history" = "清除提交記錄";
 "Open in Finder" = "在 Finder 中打開";
+
+"Discard selected unstaged changes, or all eligible changes when none are selected" = "捨棄所選的未暫存修改；未選取檔案時捨棄所有符合條件的修改";

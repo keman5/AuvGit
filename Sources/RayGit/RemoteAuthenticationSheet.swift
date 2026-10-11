@@ -140,7 +140,11 @@ final class RemoteAuthenticationCoordinator: ObservableObject {
                                                        remoteChanged: false))
     }
 
-    func cancel() { guard !isSubmitting else { return }; request = nil; submissionError = nil }
+    func cancel() {
+        guard !isSubmitting else { return }
+        if request != nil { request = nil }
+        if submissionError != nil { submissionError = nil }
+    }
 
     func save(_ credential: NetworkCredential, for repository: GitRepository, operation: NetworkOperation) async throws {
         let target = try await repository.remoteAuthenticationTarget(for: operation)
@@ -237,8 +241,8 @@ struct RemoteAuthenticationSheet: View {
                 Button(networkText("retry")) {
                     guard let submission = draft.submission else { return }
                     submit(submission)
-                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(draft.submission == nil || isSubmitting)
-            }.frame(maxWidth: .infinity)
+                }.buttonStyle(RayGitDialogButtonStyle(prominent: true)).keyboardShortcut(.defaultAction).disabled(draft.submission == nil || isSubmitting)
+            }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.padding(22).frame(width: 620)
             .interactiveDismissDisabled()
             .onDisappear { draft.token = ""; draft.password = ""; draft.passphrase = "" }

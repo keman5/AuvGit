@@ -40,7 +40,7 @@ struct HistoryResetSheet: View {
                     }
                     dismiss()
                 }.disabled(context == nil || store.isBusy || store.repositoryURL != request.repositoryURL)
-            }.frame(maxWidth: .infinity)
+            }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.padding(22).frame(width: 360)
         .task {
             guard let repository = store.repository, repository.url == request.repositoryURL else { return }

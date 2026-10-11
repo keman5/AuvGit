@@ -19,6 +19,7 @@ final class NativeFocusAppearance: ObservableObject {
         let original: NSFocusRingType
     }
     private var rings: [ObjectIdentifier: Ring] = [:]
+    private var applicationPending = false
 
     static func forWindow(_ window: NSWindow) -> NativeFocusAppearance {
         if let existing = windows.object(forKey: window) { return existing }
@@ -101,6 +102,7 @@ final class NativeFocusAppearance: ObservableObject {
         guard let content = window?.contentView else { return }
         rings = rings.filter { $0.value.view != nil }
         func visit(_ view: NSView) {
+            guard !view.isHidden else { return }
             let id = ObjectIdentifier(view)
             if rings[id] == nil { rings[id] = Ring(view: view, original: view.focusRingType) }
             let desired = isVisible ? rings[id]!.original : .none
@@ -113,6 +115,15 @@ final class NativeFocusAppearance: ObservableObject {
         visit(content)
         contextRowFocus.apply()
         clearInitialFocus()
+    }
+
+    func scheduleApply() {
+        guard !applicationPending else { return }
+        applicationPending = true
+        DispatchQueue.main.async { [weak self] in
+            self?.applicationPending = false
+            self?.apply()
+        }
     }
 
     private func setVisible(_ visible: Bool) {

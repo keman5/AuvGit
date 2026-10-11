@@ -75,3 +75,5 @@
 "Filtering content" = "正在過濾內容";
 "Finding sources" = "正在尋找來源";
 "Reusing objects" = "正在重用物件";
+
+"Git index is corrupt; workspace changes are unavailable." = "Git 索引已損壞，無法讀取工作區變更。";

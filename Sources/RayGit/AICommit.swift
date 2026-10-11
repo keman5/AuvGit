@@ -38,8 +38,8 @@ struct AICommitScopeSheet: View {
                 Button(aiCommitText("Generate")) {
                     AICommitScopeChoice.save(scope, remember: remember)
                     generate(scope)
-                }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
-            }.frame(maxWidth: .infinity)
+                }.keyboardShortcut(.defaultAction).buttonStyle(RayGitDialogButtonStyle(prominent: true))
+            }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.padding(24).frame(width: 380)
     }
 }
@@ -113,7 +113,7 @@ final class AICommitController: ObservableObject {
     private(set) var scope: AICommitScope = .staged
     private var task: Task<Void, Never>?
     private var requestID = UUID()
-    func cancel() { requestID = UUID(); task?.cancel(); task = nil; isLoading = false }
+    func cancel() { requestID = UUID(); task?.cancel(); task = nil; if isLoading { isLoading = false } }
     private let generateMessage: (String, AICommitConfiguration) async throws -> String
     init(generateMessage: @escaping (String, AICommitConfiguration) async throws -> String = { try await AICommitService.generate(prompt: $0, configuration: $1) }) {
         self.generateMessage = generateMessage
@@ -322,7 +322,7 @@ struct AICommitSettingsSheet: View {
             HStack { if !error.isEmpty { FloatingNotice(message: error) }; Button(aiCommitText("Cancel")) { dismiss() }; Button(aiCommitText("Save")) {
                 do { if !key.isEmpty { try AICommitSecret.save(key) }; configuration.save(); dismiss() }
                 catch { self.error = OperationFailure.message(error) }
-            }.buttonStyle(.borderedProminent).disabled(configuration.provider.isEmpty || configuration.model.trimmingCharacters(in: .whitespaces).isEmpty || !(30...4000).contains(configuration.maximumPatchKB)) }.frame(maxWidth: .infinity)
+            }.buttonStyle(RayGitDialogButtonStyle(prominent: true)).disabled(configuration.provider.isEmpty || configuration.model.trimmingCharacters(in: .whitespaces).isEmpty || !(30...4000).contains(configuration.maximumPatchKB)) }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.textFieldStyle(.roundedBorder).padding(22).frame(width: 520)
     }
 }

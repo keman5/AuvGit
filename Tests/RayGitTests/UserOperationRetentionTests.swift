@@ -1,9 +1,26 @@
 import XCTest
+import Combine
 @testable import GitCore
 @testable import RayGit
 
 @MainActor
 final class UserOperationRetentionTests: XCTestCase {
+    func testRoutineCommandRecordsDoNotInvalidateWorkspaceAndStillUpdateLog() async throws {
+        let store = RepositoryStore(persistsSession: false)
+        let repository = GitRepository(url: URL(fileURLWithPath: "/tmp/log-isolation"))
+        store.repository = repository; store.repositoryURL = repository.url
+        var workspaceUpdates = 0, logUpdates = 0
+        let workspace = store.objectWillChange.sink { workspaceUpdates += 1 }
+        let log = store.commandRecords.objectWillChange.sink { logUpdates += 1 }
+        defer { workspace.cancel(); log.cancel() }
+        for _ in 0..<20 {
+            GitCommandLog.record(directory: repository.url, executable: "git", arguments: ["status"], output: "", error: nil, exitCode: 0, started: Date())
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(workspaceUpdates, 0)
+        XCTAssertEqual(logUpdates, 20)
+        XCTAssertEqual(store.operationLog.count, 20)
+    }
     func testLatestActionSurvivesRefreshAndReadCommandChurn() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

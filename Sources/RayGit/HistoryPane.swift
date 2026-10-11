@@ -112,12 +112,19 @@ struct HistoryPane: View {
             }.frame(maxWidth: .infinity, alignment: .leading).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 12).frame(height: 28).fixedSize(horizontal: false, vertical: true).rayGitChrome()
             Divider()
             }
-            if visible.isEmpty {
-                ContentUnavailableView {
-                    Label(isLoading ? historyText("history.loading") : historyText("history.empty"), systemImage: "clock.arrow.circlepath")
-                } description: {
-                    Text(search.isEmpty ? historyText("history.emptyDescription") : historyText("history.noResults"))
-                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            if compact {
+                NativeCompactHistoryTable(commits: visible, graph: graph, styles: graphStyles,
+                    selection: $selection, navigationGeneration: navigationGeneration,
+                    graphWidth: graphWidth(graph), nameWidth: compactNameWidth, dateWidth: compactDateWidth,
+                    showAvatars: showAvatars, showNames: showNames,
+                    showRemoteLabels: showRemoteLabels, showTagLabels: showTagLabels,
+                    isBusy: isBusy, hasMore: hasMore, isLoading: isLoading,
+                    onLoadMore: onLoadMore, onAction: onAction)
+                    .overlay {
+                        if visible.isEmpty { emptyHistory.allowsHitTesting(false) }
+                    }
+            } else if visible.isEmpty {
+                emptyHistory
             } else {
                 ScrollViewReader { proxy in
                 List(selection: $selection) {
@@ -238,6 +245,13 @@ struct HistoryPane: View {
                 selection = target
             }, showChanges: onShowChanges))
         }
+    }
+    private var emptyHistory: some View {
+        ContentUnavailableView {
+            Label(isLoading ? historyText("history.loading") : historyText("history.empty"), systemImage: "clock.arrow.circlepath")
+        } description: {
+            Text(search.isEmpty ? historyText("history.emptyDescription") : historyText("history.noResults"))
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     private func scrollAfterNavigation(_ proxy: ScrollViewProxy) {
         guard pendingNavigationScroll, let selection, commits.contains(where: { $0.hash == selection }) else { return }

@@ -109,7 +109,7 @@ struct BorderlessToolbarView<CommandContent: View>: View {
                 Button(shellToolbarText("space")) { model.insert("space") }
                 Button(shellToolbarText("flexibleSpace")) { model.insert("flexibleSpace") }
             }
-            HStack { Button(shellToolbarText("restoreDefaults")) { model.reset() }; Button(shellToolbarText("done")) { customizing = false }.keyboardShortcut(.defaultAction) }.frame(maxWidth: .infinity)
+            HStack { Button(shellToolbarText("restoreDefaults")) { model.reset() }; Button(shellToolbarText("done")) { customizing = false }.keyboardShortcut(.defaultAction) }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.padding(20).frame(width: 360)
     }
 }

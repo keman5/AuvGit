@@ -38,3 +38,7 @@
 "Revert Message" = "创建新提交以撤销 %@ 的修改。需要干净工作区；遇到冲突会停止。";
 "Delete Branch Message" = "删除分支 %@。未合并分支将由 Git 拒绝删除。";
 "Drop Stash Message" = "将永久删除 %@ 贮藏记录。请先确认其中内容已不再需要。";
+
+"Discard Workspace Message" = "已跟踪文件的未暂存修改将恢复为索引版本。未跟踪文件将被永久删除，无法在应用内撤销。已暂存内容保持不变。";
+
+"File Count Summary" = "%d 个文件";

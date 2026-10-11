@@ -18,14 +18,32 @@ struct TitlebarToolbarSupport: NSViewRepresentable {
         private var eventMonitor: Any?
         private var customizationDelegate: SpaceCustomizationDelegate?
         private var titleVisibilityObservation: NSKeyValueObservation?
+        private var configurationPending = false
 
         func scheduleToolbarConfiguration() {
-            DispatchQueue.main.async { [weak self] in self?.configureToolbar() }
+            // SwiftUI may order its window before the deferred toolbar is ready.
+            // Keep that placeholder invisible until the restored shell is shown.
+            if let window, !hidesNativeToolbar, shellContent != nil, EightPointWindowShell.usesBorderlessMode {
+                window.alphaValue = 0
+            }
+            guard !configurationPending else { return }
+            configurationPending = true
+            DispatchQueue.main.async { [weak self] in
+                self?.configurationPending = false
+                self?.configureToolbar()
+            }
         }
 
         private func configureToolbar() {
             guard let window else { return }
-            if hidesNativeToolbar { window.toolbar?.isVisible = false; if let shellWindowTitle { window.title = shellWindowTitle; window.contentView?.needsLayout = true }; return }
+            if hidesNativeToolbar {
+                if window.toolbar?.isVisible == true { window.toolbar?.isVisible = false }
+                if let shellWindowTitle, window.title != shellWindowTitle {
+                    window.title = shellWindowTitle
+                    (window.contentView as? EightPointFrameView)?.updateTitle()
+                }
+                return
+            }
             EightPointWindowShell.install(on: window, content: shellContent)
             if let toolbar = window.toolbar, let delegate = toolbar.delegate,
                !(delegate is SpaceCustomizationDelegate) {

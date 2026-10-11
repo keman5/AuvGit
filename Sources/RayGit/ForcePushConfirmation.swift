@@ -38,10 +38,10 @@ struct PullOperationConfirmation: View {
             HStack {
                 Spacer()
                 Button(L10n.text("cancel", table: "Network"), action: cancel).keyboardShortcut(.cancelAction)
-                Button(L10n.text("pull", table: "Network")) { execute(.pull) }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
+                Button(L10n.text("pull", table: "Network")) { execute(.pull) }.keyboardShortcut(.defaultAction).buttonStyle(RayGitDialogButtonStyle(prominent: true))
                 Button(L10n.text("fetch", table: "Network")) { execute(.fetch) }
                 Spacer()
-            }
+            }.buttonStyle(RayGitDialogButtonStyle())
         }.padding(24).frame(width: 360)
     }
 }
@@ -79,7 +79,7 @@ struct ForcePushConfirmation: View {
                     .keyboardShortcut(.defaultAction)
                 Button(forcePushText("action"), role: .destructive, action: execute)
                 Spacer()
-            }
+            }.buttonStyle(RayGitDialogButtonStyle())
         }.padding(24).frame(width: 360).onExitCommand(perform: cancel)
     }
 }

@@ -186,9 +186,9 @@ struct RebaseWorkflowView: View {
             HStack(spacing: 10) {
                 if store.isBusy { ProgressView().controlSize(.small) }
                 if let onClose { Button(workflowText("Close"), action: onClose).keyboardShortcut(.cancelAction).disabled(store.isBusy) }
-                Button(sessionText("Preview and run rebase")) { prepare() }.buttonStyle(.borderedProminent)
+                Button(sessionText("Preview and run rebase")) { prepare() }.buttonStyle(RayGitDialogButtonStyle(prominent: true))
                     .disabled(store.isBusy || captured == nil || todo.isEmpty)
-            }.frame(maxWidth: .infinity)
+            }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.tint(.blue).controlSize(.regular).padding(20)
             .onChange(of: messageSelection) { _, _ in loadMessage() }
             .rayGitSheet(isPresented: $confirm, onDismiss: { pending = nil }) { preview }
@@ -247,8 +247,8 @@ struct RebaseWorkflowView: View {
             Divider()
             HStack(spacing: 8) {
                 Button(sessionText("Cancel")) { confirm = false; pending = nil }.keyboardShortcut(.cancelAction)
-                Button(sessionText("Run confirmed plan")) { if let request = pending { confirm = false; pending = nil; run(request) } }.buttonStyle(.borderedProminent)
-            }.frame(maxWidth: .infinity)
+                Button(sessionText("Run confirmed plan")) { if let request = pending { confirm = false; pending = nil; run(request) } }.buttonStyle(RayGitDialogButtonStyle(prominent: true))
+            }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.controlSize(.small).padding(20).frame(width: 800, height: 600)
     }
 

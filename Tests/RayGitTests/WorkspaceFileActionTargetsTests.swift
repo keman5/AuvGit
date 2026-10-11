@@ -13,15 +13,25 @@ final class WorkspaceFileActionTargetsTests: XCTestCase {
     func testEmptySelectionTargetsAllEligibleRows() {
         XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .stage, files: files, selection: []), ["modified", "mixed", "untracked"])
         XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .unstage, files: files, selection: []), ["staged", "mixed"])
-        XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .discard, files: files, selection: []), ["modified", "mixed"])
+        XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .discard, files: files, selection: []), ["modified", "mixed", "untracked"])
     }
     func testSelectionRestrictsTargetsWithoutFallingBackToAll() {
-        XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .discard, files: files, selection: ["modified", "untracked", "conflict"]), ["modified"])
+        XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .discard, files: files, selection: ["modified", "untracked", "conflict"]), ["modified", "untracked"])
         XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .stage, files: files, selection: ["missing", "ignored"]), [])
         XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .unstage, files: files, selection: ["modified"]), [])
     }
     func testCleanRepositoryAndConflictsNeverProduceDiscardTargets() {
         XCTAssertTrue(WorkspaceFileActionTargets.paths(for: .discard, files: [], selection: []).isEmpty)
-        XCTAssertTrue(WorkspaceFileActionTargets.paths(for: .discard, files: files, selection: ["untracked", "conflict"]).isEmpty)
+        XCTAssertTrue(WorkspaceFileActionTargets.paths(for: .discard, files: files, selection: ["conflict"]).isEmpty)
+    }
+    func testAvailabilityMatchesResolvedTargetsForStatusesAndSelections() {
+        let rows = files + [GitFile(path: "ignored", indexStatus: "!", worktreeStatus: "!"), GitFile(path: "clean", indexStatus: " ", worktreeStatus: " ")]
+        let selections: [Set<String>] = [[], ["modified"], ["staged"], ["mixed"], ["untracked"], ["conflict"], ["ignored"], ["clean"], ["missing"], ["missing", "ignored"], ["conflict", "mixed", "untracked"]]
+        for action in [FileAction.stage, .stageAll, .unstage, .unstageAll, .discard, .compare] {
+            for selection in selections {
+                XCTAssertEqual(WorkspaceFileActionTargets.hasEligibleTarget(for: action, files: rows, selection: selection), !WorkspaceFileActionTargets.paths(for: action, files: rows, selection: selection).isEmpty, "Availability must match resolved targets for \(action), \(selection)")
+            }
+            XCTAssertFalse(WorkspaceFileActionTargets.hasEligibleTarget(for: action, files: [], selection: []))
+        }
     }
 }

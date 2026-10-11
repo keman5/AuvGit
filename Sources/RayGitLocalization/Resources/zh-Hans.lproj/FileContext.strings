@@ -12,3 +12,8 @@
 "open" = "使用默认应用打开";
 "reveal" = "在访达中显示";
 "trashMessage" = "将以下项目移到废纸篓？你可以从废纸篓恢复。";
+
+"deleteTitle" = "删除文件";
+"deleteCount" = "删除所选的 %ld 个项目？";
+"permanentlyDelete" = "删除";
+"moveToTrash" = "移入废纸篓";

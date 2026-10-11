@@ -5,7 +5,7 @@ public struct TrashedRepositoryFile: Sendable, Codable {
     public let trashURL: URL
     let repositoryURL: URL
 }
-public struct WorkspaceFileNode: Identifiable, Sendable {
+public struct WorkspaceFileNode: Identifiable, Sendable, Codable {
     public let path: String
     public var id: String { path }
     public let isDirectory: Bool
@@ -38,6 +38,27 @@ extension GitRepository {
         guard !FileManager.default.fileExists(atPath: target.path) else { throw GitError("The destination already exists.") }
         try FileManager.default.moveItem(at: source, to: target)
     }
+    public func permanentlyDeleteWorkspaceFile(path: String) throws {
+        try FileManager.default.removeItem(at: managedURL(path))
+    }
+    public func discardWorkspace(paths: [String]) async throws {
+        guard !paths.isEmpty else { return }
+        let entries = Dictionary(try await status().map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
+        var tracked: [String] = []
+        var untracked: [String] = []
+        for path in Set(paths).sorted() {
+            guard let file = entries[path], !file.isConflict, file.isUnstaged else { throw GitError("Cannot discard this worktree path: " + path) }
+            if file.isUntracked {
+                let file = try managedURL(path)
+                let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+                guard attributes[.type] as? FileAttributeType == .typeRegular else { throw GitError("Only regular untracked files can be discarded.") }
+                untracked.append(path)
+            } else { tracked.append(path) }
+        }
+        // Restore tracked worktrees from the index, leaving all staged contents untouched.
+        try await discardWorktree(paths: tracked)
+        for path in untracked { try permanentlyDeleteWorkspaceFile(path: path) }
+    }
     public func trashWorkspaceFile(path: String) throws -> TrashedRepositoryFile {
         let file = try managedURL(path)
         var result: NSURL?
@@ -58,15 +79,25 @@ extension GitRepository {
     public func workspaceTree() async throws -> [WorkspaceFileNode] {
         let output = try await GitProcess.run(at: url, arguments: ["ls-files", "--cached", "--others", "--exclude-standard", "-z"])
         let paths = Set(output.data.split(separator: 0).map { String(decoding: $0, as: UTF8.self) })
+        return Self.workspaceTree(paths: paths)
+    }
+    static func workspaceTree(paths: Set<String>) -> [WorkspaceFileNode] {
+        var children: [String: Set<String>] = [:]
+        var directories: Set<String> = []
+        for path in paths {
+            let components = path.split(separator: "/")
+            var prefix = ""
+            for (index, component) in components.enumerated() {
+                let name = String(component)
+                children[prefix, default: []].insert(name)
+                prefix = prefix.isEmpty ? name : prefix + "/" + name
+                if index < components.count - 1 { directories.insert(prefix) }
+            }
+        }
         func nodes(prefix: String) -> [WorkspaceFileNode] {
-            let relevant = paths.filter { prefix.isEmpty || $0.hasPrefix(prefix + "/") }
-            let names = Set(relevant.compactMap { value -> String? in
-                let tail = prefix.isEmpty ? value : String(value.dropFirst(prefix.count + 1))
-                return tail.split(separator: "/").first.map(String.init)
-            })
-            return names.sorted().map { name in
+            (children[prefix] ?? []).sorted().map { name in
                 let path = prefix.isEmpty ? name : prefix + "/" + name
-                let directory = relevant.contains { $0.hasPrefix(path + "/") }
+                let directory = directories.contains(path)
                 return WorkspaceFileNode(path: path, isDirectory: directory, children: directory ? nodes(prefix: path) : [])
             }
         }

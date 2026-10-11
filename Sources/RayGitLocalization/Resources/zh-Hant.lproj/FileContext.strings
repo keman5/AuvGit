@@ -12,3 +12,8 @@
 "open" = "使用預設應用程式打開";
 "reveal" = "在 Finder 中顯示";
 "trashMessage" = "將以下項目移到垃圾桶？你可以從垃圾桶復原。";
+
+"deleteTitle" = "刪除檔案";
+"deleteCount" = "刪除所選的 %ld 個項目？";
+"permanentlyDelete" = "刪除";
+"moveToTrash" = "移入垃圾桶";

@@ -12,3 +12,8 @@
 "open" = "デフォルトのアプリケーションで開く";
 "reveal" = "Finder で表示";
 "trashMessage" = "これらの項目をゴミ箱に移動しますか？ゴミ箱から復元できます。";
+
+"deleteTitle" = "ファイルを削除";
+"deleteCount" = "選択した %ld 個の項目を削除しますか？";
+"permanentlyDelete" = "削除";
+"moveToTrash" = "ゴミ箱に移動";

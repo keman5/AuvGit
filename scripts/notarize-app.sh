@@ -3,7 +3,7 @@ set -euo pipefail
 cd "${0:A:h:h}"
 : "${RAYGIT_SIGN_IDENTITY:?Set RAYGIT_SIGN_IDENTITY to your Developer ID Application identity}"
 : "${RAYGIT_NOTARY_PROFILE:?Set RAYGIT_NOTARY_PROFILE to a saved notarytool keychain profile}"
-./scripts/build-app.sh
+./scripts/build-app.sh --no-install
 RAYGIT_APP="$PWD/.artifacts/RayGit.app"
 codesign --force --options runtime --timestamp --sign "$RAYGIT_SIGN_IDENTITY" "$RAYGIT_APP"
 codesign --verify --strict --verbose=2 "$RAYGIT_APP"

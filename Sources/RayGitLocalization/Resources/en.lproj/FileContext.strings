@@ -12,3 +12,8 @@
 "open" = "Open with Default Application";
 "reveal" = "Reveal in Finder";
 "trashMessage" = "Move these items to Trash? You can restore them from Trash.";
+
+"deleteTitle" = "Delete Files";
+"deleteCount" = "Delete %ld selected items?";
+"permanentlyDelete" = "Delete";
+"moveToTrash" = "Move to Trash";

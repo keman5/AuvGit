@@ -75,3 +75,5 @@
 "Filtering content" = "内容をフィルタ中";
 "Finding sources" = "ソースを検索中";
 "Reusing objects" = "オブジェクトを再利用中";
+
+"Git index is corrupt; workspace changes are unavailable." = "Git インデックスが破損しているため、作業ツリーの変更を読み取れません。";

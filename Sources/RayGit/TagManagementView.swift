@@ -114,7 +114,7 @@ struct TagManagementView: View {
             HStack {
                 if store.isBusy { ProgressView().controlSize(.small) }
                 Button(workflowText("Close")) { dismiss() }.keyboardShortcut(.cancelAction)
-            }.frame(maxWidth: .infinity).padding(.horizontal, 24).padding(.vertical, 14)
+            }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity).padding(.horizontal, 24).padding(.vertical, 14)
         }.tint(.blue).background(Color(nsColor: .windowBackgroundColor)).disabled(store.isBusy).interactiveDismissDisabled(store.isBusy).frame(width: 1020, height: 700)
         .task { await reload() }
         .rayGitSheet(isPresented: $showCreate) { createSheet }
@@ -154,9 +154,9 @@ struct TagManagementView: View {
             HStack {
                 if store.isBusy { ProgressView().controlSize(.small) }
                 Button(workflowText("Cancel")) { showCreate = false }.keyboardShortcut(.cancelAction)
-                Button(workflowText("Create tag")) { create() }.buttonStyle(.borderedProminent)
+                Button(workflowText("Create tag")) { create() }.buttonStyle(RayGitDialogButtonStyle(prominent: true))
                     .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || revision.isEmpty || (tagKind != "lightweight" && annotation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
-            }.frame(maxWidth: .infinity)
+            }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.padding(22).frame(width: 360).disabled(store.isBusy).interactiveDismissDisabled(store.isBusy)
     }
     private func field(_ label: String, text: Binding<String>) -> some View {

@@ -64,9 +64,9 @@ struct RepositoryTools: View {
                         if operation.writes, let repo = store.repository { pending = (repo, operation, first, second); confirm = true }
                         else if let repo = store.repository { run(repo, operation, first, second) }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(RayGitDialogButtonStyle(prominent: true))
                     .disabled(busy || store.isBusy || store.repository == nil || (!firstLabel.isEmpty && first.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) || (operation == .partialStash && first.isEmpty))
-                }.frame(maxWidth: .infinity)
+                }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
             }
         }
         .controlSize(.small)
@@ -164,13 +164,17 @@ struct RepositoryTools: View {
     }
 }
 
+extension Notification.Name {
+    static let rayGitRepositoryCreated = Notification.Name("RayGitRepositoryCreated")
+}
+
 struct CreateRepositorySheet: View {
     @ObservedObject var store: RepositoryStore
     @Environment(\.dismiss) private var dismiss
     @State private var clone = false
     @State private var source = ""
     @State private var destination = ""
-    @State private var cloneDestination = CloneDestination()
+    @State private var cloneDestination: CloneDestination
     @State private var busy = false
     @State private var error = ""
     @State private var authenticationRequested = false
@@ -181,9 +185,11 @@ struct CreateRepositorySheet: View {
     private let initiallyFocusSource: Bool
     init(store: RepositoryStore, initialClone: Bool? = nil) {
         self.store = store
-        let draft = RepositoryCreationDraft.load()
-        initiallyFocusSource = (initialClone ?? draft.clone) && draft.source.isEmpty
-        _clone = State(initialValue: initialClone ?? draft.clone)
+        var draft = RepositoryCreationDraft.load()
+        if let initialClone { draft.clone = initialClone }
+        draft.applyClipboard(NSPasteboard.general.string(forType: .string))
+        initiallyFocusSource = draft.clone && draft.source.isEmpty
+        _clone = State(initialValue: draft.clone)
         _source = State(initialValue: draft.source)
         _destination = State(initialValue: draft.destination)
         _cloneDestination = State(initialValue: draft.cloneDestination)
@@ -239,10 +245,10 @@ struct CreateRepositorySheet: View {
             Divider()
             HStack(spacing: 8) {
                 if busy { ProgressView().controlSize(.small) }
-                KeyViewProxy(label: workflowText("Cancel"), keyEquivalent: "\u{1b}") { dismiss() }.disabled(busy)
-                KeyViewProxy(label: workflowText(authenticationRequested ? "Retry Clone" : "Create"), prominent: true) { create() }
+                KeyViewProxy(label: workflowText("Cancel"), keyEquivalent: "\u{1b}", minimumWidth: RayGitDialogButtonStyle.minimumWidth) { dismiss() }.disabled(busy)
+                KeyViewProxy(label: workflowText(authenticationRequested ? "Retry Clone" : "Create"), prominent: true, minimumWidth: RayGitDialogButtonStyle.minimumWidth) { create() }
                     .disabled(busy || CloneDestination.targetURL(destination) == nil || (clone && source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) || (authenticationRequested && (username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)))
-            }.frame(maxWidth: .infinity)
+            }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.controlSize(.small).interactiveDismissDisabled(busy).padding(20).frame(width: 440)
             .nativeFocusRoot(reusingParent: true)
             .onChange(of: clone) { _, _ in saveDraft() }
@@ -252,10 +258,7 @@ struct CreateRepositorySheet: View {
             .onDisappear { password = ""; saveDraft() }
     }
     private func saveDraft() {
-        var draft = RepositoryCreationDraft()
-        draft.clone = clone; draft.source = source; draft.destination = destination
-        draft.cloneDestination = cloneDestination
-        draft.save()
+        RepositoryCreationDraft(clone: clone, source: source, destination: destination, cloneDestination: cloneDestination).save()
     }
     private func create() {
         let cloning = clone, cloneSource = source.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -272,7 +275,9 @@ struct CreateRepositorySheet: View {
                 let repo = try await cloning ? GitRepository.clone(source: cloneSource, destination: target, credential: credential) : GitRepository.initialize(at: target)
                 if cloning { cloneDestination.rememberSuccessfulClone(target) }
                 password = ""
-                store.isBusy = false; await store.open(repo.url); dismiss()
+                store.isBusy = false; await store.open(repo.url)
+                NotificationCenter.default.post(name: .rayGitRepositoryCreated, object: store, userInfo: ["path": repo.url.path])
+                dismiss()
             }
             catch {
                 _ = OperationFailure.message(error)

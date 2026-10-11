@@ -49,86 +49,22 @@ struct RepositorySidebar: View {
                         proxy.scrollTo(path)
                         DispatchQueue.main.async { focusedRepository = path }
                     }
+                    .onReceive(NotificationCenter.default.publisher(for: .rayGitRepositoryCreated)) { event in
+                        guard let owner = event.object as? RepositoryStore, owner === store,
+                              let path = event.userInfo?["path"] as? String else { return }
+                        proxy.scrollTo(path, anchor: .center)
+                        focusedRepository = path
+                    }
                 }
             }.frame(minHeight: 130, idealHeight: 300)
             VStack(spacing: 0) {
                 HStack { Text(interactionText("Branches")).font(.system(size: 13, weight: .semibold)); Spacer(); RayGitBadge(String(store.branches.count), tint: .secondary) }.padding(.horizontal, 16).frame(height: 42)
-                List(selection: $branchSelection) {
-                    branchGroupHeader("Local Branches", isExpanded: $localBranchesExpanded)
-                    if localBranchesExpanded {
-                        ForEach(store.branches.filter { !$0.isRemote }) { branch in
-                            HStack(spacing: 6) {
-                                Label(branch.name, systemImage: "arrow.triangle.branch").lineLimit(1).truncationMode(.middle)
-                                if branch.isCurrent { Spacer(minLength: 0); Image(systemName: "checkmark.circle.fill").font(.system(size: 11)).accessibilityHidden(true) }
-                            }
-                                .frame(height: 18)
-                                .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets(top: 2, leading: 28, bottom: 2, trailing: 8))
-                                .fontWeight(branch.isCurrent ? .semibold : .regular)
-                                .tag("branch:" + branch.name)
-                                .listRowBackground(branch.isCurrent ? RayGitStyle.blue.opacity(0.12) : Color.clear)
-                        }
-                    }
-                    branchGroupHeader("Remote Branches", isExpanded: $remoteBranchesExpanded)
-                    if remoteBranchesExpanded {
-                        ForEach(store.branches.filter(\.isRemote)) { branch in
-                            Label(branch.name, systemImage: "network")
-                                .lineLimit(1).truncationMode(.middle).frame(height: 18)
-                                .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets(top: 2, leading: 28, bottom: 2, trailing: 8))
-                                .tag("remote:" + branch.name)
-                        }
-                    }
-                    branchGroupHeader("Stashes", isExpanded: $stashesExpanded)
-                    if stashesExpanded {
-                        ForEach(store.stashes) { stash in
-                            Label(stash.subject, systemImage: "archivebox")
-                                .lineLimit(1).truncationMode(.tail).frame(height: 18)
-                                .listRowSeparator(.hidden)
-                                .help(stash.subject)
-                                .listRowInsets(EdgeInsets(top: 2, leading: 28, bottom: 2, trailing: 8))
-                                .tag("stash:" + stash.ref)
-                        }
-                    }
-                }.listStyle(.plain).font(.system(size: 12)).scrollContentBackground(.hidden)
-                    .contentMargins(.vertical, 0, for: .scrollContent)
-                    .environment(\.defaultMinListRowHeight, 22)
-                    .background(BranchListDensity(onShortcut: handleShortcut).allowsHitTesting(false).accessibilityHidden(true))
+                NativeBranchTable(branches: store.branches, stashes: store.stashes,
+                    repositoryPath: store.repositoryURL?.path, repositoryIdentity: store.repository.map { ObjectIdentifier($0) }, currentBranch: store.branch, isBusy: store.isBusy,
+                    localExpanded: $localBranchesExpanded, remoteExpanded: $remoteBranchesExpanded,
+                    stashesExpanded: $stashesExpanded, selection: $branchSelection,
+                    onAction: onAction, onRenameStash: prepareStashRename, onShortcut: handleShortcut)
                     .background { if let branchFocus { WorkspaceFileFocusRegion(focus: branchFocus).allowsHitTesting(false).accessibilityHidden(true) } }
-                    .contextMenu(forSelectionType: String.self) { items in
-                        if let item = items.first, items.count == 1 {
-                            let target = String(item.dropFirst(item.firstIndex(of: ":").map { item.distance(from: item.startIndex, to: $0) + 1 } ?? 0))
-                            if item.hasPrefix("stash:") {
-                                Button(interactionText("Show Changes")) { onAction(.stashShow, target) }
-                                Button(interactionText("Apply Stash…")) { onAction(.stashApply, target) }.disabled(store.isBusy)
-                                Button(shortcutText("Rename Stash")) { prepareStashRename(target) }.disabled(store.isBusy)
-                                Button(interactionText("Drop Stash…")) { onAction(.stashDrop, target) }.disabled(store.isBusy)
-                            } else {
-                                if item.hasPrefix("branch:") {
-                                    Button(interactionText("Check Out…")) { onAction(.checkout, target) }.disabled(store.isBusy)
-                                }
-                                Button(interactionText("Log")) { onAction(.history, (item.hasPrefix("remote:") ? "refs/remotes/" : "refs/heads/") + target) }.disabled(store.isBusy)
-                                if item.hasPrefix("remote:") {
-                                    Button(sidebarRefinementText("Create Local Branch…")) { onAction(.createLocalBranch, target) }.disabled(store.isBusy)
-                                }
-                                Button(sidebarRefinementText("Merge into Current Branch")) { onAction(.merge, (item.hasPrefix("remote:") ? "refs/remotes/" : "refs/heads/") + target) }.disabled(store.isBusy || (!item.hasPrefix("remote:") && target == store.branch))
-                                Button(sidebarRefinementText("Stop Tracking Remote Branch")) { onAction(.stopTracking, item.hasPrefix("remote:") ? "refs/remotes/" + target : target) }.disabled(store.isBusy)
-                                if item.hasPrefix("branch:") {
-                                    Button(sidebarRefinementText("Set Tracking Branch…")) { onAction(.setTracking, target) }.disabled(store.isBusy)
-                                    Divider()
-                                    Button(interactionText("Rename Branch…")) { onAction(.rename, target) }.disabled(store.isBusy)
-                                    Button(interactionText("Delete Branch…")) { onAction(.delete, target) }.disabled(store.isBusy || store.branches.first(where: { $0.name == target })?.isCurrent == true)
-                                }
-                                Divider()
-                                Button(interactionText("Copy Name")) { onAction(.copy, target) }
-                            }
-                        }
-                    } primaryAction: { items in
-                        guard let item = items.first else { return }
-                        if item.hasPrefix("branch:") { onAction(.checkout, String(item.dropFirst(7))) }
-                        else if item.hasPrefix("remote:") { onAction(.history, "refs/remotes/" + String(item.dropFirst(7))) }
-                        else if item.hasPrefix("stash:") { onAction(.stashShow, String(item.dropFirst(6))) }
-                    }
             }.frame(minHeight: 170)
         }
         .controlSize(.small)
@@ -148,7 +84,7 @@ struct RepositorySidebar: View {
                         guard let reference = renameStash else { return }; let name = stashName; renameStash = nil
                         store.operation(shortcutText("Rename Stash")) { _ = try await $0.renameStash(reference: reference, message: name) }
                     }.disabled(stashName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).keyboardShortcut(.defaultAction)
-                }.frame(maxWidth: .infinity)
+                }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
             }.padding(24).frame(width: 360)
         }
     }
@@ -179,21 +115,6 @@ struct RepositorySidebar: View {
             }
         }
         return false
-    }
-    private func branchGroupHeader(_ title: String, isExpanded: Binding<Bool>) -> some View {
-        Button { isExpanded.wrappedValue.toggle() } label: {
-            HStack(spacing: 4) {
-                Image(systemName: isExpanded.wrappedValue ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9, weight: .semibold)).frame(width: 12)
-                    .accessibilityHidden(true)
-                Text(interactionText(title)).font(.system(size: 11, weight: .semibold))
-                Spacer(minLength: 0)
-            }.foregroundStyle(.secondary).frame(height: 18).contentShape(Rectangle())
-        }.buttonStyle(.plain)
-            .accessibilityLabel(interactionText(title))
-            .accessibilityValue(isExpanded.wrappedValue ? sidebarRefinementText("Expanded") : sidebarRefinementText("Collapsed"))
-            .listRowSeparator(.hidden)
-            .listRowInsets(EdgeInsets(top: 2, leading: 12, bottom: 2, trailing: 8))
     }
     private func repositoryRow(_ path: String) -> some View {
         let active = path == store.highlightedRepositoryPath
@@ -249,65 +170,5 @@ struct RepositorySidebar: View {
                 Divider()
                 Button(interactionText("Remove Repository")) { onAction(.removeRecent, path) }
             }
-    }
-}
-
-/// SwiftUI's macOS List can keep native row spacing despite compact row insets.
-private struct BranchListDensity: NSViewRepresentable {
-    var onShortcut: (NSEvent) -> Bool = { _ in false }
-    func makeNSView(context: Context) -> Probe { Probe() }
-    func updateNSView(_ view: Probe, context: Context) { view.onShortcut = onShortcut; view.configure() }
-
-    final class Probe: NSView {
-        private weak var configuredTable: NSTableView?
-        var onShortcut: (NSEvent) -> Bool = { _ in false }
-        private var monitor: Any?
-        deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow(); configure()
-            if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
-            guard window != nil else { return }
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                guard let self, let window = self.window, event.window === window, window.attachedSheet == nil,
-                      !self.isHiddenOrHasHiddenAncestor, let table = self.configuredTable,
-                      let responder = window.firstResponder as? NSView,
-                      !(responder is NSTextView), !(responder is NSTextField),
-                      responder === table || responder.isDescendant(of: table) else { return event }
-                return self.onShortcut(event) ? nil : event
-            }
-        }
-        override func layout() { super.layout(); configure() }
-
-        func configure() {
-            if let table = configuredTable { apply(to: table); return }
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                var ancestor = self.superview
-                while let view = ancestor {
-                    if let table = Self.table(in: view) {
-                        self.configuredTable = table
-                        self.apply(to: table)
-                        return
-                    }
-                    ancestor = view.superview
-                }
-            }
-        }
-
-        private func apply(to table: NSTableView) {
-            if table.usesAutomaticRowHeights { table.usesAutomaticRowHeights = false }
-            if table.rowSizeStyle != .custom { table.rowSizeStyle = .custom }
-            if table.rowHeight != 24 { table.rowHeight = 24 }
-            if table.intercellSpacing.height != 0 { table.intercellSpacing.height = 0 }
-        }
-
-        private static func table(in view: NSView) -> NSTableView? {
-            if let table = view as? NSTableView { return table }
-            for child in view.subviews {
-                if let table = table(in: child) { return table }
-            }
-            return nil
-        }
     }
 }

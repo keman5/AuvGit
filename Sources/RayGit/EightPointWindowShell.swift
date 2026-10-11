@@ -33,7 +33,7 @@ enum EightPointWindowShell {
             }
             controllers[key] = controller
             let saved = UserDefaults.standard.string(forKey: BorderlessShellController.framePreference).flatMap { WindowShellGeometry.restore(NSRectFromString($0), minimum: shell.minSize, screens: NSScreen.screens.map(\.visibleFrame)) }
-            shell.setFrame(saved ?? window.frame, display: true)
+            shell.setFrame(saved ?? window.frame, display: false)
             window.orderOut(nil)
             controller.showWindow(nil); shell.makeKeyAndOrderFront(nil)
         }
@@ -84,19 +84,15 @@ final class EightPointFrameView: NSView {
         super.viewDidMoveToWindow()
         // Native sheet dimming is a sibling of the content view. Clip the whole
         // frame so the dimmer cannot fill the transparent eight-point corners.
-        if let frame = window?.contentView?.superview {
-            frame.wantsLayer = true
-            frame.layer?.cornerRadius = RayGitStyle.windowCornerRadius
-            frame.layer?.masksToBounds = true
-        }
+        if let window { WindowFrameAppearance.clip(window) }
     }
     override var wantsUpdateLayer: Bool { true }
     override func updateLayer() { layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor }
+    func updateTitle() { chrome.needsLayout = true }
     override func layout() {
         super.layout()
         hosted.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - 34))
         chrome.frame = NSRect(x: 0, y: max(0, bounds.height - 34), width: bounds.width, height: 34)
-        chrome.needsLayout = true
         edges.frame = bounds
     }
 }
@@ -152,6 +148,20 @@ private final class ShellResizeEdges: NSView {
             let current = NSEvent.mouseLocation
             let frame = WindowShellGeometry.resize(initial, edges: edges, delta: NSPoint(x: current.x - mouse.x, y: current.y - mouse.y), minimum: window.minSize)
             window.setFrame(frame, display: true)
+        }
+    }
+}
+
+/// Clip both the content and the native frame containing sheet dimming.
+@MainActor
+enum WindowFrameAppearance {
+    static func clip(_ window: NSWindow) {
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        for view in [window.contentView, window.contentView?.superview].compactMap({ $0 }) {
+            view.wantsLayer = true
+            view.layer?.cornerRadius = RayGitStyle.windowCornerRadius
+            view.layer?.masksToBounds = true
         }
     }
 }

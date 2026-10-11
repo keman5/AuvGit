@@ -59,7 +59,7 @@ struct RepositoryContextEditor: View {
                 Button(repositoryContextText("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction).disabled(store.isBusy)
                 Button(repositoryContextText("Save")) { save() }.keyboardShortcut(.defaultAction)
                     .disabled(!loaded || store.isBusy || (target.editor == .remote && (selectedRemote == nil || fetchURL.isEmpty)))
-            }.frame(maxWidth: .infinity)
+            }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.padding(20).frame(width: target.editor == .ignore ? 580 : 360).task { await load() }
     }
     private func selectRemote() {

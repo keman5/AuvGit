@@ -1,7 +1,7 @@
 import Foundation
 
 /// Git-visible state, excluding ignored build/log activity and transient lock files.
-public struct RepositoryChangeState: Equatable, Sendable {
+public struct RepositoryChangeState: Equatable, Sendable, Codable {
     public let history: String
     private let index: String
     private let files: [GitFile]

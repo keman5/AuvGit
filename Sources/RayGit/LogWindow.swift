@@ -178,7 +178,7 @@ private struct LogWindowContent: View {
             .onReceive(NotificationCenter.default.publisher(for: .rayGitWorktreeChanged)) { event in
                 if let url = event.object as? URL, url == store.repositoryURL { Task { await store.refresh(); await loadTags() } }
             }
-            .onReceive(Timer.publish(every: 3, on: .main, in: .common).autoconnect()) { _ in Task { await store.pollForChanges() } }
+            .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in Task { await store.pollForChanges() } }
             .rayGitSheet(item: $resetRequest) { HistoryResetSheet(store: store, request: $0) }
         .rayGitSheet(isPresented: $showOperationLog) { OperationLogView(store: store) }
             .rayGitSheet(item: $mutation) { request in mutationSheet(request) }
@@ -348,9 +348,9 @@ private struct LogWindowContent: View {
             }
             HStack {
                 Button(workflowText("Cancel")) { mutation = nil }.keyboardShortcut(.cancelAction)
-                Button(workflowText("Continue")) { perform(request) }.buttonStyle(.borderedProminent)
+                Button(workflowText("Continue")) { perform(request) }.buttonStyle(RayGitDialogButtonStyle(prominent: true))
                     .disabled(store.isBusy || ([.createBranch, .createTag].contains(request.action) && name.trimmingCharacters(in: .whitespaces).isEmpty))
-            }.frame(maxWidth: .infinity)
+            }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.padding(22).frame(width: 360)
     }
     private func perform(_ request: Mutation) {

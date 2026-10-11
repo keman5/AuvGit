@@ -17,3 +17,6 @@
 "Auto Stash Retained" = "ローカル変更をスタッシュ %@ に自動保存しました。スタッシュは保持されています。必要なときに適用してください。";
 "Merge Branch Message" = "%@ を現在のブランチ %@ にマージしますか？";
 "Create Local Branch…" = "ローカルブランチを作成…";
+"Project is unavailable" = "プロジェクトが見つかりません";
+"Remove missing project message" = "プロジェクトのフォルダまたは Git データが存在しません。プロジェクト一覧から削除しますか？\n\n%@\n\n一覧の項目だけが削除されます。";
+"Remove from project list" = "プロジェクト一覧から削除";

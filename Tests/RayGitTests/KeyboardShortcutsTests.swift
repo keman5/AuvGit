@@ -4,6 +4,20 @@ import XCTest
 
 @MainActor
 final class KeyboardShortcutsTests: XCTestCase {
+    func testDeleteDefaultMigrationPreservesLaterCustomization() throws {
+        let name = "KeyboardShortcutsTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(try JSONEncoder().encode(ShortcutBinding(key: "Backspace", modifiers: 1)), forKey: "shortcut.binding.deleteFile")
+        let shortcuts = KeyboardShortcuts(defaults: defaults)
+        XCTAssertEqual(shortcuts.binding(.deleteFile), .init(key: "Backspace", modifiers: 0))
+        XCTAssertFalse(ShortcutCommand.deleteFile.worksWhileEditingText)
+        XCTAssertTrue(shortcuts.set(.init(key: "Backspace", modifiers: 1), for: .deleteFile))
+        XCTAssertEqual(KeyboardShortcuts(defaults: defaults).binding(.deleteFile), .init(key: "Backspace", modifiers: 1))
+        defaults.removeObject(forKey: "shortcut.deleteFile.backspaceMigrated")
+        defaults.set(try JSONEncoder().encode(ShortcutBinding(key: "F10", modifiers: 0)), forKey: "shortcut.binding.deleteFile")
+        XCTAssertEqual(KeyboardShortcuts(defaults: defaults).binding(.deleteFile), .init(key: "F10", modifiers: 0))
+    }
     func testMigrationCustomizationConflictsPersistenceAndRestore() throws {
         let name = "KeyboardShortcutsTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))

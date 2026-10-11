@@ -76,6 +76,46 @@ final class CloneDestinationTests: XCTestCase {
         XCTAssertTrue(reopened.cloneDestination.automatic)
         XCTAssertEqual(reopened.cloneDestination.parent.path, "/other")
     }
+    func testEveryOpeningReplacesSavedSourceAndCustomDestinationFromValidClipboard() throws {
+        let name = "CloneClipboardTests." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set("/projects", forKey: CloneDestination.parentPreference)
+        var draft = RepositoryCreationDraft(defaults: defaults)
+        draft.source = "https://example.com/old.git"
+        draft.destination = "~/custom destination"
+        draft.cloneDestination.edit(draft.destination)
+        draft.save(defaults: defaults)
+        var first = RepositoryCreationDraft.load(defaults: defaults)
+        XCTAssertTrue(first.applyClipboard("  https://example.com/team/new.git\n"))
+        XCTAssertTrue(first.clone); XCTAssertEqual(first.source, "https://example.com/team/new.git")
+        XCTAssertTrue(first.cloneDestination.automatic); XCTAssertEqual(first.destination, "/projects/new")
+        first.save(defaults: defaults)
+        var second = RepositoryCreationDraft.load(defaults: defaults)
+        XCTAssertTrue(second.applyClipboard("git@example.com:team/another.git"))
+        XCTAssertEqual(second.source, "git@example.com:team/another.git")
+        XCTAssertEqual(second.destination, "/projects/another")
+        let unchanged = second
+        for invalid in [nil, "", "normal clipboard text", "just-a-word", "https:///repo.git", "https://example.com", "https://example.com/..", "-danger"] as [String?] {
+            XCTAssertFalse(second.applyClipboard(invalid))
+            XCTAssertEqual(second, unchanged)
+        }
+    }
+    func testClipboardLocalSourceUsesSyntaxWithoutTouchingDiskAndKeepsSavedParent() throws {
+        let name = "CloneClipboardLocalTests." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set("/projects/repo", forKey: CloneDestination.parentPreference)
+        var draft = RepositoryCreationDraft(defaults: defaults)
+        XCTAssertTrue(draft.applyClipboard("/not-created/repo.git"))
+        XCTAssertEqual(draft.cloneDestination.parent.path, "/projects/repo")
+        XCTAssertEqual(draft.destination, "/projects/repo/repo")
+        XCTAssertTrue(draft.applyClipboard("file:///not-created/my%20repo.git"))
+        XCTAssertEqual(draft.destination, "/projects/repo/my repo")
+        XCTAssertTrue(draft.applyClipboard("ssh://git@example.com:2222/team/repo.git"))
+        XCTAssertEqual(draft.destination, "/projects/repo/repo")
+    }
+
     func testCorruptDraftFallsBackWithoutChangingSavedCloneParent() throws {
         let name = "RepositoryDraftTests." + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))

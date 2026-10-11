@@ -15,9 +15,15 @@ public enum AppLanguage: String, CaseIterable, Identifiable {
 }
 
 public enum L10n {
-    public static var resourceBundle: Bundle {
+    public static let resourceBundle: Bundle = {
         Bundle.main.url(forResource: "RayGit_RayGitLocalization", withExtension: "bundle").flatMap(Bundle.init(url:)) ?? Bundle.module
-    }
+    }()
+    private static let localizedBundles: [String: Bundle] = Dictionary(uniqueKeysWithValues: ["en", "zh-Hans", "zh-Hant", "ja"].compactMap { code in
+        let path = resourceBundle.path(forResource: code, ofType: "lproj")
+            ?? resourceBundle.path(forResource: code.lowercased(), ofType: "lproj")
+        guard let path, let bundle = Bundle(path: path) else { return nil }
+        return (code, bundle)
+    })
     public static let preferenceKey = "appLanguage"
     public static var language: AppLanguage { resolvedLanguage(preference: UserDefaults.standard.string(forKey: preferenceKey) ?? "system", preferredLanguages: Locale.preferredLanguages) }
     public static var locale: Locale { Locale(identifier: language.rawValue) }
@@ -46,10 +52,7 @@ public enum L10n {
     public static func text(_ key: String, table: String = "App", language: AppLanguage, arguments: [CVarArg]) -> String {
         let resolved = language == .system ? self.language : language
         func lookup(_ code: String) -> String? {
-            // Native SwiftPM lowercases locale resource directories; Xcode preserves case.
-            let path = resourceBundle.path(forResource: code, ofType: "lproj")
-                ?? resourceBundle.path(forResource: code.lowercased(), ofType: "lproj")
-            guard let path, let bundle = Bundle(path: path) else { return nil }
+            guard let bundle = localizedBundles[code] else { return nil }
             let sentinel = "__RAYGIT_MISSING__"
             let value = bundle.localizedString(forKey: key, value: sentinel, table: table)
             return value == sentinel ? nil : value

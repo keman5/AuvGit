@@ -155,12 +155,12 @@ struct NetworkOperationsView: View {
                 }
                 if operation == .pushPreview && previewReady {
                     Button(networkText("preview")) { run(operation) }.disabled(task != nil || store.isBusy || store.repository == nil)
-                    Button(networkText("executePush")) { run(.push) }.buttonStyle(.borderedProminent).disabled(task != nil || store.isBusy)
+                    Button(networkText("executePush")) { run(.push) }.buttonStyle(RayGitDialogButtonStyle(prominent: true)).disabled(task != nil || store.isBusy)
                 } else {
                     Button(networkText(operation == .pushPreview ? "preview" : "run")) { run(operation) }
-                        .buttonStyle(.borderedProminent).disabled(task != nil || store.isBusy || store.repository == nil)
+                        .buttonStyle(RayGitDialogButtonStyle(prominent: true)).disabled(task != nil || store.isBusy || store.repository == nil)
                 }
-            }.frame(maxWidth: .infinity).padding(.horizontal, 24).padding(.vertical, 16)
+            }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity).padding(.horizontal, 24).padding(.vertical, 16)
         }.tint(.blue).background(Color(nsColor: .windowBackgroundColor)).frame(width: 800, height: 720)
         .interactiveDismissDisabled(task != nil)
         .task { await loadCredentials(); await loadRepositoryContext() }

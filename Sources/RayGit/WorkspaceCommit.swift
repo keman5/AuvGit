@@ -11,7 +11,7 @@ struct WorkspaceCommitRequest: Identifiable {
 
 extension RepositoryStore {
     var canCommit: Bool {
-        repository != nil && pendingRepositoryPath == nil && !isBusy &&
+        repository != nil && workspaceStatusFailure == nil && pendingRepositoryPath == nil && !isBusy &&
         !commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         (amend || !files.isEmpty) && !files.contains(where: \.isConflict)
     }
@@ -35,15 +35,13 @@ extension RepositoryStore {
                     return
                 }
                 operation(amending ? "修订提交" : "提交") { repo in
-                    if !amending {
-                        let latest = try await repo.status()
-                        guard !latest.contains(where: \.isConflict) else {
-                            throw GitError(workflowText("Resolve conflicts before committing."))
-                        }
-                        if !latest.contains(where: \.isStaged) {
-                            let paths = latest.filter { $0.isUnstaged && (!$0.isUntracked || includeUntracked == true) }.map(\.path)
-                            try await repo.stage(paths: paths)
-                        }
+                    let latest = try await repo.status()
+                    guard !latest.contains(where: \.isConflict) else {
+                        throw GitError(workflowText("Resolve conflicts before committing."))
+                    }
+                    if !latest.contains(where: \.isStaged) {
+                        let paths = latest.filter { $0.isUnstaged && (!$0.isUntracked || amending || includeUntracked == true) }.map(\.path)
+                        if !paths.isEmpty { try await repo.stage(paths: paths) }
                     }
                     try await repo.commit(message: message, amend: amending)
                     self.recordSuccessfulCommitMessage(message, for: repo.url)
@@ -88,9 +86,9 @@ struct WorkspaceCommitSheet: View {
                 Button(L10n.text("commit", table: "Main")) {
                     store.confirmWorkspaceCommit(request, includeUntracked: includeUntracked)
                     dismiss()
-                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                }.buttonStyle(RayGitDialogButtonStyle(prominent: true)).keyboardShortcut(.defaultAction)
                     .disabled(!request.hasTrackedChanges && !includeUntracked)
-            }.frame(maxWidth: .infinity)
+            }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.padding(24).frame(width: 360)
     }
 }

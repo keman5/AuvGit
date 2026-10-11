@@ -70,7 +70,7 @@ final class NativeFocusCoordinator: ObservableObject {
             }
         }
         appearance?.navigationScope = self
-        appearance?.apply()
+        appearance?.scheduleApply()
         window.autorecalculatesKeyViewLoop = true
         if entryResponder == nil {
             let responder = EntryResponder(scope: self)
@@ -137,7 +137,7 @@ final class NativeFocusCoordinator: ObservableObject {
     private func refresh() {
         guard let window else { return }
         if shouldRecalculateLoop { window.recalculateKeyViewLoop(); shouldRecalculateLoop = false }
-        appearance?.apply()
+        appearance?.scheduleApply()
         targets = targets.filter { $0.value.view != nil }
         guard window.attachedSheet == nil, appearance?.isVisible == true, window.firstResponder !== window else { return }
         let available = targets.values.filter { $0.view.map { isAvailable($0, in: window) } == true }
@@ -200,6 +200,7 @@ struct KeyViewProxy: NSViewRepresentable {
     var checked: Bool? = nil
     var keyEquivalent = ""
     var prominent = false
+    var minimumWidth: CGFloat = 0
     let action: () -> Void
     final class Button: NSButton {
         var activate: (() -> Void)?
@@ -207,6 +208,12 @@ struct KeyViewProxy: NSViewRepresentable {
         override var canBecomeKeyView: Bool { acceptsFirstResponder && window != nil }
         override func becomeFirstResponder() -> Bool { needsDisplay = true; return acceptsFirstResponder }
         override func resignFirstResponder() -> Bool { needsDisplay = true; return true }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let window, window.sheetParent != nil || window is NSPanel {
+                DialogAppearance.configureDefaultButton(in: window)
+            }
+        }
         @objc func invoke(_ sender: Any?) { activate?() }
     }
     func makeNSView(context: Context) -> Button {
@@ -220,13 +227,16 @@ struct KeyViewProxy: NSViewRepresentable {
         button.title = label; button.setAccessibilityLabel(label)
         button.isEnabled = enabled; button.activate = action
         button.controlSize = .small
-        button.keyEquivalent = keyEquivalent; button.keyEquivalentModifierMask = []
+        button.keyEquivalent = keyEquivalent.isEmpty && prominent && checked == nil ? "\r" : keyEquivalent; button.keyEquivalentModifierMask = []
         button.bezelColor = prominent ? .controlAccentColor : nil
         if let checked { button.setButtonType(.switch); button.state = checked ? .on : .off }
         else { button.setButtonType(.momentaryPushIn) }
         scope?.register(button)
+        if let window = button.window, window.sheetParent != nil || window is NSPanel {
+            DialogAppearance.configureDefaultButton(in: window)
+        }
     }
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: Button, context: Context) -> CGSize? { nsView.intrinsicContentSize }
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: Button, context: Context) -> CGSize? { CGSize(width: max(minimumWidth, nsView.intrinsicContentSize.width), height: nsView.intrinsicContentSize.height) }
 }
 
 enum NativeFocusNavigation {

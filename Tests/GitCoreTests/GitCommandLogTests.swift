@@ -41,6 +41,9 @@ final class GitCommandLogTests: XCTestCase {
         XCTAssertTrue(try files().isDisjoint(with: created))
     }
     func testAdditionalFailureCategoriesTakePriorityOverGenericConnection() {
+        for diagnostic in ["fatal: unknown index entry format 0xbdef0000", "BUG: read-cache.c:340: unsupported ce_mode: 27573600000"] {
+            XCTAssertEqual(GitFailureSummary.key(for: diagnostic), "Git index is corrupt; workspace changes are unavailable.")
+        }
         XCTAssertEqual(GitFailureSummary.key(for: "unable to access: SSL certificate problem"), "TLS certificate verification failed")
         XCTAssertEqual(GitFailureSummary.key(for: "unable to access: proxy authentication failed"), "Proxy connection or authentication failed")
         XCTAssertEqual(GitFailureSummary.key(for: "Host key verification failed"), "SSH host key verification failed")

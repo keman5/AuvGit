@@ -23,5 +23,8 @@ final class WorkspaceContextEligibilityTests: XCTestCase {
         XCTAssertFalse(WorkspaceContextEligibility(paths: [], files: files, existing: []).canGit(.stage))
         XCTAssertFalse(WorkspaceContextEligibility(paths: ["tracked", "ignored"], files: files, existing: ["tracked", "ignored"]).canGit(.stage))
         XCTAssertTrue(WorkspaceContextEligibility(paths: ["new"], files: files, existing: ["new"]).canGit(.stage))
+        XCTAssertTrue(WorkspaceContextEligibility(paths: ["new"], files: files, existing: ["new"]).canGit(.discard))
+        XCTAssertTrue(WorkspaceContextEligibility(paths: ["tracked", "new"], files: files, existing: ["tracked", "new"]).canGit(.discard))
+        XCTAssertFalse(WorkspaceContextEligibility(paths: ["ignored"], files: files, existing: ["ignored"]).canGit(.discard))
     }
 }

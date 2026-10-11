@@ -10,7 +10,7 @@ enum RayGitPreferences {
     static var doubleClick: String { UserDefaults.standard.string(forKey: "preferences.doubleClick") ?? "compare" }
     static var historyPageSize: Int { min(1000, max(25, UserDefaults.standard.object(forKey: "preferences.historyPageSize") as? Int ?? 200)) }
     static var backgroundRefresh: Bool { UserDefaults.standard.object(forKey: "preferences.backgroundRefresh") as? Bool ?? true }
-    static var pollInterval: Double { min(300, max(3, UserDefaults.standard.object(forKey: "preferences.pollInterval") as? Double ?? 3)) }
+    static var pollInterval: Double { min(300, max(30, UserDefaults.standard.object(forKey: "preferences.pollInterval") as? Double ?? 30)) }
     static func matches(_ path: String, query: String, caseMode: String? = nil) -> Bool {
         let mode = caseMode ?? UserDefaults.standard.string(forKey: "preferences.filterCase") ?? "insensitive"
         let exact = mode == "exact" || (mode == "smart" && query != query.lowercased())
@@ -47,7 +47,7 @@ struct PreferencesWindow: View {
     @AppStorage("preferences.historyPageSize") private var pageSize = 200
     @AppStorage("preferences.dateStyle") private var dateStyle = "datetime"
     @AppStorage("preferences.backgroundRefresh") private var background = true
-    @AppStorage("preferences.pollInterval") private var interval = 3.0
+    @AppStorage("preferences.pollInterval") private var interval = 30.0
     private let categories = ["General", "Appearance", "Editor", "History", "Commands and Git", "Network and Authentication", "External Tools", "Keyboard Shortcuts", "Git Flow and Hosting", "Updates", "Privacy", "Advanced"]
     private var searchTerms: [String: [String]] {
         ["General": ["Startup", "Reopen last repositories", "Default view for new repositories", "Double-click changed file", "Path filter case", "Smart case"],
@@ -169,9 +169,9 @@ struct PreferencesWindow: View {
                 default:
                     Section(prefsText("Background refresh")) {
                         Toggle(prefsText("Refresh on filesystem changes and in background"), isOn: $background)
-                        Stepper(prefsText("Polling interval (seconds)") + ": \(Int(interval))", value: $interval, in: 3...300, step: 3).disabled(!background)
+                        Stepper(prefsText("Polling interval (seconds)") + ": \(Int(max(30, interval)))", value: $interval, in: 30...300, step: 15).disabled(!background)
                         Text(prefsText("Filesystem notifications are debounced. Manual refresh remains available.")).font(.caption).foregroundStyle(.secondary)
-                        Button(prefsText("Restore refresh defaults")) { background = true; interval = 3 }
+                        Button(prefsText("Restore refresh defaults")) { background = true; interval = 30 }
                     }
                 }
             }.formStyle(.grouped).controlSize(.small)

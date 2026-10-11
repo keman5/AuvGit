@@ -1,6 +1,6 @@
 import Foundation
 
-public struct GitFile: Identifiable, Hashable, Sendable {
+public struct GitFile: Identifiable, Hashable, Sendable, Codable {
     public var id: String { path }
     public let path: String
     public let originalPath: String?
@@ -12,7 +12,7 @@ public struct GitFile: Identifiable, Hashable, Sendable {
     public var isConflict: Bool { indexStatus == "U" || worktreeStatus == "U" || ["AA", "DD"].contains(indexStatus + worktreeStatus) }
     public init(path: String, originalPath: String? = nil, indexStatus: String, worktreeStatus: String) { self.path = path; self.originalPath = originalPath; self.indexStatus = indexStatus; self.worktreeStatus = worktreeStatus }
 }
-public struct GitBranch: Identifiable, Hashable, Sendable {
+public struct GitBranch: Identifiable, Hashable, Sendable, Codable {
     public var id: String { name }
     public let name: String
     public let isCurrent: Bool
@@ -55,7 +55,7 @@ public struct GitWorktree: Equatable, Sendable {
         return result
     }
 }
-public struct GitCommit: Identifiable, Hashable, Sendable {
+public struct GitCommit: Identifiable, Hashable, Sendable, Codable {
     public var id: String { hash }
     public let hash: String
     public let parents: [String]
@@ -76,14 +76,14 @@ public struct GitCommit: Identifiable, Hashable, Sendable {
         self.subject = subject; self.body = body; self.refs = refs
     }
 }
-public struct GitCommitFile: Identifiable, Hashable, Sendable {
+public struct GitCommitFile: Identifiable, Hashable, Sendable, Codable {
     public var id: String { path }
     public let path: String
     public let status: String
     public let originalPath: String?
     public init(path: String, status: String, originalPath: String? = nil) { self.path = path; self.status = status; self.originalPath = originalPath }
 }
-public struct GitStash: Identifiable, Hashable, Sendable {
+public struct GitStash: Identifiable, Hashable, Sendable, Codable {
     public var id: String { ref }
     public let ref: String
     public let subject: String

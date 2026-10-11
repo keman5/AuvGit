@@ -68,7 +68,8 @@ final class NativeFocusBridgeTests: XCTestCase {
         window.isReleasedWhenClosed = false; window.contentView = host; window.makeKeyAndOrderFront(nil)
         defer { if let sheet = window.attachedSheet { window.endSheet(sheet) }; window.close() }
         drain(host); model.presented = true; drain(host)
-        let sheet = try XCTUnwrap(window.attachedSheet), content = try XCTUnwrap(sheet.contentView)
+        let anchor = try XCTUnwrap(window.attachedSheet)
+        let sheet = DialogAppearance.visibleWindow(for: anchor), content = try XCTUnwrap(sheet.contentView)
         drain(content)
         func candidates(_ view: NSView) -> [NSView] {
             (view.canBecomeKeyView ? [view] : []) + view.subviews.flatMap(candidates)
@@ -111,7 +112,8 @@ final class NativeFocusBridgeTests: XCTestCase {
         }
         drain(host)
         model.presented = true; drain(host)
-        let sheet = try XCTUnwrap(window.attachedSheet)
+        let anchor = try XCTUnwrap(window.attachedSheet)
+        let sheet = DialogAppearance.visibleWindow(for: anchor)
         let content = try XCTUnwrap(sheet.contentView)
         drain(content)
         let source = try XCTUnwrap(fields(content).first { $0.accessibilityLabel() == workflowText("Clone URL or local path") })

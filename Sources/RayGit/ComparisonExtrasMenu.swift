@@ -80,8 +80,8 @@ private struct EncodingConversionSheet: View {
             HStack {
                 Button(compareExtra("cancel")) { dismiss() }
                 Button(compareExtra("viewEncoding")) { session.reinterpret(as: source); dismiss() }.disabled(decoded == nil || session.isDirty)
-                Button(compareExtra("convertSave")) { convert() }.buttonStyle(.borderedProminent).disabled(decoded == nil || session.isBusy || session.isDirty)
-            }.frame(maxWidth: .infinity)
+                Button(compareExtra("convertSave")) { convert() }.buttonStyle(RayGitDialogButtonStyle(prominent: true)).disabled(decoded == nil || session.isBusy || session.isDirty)
+            }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.controlSize(.small).padding(20).frame(width: 440)
         .onAppear {
             guard !initialized else { return }; initialized = true
@@ -117,7 +117,7 @@ private struct RenameIdentitySheet: View {
             Picker(compareExtra("originalPath"), selection: $original) { Text(compareExtra("chooseOriginal")).tag(""); ForEach(candidates, id: \.self) { Text($0).tag($0) } }
             Text(session.path).font(.system(.caption, design: .monospaced))
             if let error { Text(error).foregroundStyle(.orange) }
-            HStack { Button(compareExtra("cancel")) { dismiss() }; Button(compareExtra("apply")) { apply() }.buttonStyle(.borderedProminent).disabled(original.isEmpty || session.isBusy) }.frame(maxWidth: .infinity)
+            HStack { Button(compareExtra("cancel")) { dismiss() }; Button(compareExtra("apply")) { apply() }.buttonStyle(RayGitDialogButtonStyle(prominent: true)).disabled(original.isEmpty || session.isBusy) }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.controlSize(.small).padding(20).frame(width: 360)
         .task { do { candidates = try await session.repository.status().filter { $0.worktreeStatus == "D" && $0.indexStatus != "D" && !$0.isConflict }.map(\.path) } catch { self.error = compareExtra(OperationFailure.message(error, repository: session.repository.url)) } }
     }

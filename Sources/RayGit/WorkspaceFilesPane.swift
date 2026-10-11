@@ -14,6 +14,7 @@ struct FilePaneShortcutRequest {
 
 struct WorkspaceFilesPane<TreeContent: View>: View {
     let files: [GitFile]
+    var statusFailure: String? = nil
     var automaticallySelectedPath: String? = nil
     var initialSelectionReady = false
     @AppStorage("preferences.filterCase") private var filterCase = "insensitive"
@@ -29,112 +30,147 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
     @State private var filterFocusRequest: UUID?
 
     @AppStorage("workspace.columns.v1") private var columnCustomization = TableColumnCustomization<Row>()
-    @State private var sortOrder = [KeyPathComparator(\Row.path, comparator: .localizedStandard)]
+    @State private var sortOrder = [WorkspaceFilePreparation.Sort(column: .path, ascending: true)]
     @State private var category = WorkspaceStatusFilter.all
     @AppStorage("workspace.showHiddenFiles") private var showHidden = true
     @State private var showIgnored = false
     @State private var ignoredPaths: [String] = []
+    @State private var ignoredRepository: String?
     @State private var loadingIgnored = false
     @State private var ignoredRequestID = UUID()
     @State private var ignoredError: String?
-    private struct Row: Identifiable {
-        let path: String
-        let file: GitFile?
-        var id: String { path }
-        var isIgnored: Bool { file == nil }
-        let name: String
-        let directory: String
-        init(path: String, file: GitFile?) {
-            self.path = path; self.file = file
-            name = (path as NSString).lastPathComponent
-            directory = (path as NSString).deletingLastPathComponent
-        }
-        var statusKey: String {
-            guard let file else { return "!" }
-            return file.isConflict ? "U" : file.isUntracked ? "?" : file.indexStatus != " " ? file.indexStatus : file.worktreeStatus
-        }
-        var worktreeKey: String { file?.worktreeStatus ?? " " }
-        var indexKey: String { file?.indexStatus ?? " " }
-    }
+    private typealias Row = WorkspaceFileRow
     @State private var visibleFiles: [Row] = []
+    @State private var visiblePaths: Set<String> = []
     @State private var statusCounts: [WorkspaceStatusFilter: Int] = [:]
     @State private var initialSelectionRepository: String?
+    @State private var preparationTask: Task<Void, Never>?
+    @State private var preparationID = UUID()
+    @State private var displayedPreparation: WorkspaceFilePreparation?
+    @State private var displayedRepository: String?
+    @State private var preparing = true
+
+    private var preparationRequest: WorkspaceFilePreparation {
+        return WorkspaceFilePreparation(repository: repository?.url.path, files: files, ignoredPaths: ignoredRepository == repository?.url.path ? ignoredPaths : [], filter: filter, filterCase: filterCase, category: category, showHidden: showHidden, showIgnored: showIgnored, sort: sortOrder)
+    }
     private func rebuildVisibleFiles() {
-        statusCounts = Dictionary(uniqueKeysWithValues: WorkspaceStatusFilter.allCases.map { item in
-            (item, files.lazy.filter { item.includes($0) && (showHidden || !WorkspaceStatusFilter.isHiddenPath($0.path)) }.count)
-        })
-        let query = filter.trimmingCharacters(in: .whitespacesAndNewlines)
-        func visible(_ path: String) -> Bool {
-            (showHidden || !WorkspaceStatusFilter.isHiddenPath(path)) && (query.isEmpty || RayGitPreferences.matches(path, query: query, caseMode: filterCase))
+        let request = preparationRequest
+        if !preparing, displayedPreparation == request { applyInitialSelection(); return }
+        preparationTask?.cancel()
+        let id = UUID()
+        preparationID = id
+        if let result = WorkspaceFilePreparationCache.shared.cached(request) {
+            displayedPreparation = request
+            visibleFiles = result.rows
+            visiblePaths = result.paths
+            statusCounts = result.counts
+            displayedRepository = repository?.url.path
+            preparing = false
+            applyInitialSelection()
+            return
         }
-        var rows = files.filter { category.includes($0) && visible($0.path) }.map { Row(path: $0.path, file: $0) }
-        if showIgnored, category == .all {
-            let existing = Set(files.map(\.path))
-            rows += ignoredPaths.filter { !existing.contains($0) && visible($0) }.map { Row(path: $0, file: nil) }
+        preparing = true
+        preparationTask = Task { @MainActor in
+            // Coalesce the file, repository and preference changes from one view update.
+            await Task.yield()
+            guard !Task.isCancelled, preparationID == id else { return }
+            let request = preparationRequest
+            let worker = Task.detached(priority: .userInitiated) { try WorkspaceFilePreparationCache.shared.prepare(request) }
+            let result = await withTaskCancellationHandler {
+                try? await worker.value
+            } onCancel: { worker.cancel() }
+            guard !Task.isCancelled, preparationID == id, request.repository == repository?.url.path, let result else { return }
+            displayedPreparation = request
+            visibleFiles = result.rows
+            visiblePaths = result.paths
+            statusCounts = result.counts
+            displayedRepository = request.repository
+            preparing = false
+            applyInitialSelection()
         }
-        visibleFiles = rows.sorted { lhs, rhs in
-            for comparator in sortOrder {
-                let comparison = comparator.compare(lhs, rhs)
-                if comparison != .orderedSame { return comparison == .orderedAscending }
-            }
-            return lhs.path.localizedStandardCompare(rhs.path) == .orderedAscending
-        }
+    }
+    private func applyInitialSelection() {
+        guard !preparing, displayedRepository == repository?.url.path else { return }
         if let repositoryPath = repository?.url.path, initialSelectionRepository != repositoryPath, initialSelectionReady {
             initialSelectionRepository = repositoryPath
             if let first = visibleFiles.first,
-               selection == automaticallySelectedPath.map({ Set([$0]) }) || selection.isDisjoint(with: Set(visibleFiles.map(\.path))) {
+               selection == automaticallySelectedPath.map({ Set([$0]) }) || selection.isDisjoint(with: visiblePaths) {
                 selection = [first.path]
             }
         }
     }
     private var treeVisiblePaths: Set<String>? {
         if category == .all && showHidden && filter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return nil }
-        return Set(visibleFiles.map(\.path))
+        if displayedRepository != repository?.url.path {
+            return WorkspaceFilePreparationCache.shared.cached(preparationRequest)?.paths ?? []
+        }
+        return visiblePaths
     }
     private func compactText(_ key: String) -> String { L10n.text(key, table: "CompactWorkspace") }
     private func text(_ key: String) -> String { L10n.text(key, table: "Files") }
-    private func selected(_ paths: Set<String>) -> [GitFile] { files.filter { paths.contains($0.path) } }
     private func eligible(_ action: FileAction, _ paths: Set<String>) -> Set<String> {
         if [.stage, .unstage, .discard, .stageAll, .unstageAll].contains(action) {
             return WorkspaceFileActionTargets.paths(for: action, files: files, selection: paths)
         }
-        return Set(selected(paths).filter { file in
-            switch action {
-            case .compare: return true
-            case .open: return file.worktreeStatus != "D" && !(file.indexStatus == "D" && !file.isUnstaged)
-            case .history: return !file.isUntracked && file.indexStatus != "A"
-            case .stage, .stageAll: return file.isUnstaged && !file.isConflict
-            case .unstage, .unstageAll: return file.isStaged && !file.isConflict
-            case .discard: return !file.isUntracked && !file.isConflict && file.isUnstaged
-            default: return true
-            }
-        }.map(\.path))
+        if paths.count == 1, let path = paths.first {
+            guard let file = files.first(where: { $0.path == path }), fileEligible(action, file) else { return [] }
+            return [path]
+        }
+        return Set(files.lazy.filter { paths.contains($0.path) && fileEligible(action, $0) }.map(\.path))
+    }
+    private func fileEligible(_ action: FileAction, _ file: GitFile) -> Bool {
+        switch action {
+        case .compare: return true
+        case .open: return file.worktreeStatus != "D" && !(file.indexStatus == "D" && !file.isUnstaged)
+        case .history: return !file.isUntracked && file.indexStatus != "A"
+        case .stage, .stageAll: return file.isUnstaged && !file.isConflict
+        case .unstage, .unstageAll: return file.isStaged && !file.isConflict
+        case .discard: return !file.isConflict && file.isUnstaged
+        default: return true
+        }
     }
     private func performCompare(_ paths: Set<String>) {
-        guard !isBusy, paths.count == 1 else { return }
+        guard !preparing, displayedRepository == repository?.url.path, !isBusy, paths.count == 1 else { return }
         if paths.allSatisfy({ ignoredPaths.contains($0) }) { reveal(paths); return }
         guard eligible(.compare, paths).count == 1 else { return }
-        if RayGitPreferences.doubleClick == "stage", let file = selected(paths).first, !file.isConflict {
+        if RayGitPreferences.doubleClick == "stage", let file = files.first(where: { paths.contains($0.path) }), !file.isConflict {
             onAction(file.isUnstaged ? .stage : .unstage, paths)
         } else { onAction(.compare, paths) }
     }
     private func actionButton(_ key: String, _ action: FileAction, _ paths: Set<String>, single: Bool = false) -> some View {
-        let targets = eligible(action, paths)
-        return Button(text(key)) { onAction(action, targets) }
-            .disabled(isBusy || targets.isEmpty || (single && paths.count != 1))
+        let includesAll = [.stage, .unstage, .discard, .stageAll, .unstageAll].contains(action) && paths.isEmpty
+        let enabled = !isBusy && !preparing && displayedRepository == repository?.url.path && (!single || paths.count == 1) && files.contains {
+            (includesAll || paths.contains($0.path)) && fileEligible(action, $0)
+        }
+        return Button(text(key)) {
+            if !preparing, displayedRepository == repository?.url.path, !isBusy {
+                onAction(action, eligible(action, paths))
+            }
+        }.disabled(preparing || displayedRepository != repository?.url.path || !enabled)
     }
 
     private var content: some View {
-        VStack(spacing: 0) {
+        // Resolve an exact hit during rendering, before onChange publishes the new state.
+        let cached = displayedRepository == repository?.url.path ? nil : WorkspaceFilePreparationCache.shared.cached(preparationRequest)
+        let rows = cached?.rows ?? visibleFiles
+        let statuses = statusControls
+        let controls = fileControls
+        return VStack(spacing: 0) {
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 10) { statusControls; Spacer(minLength: 4); fileControls }
-                VStack(spacing: 8) { HStack { statusControls; Spacer() }; HStack { fileControls; Spacer() } }
+                HStack(spacing: 10) { statuses; Spacer(minLength: 4); controls }
+                VStack(spacing: 8) { HStack { statuses; Spacer() }; HStack { controls; Spacer() } }
             }.controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).padding(.horizontal, 10).padding(.vertical, 6).rayGitChrome()
             Divider()
-            if treeMode { treeContent(treeVisiblePaths).background { if let fileFocus { WorkspaceFileFocusRegion(focus: fileFocus).allowsHitTesting(false).accessibilityHidden(true) } } }
-            else if visibleFiles.isEmpty {
-                RayGitEmptyState(title: text(files.isEmpty ? "clean" : "noFiles"), systemImage: files.isEmpty ? "checkmark.circle" : "magnifyingglass")
-            } else { fileTable }
+            if treeMode && statusFailure == nil { treeContent(treeVisiblePaths).disabled(preparing).background { if let fileFocus { WorkspaceFileFocusRegion(focus: fileFocus).allowsHitTesting(false).accessibilityHidden(true) } } }
+            else {
+                fileTable(rows, ready: cached != nil || (!preparing && displayedRepository == repository?.url.path))
+                    .overlay {
+                        if rows.isEmpty && !preparing && displayedRepository == repository?.url.path {
+                            RayGitEmptyState(title: statusFailure ?? text(files.isEmpty ? "clean" : "noFiles"), systemImage: statusFailure != nil ? "exclamationmark.triangle" : files.isEmpty ? "checkmark.circle" : "magnifyingglass")
+                                .allowsHitTesting(false)
+                        }
+                    }
+            }
         }
     }
     private var filteredContent: some View {
@@ -143,7 +179,7 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
         .onChange(of: shortcutRequest?.id) { _, _ in performShortcut() }
         .onChange(of: files) { _, _ in rebuildVisibleFiles(); if showIgnored { Task { await loadIgnored() } } }
         .onChange(of: repository?.url.path) { _, _ in initialSelectionRepository = nil; rebuildVisibleFiles() }
-        .onChange(of: initialSelectionReady) { _, _ in rebuildVisibleFiles() }
+        .onChange(of: initialSelectionReady) { _, _ in applyInitialSelection() }
         .onChange(of: filter) { _, _ in rebuildVisibleFiles() }
         .onChange(of: filterCase) { _, _ in rebuildVisibleFiles() }
         .onChange(of: category) { _, _ in rebuildVisibleFiles() }
@@ -151,6 +187,7 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
     }
     var body: some View {
         filteredContent
+        .onDisappear { preparationTask?.cancel() }
         .onChange(of: ignoredPaths) { _, _ in rebuildVisibleFiles() }
         .onChange(of: sortOrder) { _, _ in rebuildVisibleFiles() }
         .task(id: (repository?.url.path ?? "") + "|\(showIgnored)") { await loadIgnored() }
@@ -212,44 +249,34 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
                 actionButton("history", .history, selection, single: true)
                 actionButton("discard", .discard, selection)
                 Divider()
-                actionButton("stageAll", .stageAll, Set(files.map(\.path)))
-                actionButton("unstageAll", .unstageAll, Set(files.map(\.path)))
+                actionButton("stageAll", .stageAll, [])
+                actionButton("unstageAll", .unstageAll, [])
             } label: { Image(systemName: "ellipsis") }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 24).help(text("allActions")).accessibilityLabel(text("allActions"))
         }
     }
-    private var statusColumnWidth: CGFloat {
-        let font = NSFont.systemFont(ofSize: 10, weight: .medium)
-        let titles = ["modified", "added", "deleted", "renamed", "copied", "type"].map { text("stagedStatus") + " · " + text($0) }
-            + [text("conflict"), text("untracked"), compactText("Ignored · read-only")]
-        return ceil(titles.map { ($0 as NSString).size(withAttributes: [.font: font]).width }.max() ?? 70) + 16
-    }
-    private var fileTable: some View {
-            Table(visibleFiles, selection: $selection, sortOrder: $sortOrder, columnCustomization: $columnCustomization) {
-                TableColumn(text("name"), value: \.name) { file in
-                    HStack(spacing: 6) {
-                        WorkspaceStatusIcon(file: file.file).scaleEffect(0.65).frame(width: 16, height: 16)
-                        Text(file.name).lineLimit(1).truncationMode(.middle)
-                    }
-                }.width(min: 120, ideal: 220).customizationID("filename").disabledCustomizationBehavior(.visibility)
-                TableColumn(designWorkspaceText("Status"), value: \.statusKey) { file in
-                    if let value = file.file { fileStatus(value) }
-                    else { Text(compactText("Ignored · read-only")).font(.system(size: 10)).foregroundStyle(.secondary) }
-                }.width(statusColumnWidth).customizationID("status")
-                TableColumn(text("workspace"), value: \.worktreeKey) { file in status(file.file?.worktreeStatus ?? " ", selected: selection.contains(file.path)) }.width(min: 65, ideal: 85).customizationID("workspace").defaultVisibility(.hidden)
-                TableColumn(text("index"), value: \.indexKey) { file in status(file.file?.indexStatus ?? " ", selected: selection.contains(file.path)) }.width(min: 65, ideal: 85).customizationID("index").defaultVisibility(.hidden)
-                TableColumn(text("directory"), value: \.directory) { file in
-                    let directory = file.directory
-                    Text(directory.isEmpty ? "—" : directory).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                }.width(min: 80, ideal: 180).customizationID("directory")
+    private var visibleColumns: Set<String> {
+        Set(["filename", "status", "workspace", "index", "directory"].filter { id in
+            if id == "filename" { return true }
+            switch columnCustomization[visibility: id] {
+            case .visible: return true
+            case .hidden: return false
+            default: return id != "workspace" && id != "index"
             }
-            .font(.system(size: 12)).environment(\.defaultMinListRowHeight, 22)
-            .tint(Color(red: 0.20, green: 0.53, blue: 0.94))
-            .background(WorkspaceTableDensity().allowsHitTesting(false).accessibilityHidden(true))
-            .background { if let fileFocus { WorkspaceFileFocusRegion(focus: fileFocus).allowsHitTesting(false).accessibilityHidden(true) } }
-            .contextMenu(forSelectionType: String.self) { paths in
-                WorkspaceContextMenu(paths: paths, files: files, repository: repository, isBusy: isBusy, readOnlyPaths: Set(ignoredPaths), onAction: onAction)
-            } primaryAction: { paths in performCompare(paths) }
+        })
+    }
+    private func fileTable(_ rows: [Row], ready: Bool) -> some View {
+        WorkspaceNativeFilesTable(rows: rows, files: files, repository: repository, selection: Binding(get: { selection }, set: { paths in
+            guard !preparing, displayedRepository == repository?.url.path else { return }
+            selection = paths
+        }), isBusy: isBusy, sortOrder: $sortOrder, visibleColumns: visibleColumns, onVisibleColumnsChange: { columns in
+            for id in ["filename", "status", "workspace", "index", "directory"] {
+                columnCustomization[visibility: id] = columns.contains(id) ? .visible : .hidden
+            }
+        }, onAction: { action, paths in
+            guard !preparing, displayedRepository == repository?.url.path else { return }
+            onAction(action, paths)
+        }, onCompare: performCompare, fileFocus: fileFocus, isReady: ready)
     }
 
     private func openIgnored(_ paths: Set<String>) {
@@ -265,76 +292,12 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
         defer { if ignoredRequestID == requestID { loadingIgnored = false } }
         do {
             let paths = try await repository.ignoredWorkspacePaths()
-            guard !Task.isCancelled, ignoredRequestID == requestID else { return }
-            ignoredPaths = paths; ignoredError = nil
-        } catch { if !Task.isCancelled, ignoredRequestID == requestID { ignoredError = compactText("Ignored files could not be loaded") } }
+            guard !Task.isCancelled, ignoredRequestID == requestID, repository.url == self.repository?.url else { return }
+            ignoredPaths = paths; ignoredRepository = repository.url.path; ignoredError = nil
+        } catch { if !Task.isCancelled, ignoredRequestID == requestID, repository.url == self.repository?.url { ignoredError = compactText("Ignored files could not be loaded") } }
     }
-    private func fileStatus(_ file: GitFile) -> some View {
-        let presentation = WorkspaceFileStatus(file)
-        let title = presentation.keys.map(text).joined(separator: " · ")
-        return RayGitBadge(title, tint: presentation.kind == "conflict" ? .orange : presentation.kind == "deleted" ? .red : presentation.kind == "untracked" ? .blue : presentation.kind == "added" || presentation.kind == "stagedStatus" ? .green : .orange).help(title)
-    }
-    private func status(_ value: String, selected: Bool) -> some View {
-        let key = [" ": "none", "?": "untracked", "M": "modified", "A": "added", "D": "deleted", "R": "renamed", "C": "copied", "U": "conflict", "T": "type"][value]
-        let color: Color = value == "?" ? .blue : value == "A" ? .green : value == "D" ? .red : ["M", "R", "U"].contains(value) ? .orange : .secondary
-        return Group {
-            if value == " " { Text(text("none")).foregroundStyle(.tertiary).font(.system(size: 11)) }
-            else { RayGitBadge(key.map(text) ?? value, tint: color) }
-        }
-    }
+
 }
 
 /// Apply native table metrics once the SwiftUI table is attached; the list-row
 /// environment alone does not control NSTableView's header or intercell gap.
-private struct WorkspaceTableDensity: NSViewRepresentable {
-    func makeNSView(context: Context) -> Probe { Probe() }
-    func updateNSView(_ view: Probe, context: Context) { view.configure() }
-    final class Probe: NSView {
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
-        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); configure() }
-        override func layout() { super.layout(); configure() }
-        func configure() {
-            configureTable()
-            // SwiftUI can replace the table or reset its metrics during this update.
-            DispatchQueue.main.async { [weak self] in self?.configureTable() }
-        }
-        private func configureTable() {
-            var ancestor = superview
-            while let view = ancestor {
-                if let table = Self.table(in: view) {
-                    apply(to: table)
-                    return
-                }
-                ancestor = view.superview
-            }
-        }
-        private func apply(to table: NSTableView) {
-            if !table.allowsMultipleSelection { table.allowsMultipleSelection = true }
-            if !table.allowsEmptySelection { table.allowsEmptySelection = true }
-            // SwiftUI installs automatic sizing from hosting-cell fitting heights.
-            // A rowHeight alone is ignored while that mode is enabled.
-            if let scroll = table.enclosingScrollView { scroll.autohidesScrollers = true }
-            if table.columnAutoresizingStyle != .uniformColumnAutoresizingStyle {
-                table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
-            }
-            if let scroll = table.enclosingScrollView,
-               abs(table.frame.width - scroll.contentSize.width) > 1,
-               table.tableColumns.filter({ !$0.isHidden }).reduce(CGFloat.zero, { $0 + $1.minWidth + table.intercellSpacing.width }) <= scroll.contentSize.width {
-                table.setFrameSize(NSSize(width: scroll.contentSize.width, height: table.frame.height))
-                table.sizeToFit()
-            }
-            if table.usesAutomaticRowHeights { table.usesAutomaticRowHeights = false }
-            if table.rowSizeStyle != .custom { table.rowSizeStyle = .custom }
-            if table.rowHeight != 22 { table.rowHeight = 22 }
-            if table.intercellSpacing.height != 0 { table.intercellSpacing.height = 0 }
-            if let header = table.headerView, header.frame.height != 23 {
-                var frame = header.frame; frame.size.height = 23; header.frame = frame
-            }
-        }
-        private static func table(in view: NSView) -> NSTableView? {
-            if let table = view as? NSTableView { return table }
-            for child in view.subviews { if let table = table(in: child) { return table } }
-            return nil
-        }
-    }
-}

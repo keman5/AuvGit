@@ -148,7 +148,8 @@ public actor GitRepository {
     public func stage(paths: [String]) async throws {
         guard !paths.isEmpty else { return }
         let entries = try await status()
-        let originals = entries.filter { paths.contains($0.path) }.compactMap(\.originalPath)
+        let selected = Set(paths)
+        let originals = entries.filter { selected.contains($0.path) }.compactMap(\.originalPath)
         let renameOrigins = Set(entries.compactMap(\.originalPath))
         let tracked = Set(fields(try await run(["ls-files", "-z"]).data))
         let targets = Set(paths + originals).filter { path in
@@ -160,7 +161,8 @@ public actor GitRepository {
     public func unstage(paths: [String]) async throws {
         guard !paths.isEmpty else { return }
         let entries = try await status()
-        let originals = entries.filter { paths.contains($0.path) }.compactMap(\.originalPath)
+        let selected = Set(paths)
+        let originals = entries.filter { selected.contains($0.path) }.compactMap(\.originalPath)
         let targets = Array(Set(paths + originals)).sorted()
         let head = try await run(["rev-parse", "--verify", "HEAD"], allowedCodes: [0,128])
         if head.code == 0 { _ = try await run(["reset", "--quiet", "HEAD", "--"] + targets) }
@@ -188,11 +190,11 @@ public actor GitRepository {
     }
     public func discardWorktree(paths: [String]) async throws {
         guard !paths.isEmpty else { return }
-        let entries = try await status()
+        let entries = Dictionary(try await status().map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
         let tracked = Set(fields(try await run(["ls-files", "-z"]).data))
         for path in paths {
             try validatePath(path)
-            guard tracked.contains(path), let entry = entries.first(where: { $0.path == path }), !entry.isConflict, !entry.isUntracked, entry.isUnstaged else { throw GitError("Cannot discard this worktree path: " + path) }
+            guard tracked.contains(path), let entry = entries[path], !entry.isConflict, !entry.isUntracked, entry.isUnstaged else { throw GitError("Cannot discard this worktree path: " + path) }
         }
         _ = try await run(["restore", "--worktree", "--"] + Set(paths).sorted())
     }

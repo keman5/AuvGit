@@ -20,7 +20,7 @@ final class WorkspaceFileStatusTests: XCTestCase {
         let files = [file("M", " ", "staged"), file(" ", "M", "modified"), file("?", "?", "new"), file("U", "U", "conflict")]
         XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .stage, files: files, selection: []), ["modified", "new"])
         XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .unstage, files: files, selection: []), ["staged"])
-        XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .discard, files: files, selection: []), ["modified"])
+        XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .discard, files: files, selection: []), ["modified", "new"])
         XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .stage, files: files, selection: ["modified"]), ["modified"])
         XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .stage, files: files, selection: ["ignored"]), [])
     }

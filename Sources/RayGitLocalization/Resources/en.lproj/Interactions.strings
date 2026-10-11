@@ -38,3 +38,7 @@
 "Revert Message" = "Create a new commit that reverses %@. A clean working tree is required; conflicts stop the operation.";
 "Delete Branch Message" = "Delete branch %@. Git will refuse to delete unmerged work.";
 "Drop Stash Message" = "Permanently delete stash %@. Confirm its contents are no longer needed.";
+
+"Discard Workspace Message" = "Unstaged tracked changes will be restored from the index. Untracked files will be permanently deleted. This cannot be undone in the app. Staged contents will be preserved.";
+
+"File Count Summary" = "%d files";

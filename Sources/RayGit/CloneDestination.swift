@@ -20,6 +20,7 @@ struct CloneDestination: Codable, Equatable {
         guard automatic else { return }
         path = Self.repositoryName(source).map { parent.appendingPathComponent($0).path } ?? ""
     }
+    mutating func replaceSource(_ source: String) { automatic = true; sourceChanged(source) }
     mutating func edit(_ value: String) { path = value; automatic = false }
     mutating func chooseParent(_ folder: URL, source: String) {
         let folder = folder.standardizedFileURL
@@ -50,6 +51,18 @@ struct CloneDestination: Codable, Equatable {
               name.rangeOfCharacter(from: .controlCharacters) == nil else { return nil }
         return name
     }
+    static func clipboardSource(_ value: String?) -> String? {
+        guard let source = value?.trimmingCharacters(in: .whitespacesAndNewlines), repositoryName(source) != nil else { return nil }
+        if source.contains("://") {
+            guard let url = URLComponents(string: source) else { return nil }
+            if url.scheme?.lowercased() == "file" { return url.path.hasPrefix("/") ? source : nil }
+            return url.host?.isEmpty == false && !url.path.isEmpty ? source : nil
+        }
+        if source.hasPrefix("/") || source.hasPrefix("~/") { return source }
+        guard source.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
+              let colon = source.firstIndex(of: ":"), !source[..<colon].isEmpty, !source[..<colon].contains("/") else { return nil }
+        return source
+    }
     static func targetURL(_ value: String) -> URL? {
         let expanded = (value.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).expandingTildeInPath
         guard expanded.hasPrefix("/"), !expanded.contains("\0"), expanded.rangeOfCharacter(from: .controlCharacters) == nil else { return nil }
@@ -68,6 +81,16 @@ struct RepositoryCreationDraft: Codable, Equatable {
 
     init(defaults: UserDefaults = .standard) {
         cloneDestination = CloneDestination(defaults: defaults)
+    }
+    init(clone: Bool, source: String, destination: String, cloneDestination: CloneDestination) {
+        self.clone = clone; self.source = source; self.destination = destination; self.cloneDestination = cloneDestination
+    }
+    @discardableResult mutating func applyClipboard(_ text: String?) -> Bool {
+        guard let source = CloneDestination.clipboardSource(text) else { return false }
+        clone = true; self.source = source
+        cloneDestination.replaceSource(source)
+        destination = cloneDestination.path
+        return true
     }
     static func load(defaults: UserDefaults = .standard) -> Self {
         guard let data = defaults.data(forKey: preference),

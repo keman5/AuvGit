@@ -75,3 +75,5 @@
 "Filtering content" = "Filtering content";
 "Finding sources" = "Finding sources";
 "Reusing objects" = "Reusing objects";
+
+"Git index is corrupt; workspace changes are unavailable." = "Git index is corrupt; workspace changes are unavailable.";

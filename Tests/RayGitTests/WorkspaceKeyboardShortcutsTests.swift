@@ -77,7 +77,7 @@ final class WorkspaceKeyboardShortcutsTests: XCTestCase {
         let inputs: [(UInt16, String, NSEvent.ModifierFlags, ShortcutCommand)] = [
             (0, "a", .command, .selectAllFiles), (8, "c", .command, .copyFiles),
             (36, "\n", [], .renameFile), (76, "\u{3}", [], .renameFile), (125, "\u{f701}", .command, .editFile),
-            (51, "\u{7f}", .command, .deleteFile), (8, "c", [.command, .option], .copyPath)
+            (51, "\u{7f}", [], .deleteFile), (8, "c", [.command, .option], .copyPath)
         ]
         let editor = NSTextView(frame: region.frame)
         window.contentView!.addSubview(editor)
