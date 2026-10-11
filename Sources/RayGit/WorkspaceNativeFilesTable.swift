@@ -32,6 +32,7 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
         table.allowsEmptySelection = true
         table.usesAutomaticRowHeights = false
         table.rowHeight = 22
+        table.usesAlternatingRowBackgroundColors = true
         table.intercellSpacing = NSSize(width: 3, height: 0)
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         table.allowsColumnReordering = true
@@ -365,7 +366,7 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
             return menu
         }
         @objc private func performMenu(_ item: NSMenuItem) {
-            guard parent.isReady, !parent.isBusy, let (action, paths, id) = menuActions[item.tag], id == generation else { return }
+            guard item.isEnabled, parent.isReady, !parent.isBusy, let (action, paths, id) = menuActions[item.tag], id == generation else { return }
             parent.onAction(action, paths)
         }
     }

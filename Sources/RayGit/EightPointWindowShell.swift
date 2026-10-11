@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Public eight-point main-window shell. Native mode is an explicit fallback.
+/// Public rounded main-window shell. Native mode is an explicit fallback.
 @MainActor
 enum EightPointWindowShell {
     private static let installed = NSHashTable<NSWindow>.weakObjects()
@@ -16,7 +16,7 @@ enum EightPointWindowShell {
         let mode = requestedMode
         guard mode == "native" || mode == "borderless" else { return }
         installed.add(window)
-        if mode == "native" { return }
+        if mode == "native" { WindowFrameAppearance.clip(window); return }
         else if let content {
             let toolbarModel = BorderlessToolbarModel(original: window.toolbar)
             let shell = BorderlessShellWindow(contentRect: window.frame, styleMask: [.borderless, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
@@ -83,7 +83,7 @@ final class EightPointFrameView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         // Native sheet dimming is a sibling of the content view. Clip the whole
-        // frame so the dimmer cannot fill the transparent eight-point corners.
+        // frame so the dimmer cannot fill the transparent rounded corners.
         if let window { WindowFrameAppearance.clip(window) }
     }
     override var wantsUpdateLayer: Bool { true }
@@ -162,6 +162,41 @@ enum WindowFrameAppearance {
             view.wantsLayer = true
             view.layer?.cornerRadius = RayGitStyle.windowCornerRadius
             view.layer?.masksToBounds = true
+        }
+        // Content backgrounds stop below a native title bar. Keep the outer
+        // window clear, but paint inside its clipped frame, including the title.
+        if window.styleMask.contains(.titled), !window.styleMask.contains(.fullSizeContentView),
+           let frame = window.contentView?.superview {
+            window.effectiveAppearance.performAsCurrentDrawingAppearance {
+                frame.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+            }
+        }
+    }
+}
+
+struct WindowFrameStyle: NSViewRepresentable {
+    func makeNSView(context: Context) -> FrameView { FrameView() }
+    func updateNSView(_ view: FrameView, context: Context) { view.applyStyle() }
+
+    final class FrameView: NSView {
+        // The window itself is clear for its rounded corners. Paint the interior
+        // here so unpainted SwiftUI regions cannot reveal windows underneath.
+        override var isOpaque: Bool { true }
+        override func draw(_ dirtyRect: NSRect) {
+            NSColor.windowBackgroundColor.setFill()
+            dirtyRect.fill()
+        }
+        override func viewDidChangeEffectiveAppearance() {
+            super.viewDidChangeEffectiveAppearance()
+            needsDisplay = true
+            applyStyle()
+        }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            applyStyle()
+        }
+        func applyStyle() {
+            if let window { WindowFrameAppearance.clip(window) }
         }
     }
 }

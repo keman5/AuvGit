@@ -93,8 +93,9 @@ private final class CompareController: NSWindowController, NSWindowDelegate {
         } else { window.title = title + " — " + interactionText("File Compare") }
         window.minSize = NSSize(width: 1050, height: 600)
         window.isReleasedWhenClosed = false
-        if let session { window.contentView = NSHostingView(rootView: FileCompareContent(session: session, searchOptions: searchOptions, replacement: replacement, initialLine: initialLine, initialPaneID: initialPaneID).nativeFocusRoot()) }
-        else { window.contentView = NSHostingView(rootView: CompareWindowContent(title: title, repository: repository, target: target, stash: stash).nativeFocusRoot()) }
+        if let session { window.contentView = NSHostingView(rootView: FileCompareContent(session: session, searchOptions: searchOptions, replacement: replacement, initialLine: initialLine, initialPaneID: initialPaneID).nativeFocusRoot().background(WindowFrameStyle())) }
+        else { window.contentView = NSHostingView(rootView: CompareWindowContent(title: title, repository: repository, target: target, stash: stash).nativeFocusRoot().background(WindowFrameStyle())) }
+        WindowFrameAppearance.clip(window)
         super.init(window: window); window.delegate = self; window.center()
         observer = session?.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.window?.isDocumentEdited = self?.session?.isDirty == true }

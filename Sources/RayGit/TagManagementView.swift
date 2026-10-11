@@ -113,7 +113,7 @@ struct TagManagementView: View {
             Divider()
             HStack {
                 if store.isBusy { ProgressView().controlSize(.small) }
-                Button(workflowText("Close")) { dismiss() }.keyboardShortcut(.cancelAction)
+                DialogButton(workflowText("Close"), prominent: true, role: .cancel) { dismiss() }
             }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity).padding(.horizontal, 24).padding(.vertical, 14)
         }.tint(.blue).background(Color(nsColor: .windowBackgroundColor)).disabled(store.isBusy).interactiveDismissDisabled(store.isBusy).frame(width: 1020, height: 700)
         .task { await reload() }
@@ -153,8 +153,8 @@ struct TagManagementView: View {
             Divider()
             HStack {
                 if store.isBusy { ProgressView().controlSize(.small) }
-                Button(workflowText("Cancel")) { showCreate = false }.keyboardShortcut(.cancelAction)
-                Button(workflowText("Create tag")) { create() }.buttonStyle(RayGitDialogButtonStyle(prominent: true))
+                DialogButton(workflowText("Cancel"), role: .cancel) { showCreate = false }
+                DialogButton(workflowText("Create tag"), prominent: true) { create() }
                     .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || revision.isEmpty || (tagKind != "lightweight" && annotation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
             }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.padding(22).frame(width: 360).disabled(store.isBusy).interactiveDismissDisabled(store.isBusy)

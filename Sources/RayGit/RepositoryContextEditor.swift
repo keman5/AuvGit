@@ -55,9 +55,9 @@ struct RepositoryContextEditor: View {
             }
             if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             HStack {
-                Button(repositoryContextText("Reload")) { Task { await load() } }.disabled(store.isBusy || loading)
-                Button(repositoryContextText("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction).disabled(store.isBusy)
-                Button(repositoryContextText("Save")) { save() }.keyboardShortcut(.defaultAction)
+                DialogButton(repositoryContextText("Reload")) { Task { await load() } }.disabled(store.isBusy || loading)
+                DialogButton(repositoryContextText("Cancel"), role: .cancel) { dismiss() }.disabled(store.isBusy)
+                DialogButton(repositoryContextText("Save"), prominent: true) { save() }
                     .disabled(!loaded || store.isBusy || (target.editor == .remote && (selectedRemote == nil || fetchURL.isEmpty)))
             }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.padding(20).frame(width: target.editor == .ignore ? 580 : 360).task { await load() }

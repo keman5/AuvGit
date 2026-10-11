@@ -11,7 +11,7 @@ final class HistoryColumnLayoutTests: XCTestCase {
     }
 
     func testColumnMinimumsKeepDateHashAndSubjectReadable() {
-        XCTAssertEqual(HistoryColumn.graph.clampedWidth(0), 55)
+        XCTAssertEqual(HistoryColumn.graph.clampedWidth(0), 42)
         XCTAssertEqual(HistoryColumn.message.clampedWidth(0), 220)
         XCTAssertEqual(HistoryColumn.author.clampedWidth(0), 55)
         XCTAssertEqual(HistoryColumn.date.clampedWidth(0), 105)
@@ -46,9 +46,9 @@ final class HistoryColumnLayoutTests: XCTestCase {
         let middle = HistoryColumnLayout.graphMessageWidths(activeLaneCount: 2, maximumLaneCount: 3, maximumGraphWidth: 54, baseMessageWidth: 360)
         let deep = HistoryColumnLayout.graphMessageWidths(activeLaneCount: 3, maximumLaneCount: 3, maximumGraphWidth: 54, baseMessageWidth: 360)
 
-        XCTAssertEqual(shallow.graph, 18)
-        XCTAssertEqual(middle.graph, 36)
-        XCTAssertEqual(deep.graph, 54)
+        XCTAssertEqual(shallow.graph, 12)
+        XCTAssertEqual(middle.graph, 24)
+        XCTAssertEqual(deep.graph, 36)
         XCTAssertLessThan(shallow.graph, middle.graph)
         XCTAssertLessThan(middle.graph, deep.graph)
         XCTAssertEqual(shallow.graph + shallow.message, 414)
@@ -57,11 +57,11 @@ final class HistoryColumnLayoutTests: XCTestCase {
     }
 
     func testAccessibleGraphGeometryNeverCompressesLanes() {
-        XCTAssertEqual(HistoryColumnLayout.graphWidth(laneCount: 1), 18)
-        XCTAssertEqual(HistoryColumnLayout.graphWidth(laneCount: 4), 72)
-        XCTAssertEqual(HistoryColumnLayout.graphWidth(laneCount: 8), 144)
-        XCTAssertEqual(HistoryColumnLayout.rowHeight(compact: true), 24)
-        XCTAssertEqual(HistoryColumnLayout.rowHeight(compact: false), 28)
+        XCTAssertEqual(HistoryColumnLayout.graphWidth(laneCount: 1), 12)
+        XCTAssertEqual(HistoryColumnLayout.graphWidth(laneCount: 4), 48)
+        XCTAssertEqual(HistoryColumnLayout.graphWidth(laneCount: 8), 96)
+        XCTAssertEqual(HistoryColumnLayout.rowHeight(compact: true), 22)
+        XCTAssertEqual(HistoryColumnLayout.rowHeight(compact: false), 24)
     }
 
 }

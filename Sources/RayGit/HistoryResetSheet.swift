@@ -31,8 +31,8 @@ struct HistoryResetSheet: View {
             Text(text((request.advanced ? mode : .hard).rawValue + "Message")).font(.caption).foregroundStyle(.secondary)
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
             HStack {
-                Button(workflowText("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(text("confirm"), role: (request.advanced ? mode : .hard) == .hard ? .destructive : nil) {
+                DialogButton(workflowText("Cancel"), prominent: (request.advanced ? mode : .hard) == .hard, role: .cancel) { dismiss() }
+                DialogButton(text("confirm"), prominent: (request.advanced ? mode : .hard) != .hard, role: (request.advanced ? mode : .hard) == .hard ? .destructive : nil) {
                     guard let context, store.repositoryURL == request.repositoryURL, !store.isBusy else { return }
                     let selectedMode = request.advanced ? mode : .hard
                     store.operation(historyActionText(request.advanced ? "resetAdvanced" : "reset")) { repository in

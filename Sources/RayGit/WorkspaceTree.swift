@@ -77,7 +77,7 @@ struct WorkspaceTree: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(compareText("Ignored Files")).font(.headline)
                     List(ignored, id: \.self) { Text($0).font(.system(size: 12)).textSelection(.enabled) }
-                    HStack { Button(compareText("Close")) { showIgnored = false }.keyboardShortcut(.cancelAction) }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
+                    HStack { DialogButton(compareText("Close"), prominent: true, role: .cancel) { showIgnored = false } }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
                 }.controlSize(.small).padding(20).frame(width: 600, height: 450)
             }
             .rayGitSheet(isPresented: $showIgnoreEditor) {
@@ -89,8 +89,8 @@ struct WorkspaceTree: View {
                         .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
                         .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(0.12)))
                     HStack {
-                        Button(compareText("Cancel")) { showIgnoreEditor = false }.keyboardShortcut(.cancelAction)
-                        Button(compareText("Save")) {
+                        DialogButton(compareText("Cancel"), role: .cancel) { showIgnoreEditor = false }
+                        DialogButton(compareText("Save"), prominent: true) {
                             guard !isBusy, !mutationBusy, permitsMutation() else { return }
                             mutationBusy = true; setBusy(true)
                             Task {
@@ -98,7 +98,7 @@ struct WorkspaceTree: View {
                                 do { try await repository.saveGitignore(text: ignoreDraft, expected: expectedIgnore); editorError = nil; showIgnoreEditor = false; changed() }
                                 catch { editorError = compareText(OperationFailure.message(error, repository: repository.url)) }
                             }
-                        }.buttonStyle(RayGitDialogButtonStyle(prominent: true)).keyboardShortcut(.defaultAction).disabled(mutationBusy || isBusy)
+                        }.disabled(mutationBusy || isBusy)
                     }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
                 }.controlSize(.small).padding(20).frame(width: 650, height: 500)
             }

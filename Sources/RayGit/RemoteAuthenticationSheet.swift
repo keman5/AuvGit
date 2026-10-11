@@ -64,6 +64,7 @@ struct RemoteAuthenticationRequest: Identifiable {
     let id = UUID()
     let repository: GitRepository
     let operation: NetworkOperation
+    let remoteName: String?
     let endpoint: RemoteEndpoint
     let preferredUsername: String?
     let preferredSSHUsername: String?
@@ -80,17 +81,17 @@ final class RemoteAuthenticationCoordinator: ObservableObject {
 
     init(credentials: RemoteCredentialStore = .shared) { self.credentials = credentials }
 
-    func savedCredential(for repository: GitRepository, operation: NetworkOperation) async -> NetworkCredential? {
-        guard let target = try? await repository.remoteAuthenticationTarget(for: operation) else { return nil }
+    func savedCredential(for repository: GitRepository, operation: NetworkOperation, remoteName: String? = nil) async -> NetworkCredential? {
+        guard let target = try? await repository.remoteAuthenticationTarget(for: operation, remoteName: remoteName) else { return nil }
         let username = credentials.preferredUsername(for: target.endpoint) ?? target.endpoint.username
         guard let username else { return nil }
         return try? credentials.load(for: target.endpoint, username: username)
     }
 
     @discardableResult
-    func presentIfNeeded(error: Error, repository: GitRepository, operation: NetworkOperation,
+    func presentIfNeeded(error: Error, repository: GitRepository, operation: NetworkOperation, remoteName: String? = nil,
                          retry: @escaping @MainActor (RemoteAuthenticationRetryContext) -> Void) async -> Bool {
-        guard let target = try? await repository.remoteAuthenticationTarget(for: operation),
+        guard let target = try? await repository.remoteAuthenticationTarget(for: operation, remoteName: remoteName),
               NetworkAuthenticationPolicy.prompt(for: error, endpoint: target.endpoint) != nil else { return false }
         let preferred = credentials.preferredUsername(for: target.endpoint) ?? target.endpoint.username
         var privateKey: URL?
@@ -104,7 +105,7 @@ final class RemoteAuthenticationCoordinator: ObservableObject {
                case let .ssh(_, key, _)? = try? credentials.load(for: candidate, username: preferredSSHUsername) { privateKey = key }
         }
         submissionError = nil
-        request = RemoteAuthenticationRequest(repository: repository, operation: operation, endpoint: target.endpoint,
+        request = RemoteAuthenticationRequest(repository: repository, operation: operation, remoteName: remoteName, endpoint: target.endpoint,
                                               preferredUsername: preferred, preferredSSHUsername: preferredSSHUsername,
                                               privateKey: privateKey, retry: retry)
         return true
@@ -118,7 +119,7 @@ final class RemoteAuthenticationCoordinator: ObservableObject {
             isSubmitting = true; submissionError = nil
             Task { @MainActor in
                 do {
-                    let plan = try await request.repository.remoteSSHMigrationPlan(for: request.operation, username: username, port: port)
+                    let plan = try await request.repository.remoteSSHMigrationPlan(for: request.operation, username: username, port: port, remoteName: request.remoteName)
                     let accessed = key.startAccessingSecurityScopedResource()
                     defer { if accessed { key.stopAccessingSecurityScopedResource() } }
                     try await request.repository.migrateRemoteToSSH(plan, credential: submission.credential)
@@ -146,8 +147,8 @@ final class RemoteAuthenticationCoordinator: ObservableObject {
         if submissionError != nil { submissionError = nil }
     }
 
-    func save(_ credential: NetworkCredential, for repository: GitRepository, operation: NetworkOperation) async throws {
-        let target = try await repository.remoteAuthenticationTarget(for: operation)
+    func save(_ credential: NetworkCredential, for repository: GitRepository, operation: NetworkOperation, remoteName: String? = nil) async throws {
+        let target = try await repository.remoteAuthenticationTarget(for: operation, remoteName: remoteName)
         try credentials.save(credential, for: target.endpoint)
     }
 
@@ -237,11 +238,11 @@ struct RemoteAuthenticationSheet: View {
             Divider()
             HStack {
                 if isSubmitting { ProgressView().controlSize(.small) }
-                Button(networkText("cancel"), action: cancel).keyboardShortcut(.cancelAction).disabled(isSubmitting)
-                Button(networkText("retry")) {
+                DialogButton(networkText("cancel"), role: .cancel, action: cancel).disabled(isSubmitting)
+                DialogButton(networkText("retry"), prominent: true) {
                     guard let submission = draft.submission else { return }
                     submit(submission)
-                }.buttonStyle(RayGitDialogButtonStyle(prominent: true)).keyboardShortcut(.defaultAction).disabled(draft.submission == nil || isSubmitting)
+                }.disabled(draft.submission == nil || isSubmitting)
             }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.padding(22).frame(width: 620)
             .interactiveDismissDisabled()

@@ -58,13 +58,12 @@ struct RepositoryTools: View {
                 Divider()
                 HStack(spacing: 8) {
                     if busy || store.isBusy { ProgressView().controlSize(.small) }
-                    Button(workflowText("Close")) { dismiss() }
-                        .keyboardShortcut(.cancelAction).disabled(busy || store.isBusy)
-                    Button(workflowText(operation.writes ? "Run change…" : "Read")) {
+                    DialogButton(workflowText("Close"), role: .cancel) { dismiss() }
+                        .disabled(busy || store.isBusy)
+                    DialogButton(workflowText(operation.writes ? "Run change…" : "Read"), prominent: true) {
                         if operation.writes, let repo = store.repository { pending = (repo, operation, first, second); confirm = true }
                         else if let repo = store.repository { run(repo, operation, first, second) }
                     }
-                    .buttonStyle(RayGitDialogButtonStyle(prominent: true))
                     .disabled(busy || store.isBusy || store.repository == nil || (!firstLabel.isEmpty && first.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) || (operation == .partialStash && first.isEmpty))
                 }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
             }

@@ -10,6 +10,9 @@ final class CommitGraphTests: XCTestCase {
         XCTAssertEqual(graph.laneCount, 1)
         XCTAssertEqual(graph.frontier, ["c"])
         XCTAssertEqual(graph.rows[1].segments.count, 2)
+        XCTAssertEqual(graph.rows[0].segments.first?.sourceHash, "a")
+        XCTAssertEqual(graph.rows[1].segments.first { $0.fromY == 0 }?.sourceHash, "a")
+        XCTAssertEqual(graph.rows[1].segments.first { $0.fromY == 0.5 }?.sourceHash, "b")
     }
     func testForkConvergesOnSharedAncestor() {
         let graph = CommitGraph(commits: [commit("a", ["root"]), commit("b", ["root"]), commit("root", [])])

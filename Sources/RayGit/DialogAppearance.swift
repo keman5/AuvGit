@@ -14,6 +14,21 @@ struct RayGitDialogButtonStyle: PrimitiveButtonStyle {
     }
 }
 
+/// Explicit dialog actions use the native button for rendering and activation.
+struct DialogButton: View {
+    let title: String
+    var prominent = false
+    var role: ButtonRole? = nil
+    let action: () -> Void
+    init(_ title: String, prominent: Bool = false, role: ButtonRole? = nil, action: @escaping () -> Void) {
+        self.title = title; self.prominent = prominent; self.role = role; self.action = action
+    }
+    var body: some View {
+        KeyViewProxy(label: title, keyEquivalent: role == .cancel ? "\u{1b}" : "", prominent: prominent,
+                     minimumWidth: RayGitDialogButtonStyle.minimumWidth, tint: role == .destructive ? .systemRed : nil, action: action)
+    }
+}
+
 extension View {
     func rayGitPopover<Content: View>(isPresented: Binding<Bool>, arrowEdge: Edge = .top,
                                       @ViewBuilder content: @escaping () -> Content) -> some View {
@@ -22,14 +37,14 @@ extension View {
     func rayGitSheet<Content: View>(isPresented: Binding<Bool>, onDismiss: (() -> Void)? = nil,
                                     @ViewBuilder content: @escaping () -> Content) -> some View {
         sheet(isPresented: isPresented, onDismiss: onDismiss) {
-            content().nativeFocusRoot().background(Color(nsColor: .windowBackgroundColor)).background(DialogFrameStyle())
+            content().nativeFocusRoot(focusesOnPresentation: true).background(Color(nsColor: .windowBackgroundColor)).background(DialogFrameStyle())
                 .presentationCornerRadius(RayGitStyle.windowCornerRadius)
         }
     }
     func rayGitSheet<Item: Identifiable, Content: View>(item: Binding<Item?>, onDismiss: (() -> Void)? = nil,
                                                        @ViewBuilder content: @escaping (Item) -> Content) -> some View {
         sheet(item: item, onDismiss: onDismiss) { value in
-            content(value).nativeFocusRoot().background(Color(nsColor: .windowBackgroundColor)).background(DialogFrameStyle())
+            content(value).nativeFocusRoot(focusesOnPresentation: true).background(Color(nsColor: .windowBackgroundColor)).background(DialogFrameStyle())
                 .presentationCornerRadius(RayGitStyle.windowCornerRadius)
         }
     }
@@ -174,10 +189,14 @@ enum DialogAppearance {
         }
         guard let content = window.contentView else { return }
         let candidates = buttons(in: content)
-        guard !candidates.isEmpty else { return }
-        let preferred = candidates.first { $0.keyEquivalent == "\r" }
-            ?? candidates.first { $0.bezelColor == .controlAccentColor }
-            ?? candidates.last { $0.keyEquivalent == "\u{1b}" }
+        // NSWindow can rewrite its default cell's live key equivalent to Return.
+        // Use declared actions so an early Cancel cannot outrank a later primary.
+        func declaredKey(_ button: NSButton) -> String {
+            (button as? KeyViewProxy.Button)?.declaredKeyEquivalent ?? button.keyEquivalent
+        }
+        let preferred = candidates.first { declaredKey($0) == "\r" }
+            ?? candidates.first { ($0 as? KeyViewProxy.Button)?.isPrimaryAction == true || $0.bezelColor == .controlAccentColor }
+            ?? candidates.last { declaredKey($0) == "\u{1b}" }
         window.defaultButtonCell = preferred?.cell as? NSButtonCell
     }
 
@@ -188,7 +207,7 @@ enum DialogAppearance {
                        RayGitAlertButton(discard, role: .destructive) { NSApp.stopModal(withCode: .alertSecondButtonReturn) },
                        RayGitAlertButton(cancel, role: .cancel) { NSApp.stopModal(withCode: .alertThirdButtonReturn) }]
         let host = NSHostingView(rootView: RayGitAlertView(title: title, message: Text(message), buttons: buttons, close: {})
-            .background(Color(nsColor: .windowBackgroundColor)).nativeFocusRoot())
+            .background(Color(nsColor: .windowBackgroundColor)).nativeFocusRoot(focusesOnPresentation: true))
         window.contentView = host
         window.setContentSize(host.fittingSize)
         style(window)
@@ -204,7 +223,7 @@ private final class DialogPanel: NSPanel {
 }
 
 /// Keep SwiftUI's native sheet as the binding/dismiss anchor while presenting
-/// its existing content in the same key-capable eight-point frame as the app.
+/// its existing content in the same key-capable rounded frame as the app.
 @MainActor
 private final class DialogSheetShell {
     let panel: DialogPanel
@@ -238,9 +257,18 @@ private final class DialogSheetShell {
         }
         DialogAppearance.configureDefaultButton(in: panel)
         let center = NotificationCenter.default
-        observers.append(center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: original, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.panel.makeKey() }
-        })
+        for source in [original, original.sheetParent].compactMap({ $0 }) {
+            observers.append(center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: source, queue: .main) { [weak self] _ in
+                // Sheet presentation can restore either the hidden sheet or
+                // its parent as key. Wait until AppKit finishes that transition.
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.panel.isVisible, let original = self.original,
+                          original.sheetParent?.attachedSheet === original,
+                          NSApp.keyWindow === original || NSApp.keyWindow === original.sheetParent else { return }
+                    self.panel.makeKey()
+                }
+            })
+        }
         for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification] {
             observers.append(center.addObserver(forName: name, object: original, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.syncFrame() }

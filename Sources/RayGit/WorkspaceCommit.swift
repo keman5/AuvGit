@@ -82,12 +82,11 @@ struct WorkspaceCommitSheet: View {
             Text(workflowText("There are no staged files. All tracked changes will be staged and committed. Include untracked files too?"))
             Toggle(workflowText("Include untracked files"), isOn: $includeUntracked)
             HStack {
-                Button(workflowText("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(L10n.text("commit", table: "Main")) {
+                DialogButton(workflowText("Cancel"), role: .cancel) { dismiss() }
+                DialogButton(L10n.text("commit", table: "Main"), prominent: true) {
                     store.confirmWorkspaceCommit(request, includeUntracked: includeUntracked)
                     dismiss()
-                }.buttonStyle(RayGitDialogButtonStyle(prominent: true)).keyboardShortcut(.defaultAction)
-                    .disabled(!request.hasTrackedChanges && !includeUntracked)
+                }.disabled(!request.hasTrackedChanges && !includeUntracked)
             }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.padding(24).frame(width: 360)
     }

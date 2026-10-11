@@ -50,7 +50,8 @@ private final class LogWindowController: NSWindowController, NSWindowDelegate {
         window.title = repository.url.lastPathComponent + " — " + logText("Log")
         window.minSize = NSSize(width: 1040, height: 640)
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: LogWindowContent(store: store).nativeFocusRoot())
+        window.contentView = NSHostingView(rootView: LogWindowContent(store: store).nativeFocusRoot().background(WindowFrameStyle()))
+        WindowFrameAppearance.clip(window)
         super.init(window: window)
         window.delegate = self; window.center()
         opening = Task { [weak self] in
@@ -139,7 +140,7 @@ private struct LogWindowContent: View {
                         HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch,
                             isLoading: store.loadingHistory, hasMore: store.hasMore,
                             onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy,
-                            onAction: historyAction, onShowChanges: { if let path = store.selectedCommitPath { compare(path) } }, showsDetails: false, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), localUnpushedCommitHashes: store.localUnpushedCommitHashes, navigationGeneration: store.historyNavigationGeneration, onJump: jump, authorFilter: $store.historyAuthor)
+                            onAction: historyAction, onShowChanges: { if let path = store.selectedCommitPath { compare(path) } }, showsDetails: false, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), currentBranch: store.branches.first { $0.isCurrent && !$0.isRemote }, localUnpushedCommitHashes: store.localUnpushedCommitHashes, navigationGeneration: store.historyNavigationGeneration, onJump: jump, authorFilter: $store.historyAuthor)
                             .frame(minWidth: 520, minHeight: 270, idealHeight: 470)
                         VSplitView {
                             commitMetadata.frame(minWidth: 270, minHeight: 145, idealHeight: 230)
@@ -347,8 +348,8 @@ private struct LogWindowContent: View {
                 }
             }
             HStack {
-                Button(workflowText("Cancel")) { mutation = nil }.keyboardShortcut(.cancelAction)
-                Button(workflowText("Continue")) { perform(request) }.buttonStyle(RayGitDialogButtonStyle(prominent: true))
+                DialogButton(workflowText("Cancel"), role: .cancel) { mutation = nil }
+                DialogButton(workflowText("Continue"), prominent: true) { perform(request) }
                     .disabled(store.isBusy || ([.createBranch, .createTag].contains(request.action) && name.trimmingCharacters(in: .whitespaces).isEmpty))
             }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.padding(22).frame(width: 360)

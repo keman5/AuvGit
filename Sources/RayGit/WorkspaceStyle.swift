@@ -10,7 +10,7 @@ enum RayGitStyle {
     static let chrome = Color(nsColor: NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .controlBackgroundColor : NSColor(calibratedRed: 0.98, green: 0.985, blue: 0.995, alpha: 1)
     })
-    static let windowCornerRadius: CGFloat = 8
+    static let windowCornerRadius: CGFloat = 12
     static let toolbar = Color(nsColor: NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             ? NSColor(calibratedWhite: 0.16, alpha: 1)
@@ -28,6 +28,7 @@ extension HistoryGraphColorToken {
         case .blue: Color(red: 55 / 255, green: 138 / 255, blue: 221 / 255)
         case .cyan: Color(red: 29 / 255, green: 158 / 255, blue: 117 / 255)
         case .coral: Color(red: 216 / 255, green: 90 / 255, blue: 48 / 255)
+        case .orange: Color(red: 240 / 255, green: 140 / 255, blue: 46 / 255)
         case .purple: Color(red: 127 / 255, green: 119 / 255, blue: 221 / 255)
         case .amber: Color(red: 186 / 255, green: 117 / 255, blue: 23 / 255)
         case .pink: Color(red: 212 / 255, green: 83 / 255, blue: 126 / 255)

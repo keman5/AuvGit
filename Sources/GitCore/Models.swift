@@ -17,7 +17,9 @@ public struct GitBranch: Identifiable, Hashable, Sendable, Codable {
     public let name: String
     public let isCurrent: Bool
     public let isRemote: Bool
-    public init(name: String, isCurrent: Bool, isRemote: Bool) { self.name = name; self.isCurrent = isCurrent; self.isRemote = isRemote }
+    public let upstream: String?
+    public let worktreePath: String?
+    public init(name: String, isCurrent: Bool, isRemote: Bool, upstream: String? = nil, worktreePath: String? = nil) { self.name = name; self.isCurrent = isCurrent; self.isRemote = isRemote; self.upstream = upstream; self.worktreePath = worktreePath }
 }
 public struct GitWorktree: Equatable, Sendable {
     public let path: String

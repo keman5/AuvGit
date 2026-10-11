@@ -86,4 +86,65 @@ final class GitInteractionTests: XCTestCase {
         try await repo.dropStash(ref: ref)
         let stashes = try await repo.stashes(); XCTAssertTrue(stashes.isEmpty)
     }
+    func testForceDeleteRequiresFreshBranchTipAndRejectsCurrentBranch() async throws {
+        let (url, repo) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try write("base", "base", at: url); try await repo.stage(paths: ["base"]); try await repo.commit(message: "base")
+        try await repo.createBranch(name: "website/app-store")
+        try write("topic", "topic", at: url); try await repo.stage(paths: ["topic"]); try await repo.commit(message: "topic")
+        let hash = try await repo.workflowRevision("HEAD")
+        await rejected { try await repo.deleteBranch(name: "website/app-store", force: true) }
+        try await repo.checkout(branch: "main")
+        do { try await repo.deleteBranch(name: "website/app-store"); XCTFail("Unmerged deletion accepted") }
+        catch let error as BranchDeletionNeedsForce { XCTAssertEqual(error.name, "website/app-store"); XCTAssertEqual(error.hash, hash) }
+        await rejected { try await repo.deleteBranch(name: "website/app-store", force: true, expectedHash: "stale") }
+        try await repo.deleteBranch(name: "website/app-store", force: true, expectedHash: hash)
+        let branches = try await repo.branches()
+        XCTAssertFalse(branches.contains { $0.name == "website/app-store" })
+    }
+    func testRemoteCreationTracksWithAutoSetupDisabledAndDeletionTargetsSelectedRemote() async throws {
+        let (url, repo) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let bare = url.appendingPathComponent("remote.git")
+        _ = try await GitProcess.run(at: url, arguments: ["init", "--bare", bare.path])
+        try write("base", "base", at: url); try await repo.stage(paths: ["base"]); try await repo.commit(message: "base")
+        _ = try await repo.workflowRead(["remote", "add", "team", bare.path])
+        _ = try await repo.workflowRead(["push", "team", "HEAD:refs/heads/website/app-store"])
+        _ = try await repo.workflowRead(["fetch", "team"])
+        _ = try await repo.workflowRead(["config", "branch.autoSetupMerge", "false"])
+        try await repo.createBranch(name: "local-site", startPoint: "refs/remotes/team/website/app-store")
+        var branches = try await repo.branches()
+        XCTAssertEqual(branches.first { $0.name == "local-site" }?.upstream, "team/website/app-store")
+        let current = try await repo.currentBranch(); XCTAssertEqual(current, "main")
+        try await repo.setUpstream(branch: "local-site", remoteBranch: nil)
+        branches = try await repo.branches(); XCTAssertNil(branches.first { $0.name == "local-site" }?.upstream)
+        try await repo.deleteRemoteBranch(reference: "refs/remotes/team/website/app-store")
+        let advertised = try await repo.workflowRead(["ls-remote", "--heads", "team"])
+        XCTAssertTrue(advertised.isEmpty)
+        branches = try await repo.branches()
+        XCTAssertTrue(branches.contains { $0.name == "local-site" })
+        XCTAssertFalse(branches.contains { $0.name == "team/website/app-store" })
+    }
+    func testRemoteDeletionRefusesNewServerCommitsAndUsesCustomFetchMapping() async throws {
+        let (url, repo) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let bare = url.appendingPathComponent("remote.git")
+        _ = try await GitProcess.run(at: url, arguments: ["init", "--bare", bare.path])
+        try write("base", "base", at: url); try await repo.stage(paths: ["base"]); try await repo.commit(message: "base")
+        _ = try await repo.workflowRead(["remote", "add", "team", bare.path])
+        _ = try await repo.workflowRead(["config", "remote.team.fetch", "+refs/heads/*:refs/remotes/custom/*"])
+        _ = try await repo.workflowRead(["push", "team", "HEAD:refs/heads/topic"])
+        _ = try await repo.workflowRead(["fetch", "team"])
+        let target = try await repo.remoteBranchDestination("refs/remotes/custom/topic")
+        XCTAssertEqual(target.remote, "team"); XCTAssertEqual(target.branch, "refs/heads/topic")
+        let original = try await repo.workflowRevision("HEAD")
+        try write("new", "base", at: url); try await repo.stage(paths: ["base"]); try await repo.commit(message: "new")
+        let newHash = try await repo.workflowRevision("HEAD")
+        _ = try await GitProcess.run(at: bare, arguments: ["fetch", url.path, "main:refs/heads/topic"])
+        let tracking = try await repo.workflowRevision("refs/remotes/custom/topic")
+        XCTAssertEqual(tracking, original)
+        await rejected { try await repo.deleteRemoteBranch(reference: "refs/remotes/custom/topic") }
+        let head = try await GitProcess.run(at: bare, arguments: ["rev-parse", "refs/heads/topic"]).text.trimmingCharacters(in: .newlines)
+        XCTAssertEqual(head, newHash)
+    }
 }

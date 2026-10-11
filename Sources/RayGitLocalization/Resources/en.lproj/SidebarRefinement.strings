@@ -20,3 +20,9 @@
 "Project is unavailable" = "Project is unavailable";
 "Remove missing project message" = "This project folder or its Git metadata no longer exists. Remove it from the project list?\n\n%@\n\nOnly the list entry will be removed.";
 "Remove from project list" = "Remove from project list";
+
+"Tracking %@" = "Tracking %@";
+"Delete Remote Branch…" = "Delete Remote Branch…";
+"Delete Remote Branch Message" = "Delete remote branch %@? This removes the branch on the server for everyone. Local branches are kept.";
+"Force Delete Branch…" = "Force Delete Branch…";
+"Force Delete Branch Message" = "Branch %@ has unmerged commits. Force delete it? Commits reachable only from this branch may be lost.";

@@ -6,6 +6,7 @@ final class ComparisonActionRail: NSView {
         let text: NSTextView
         let range: NSRange
         let title: String
+        var deletesContent = false
         let action: () -> Void
     }
     weak var scroll: NSScrollView?
@@ -18,16 +19,18 @@ final class ComparisonActionRail: NSView {
         entries = value
         buttons.forEach { $0.removeFromSuperview() }
         buttons = value.enumerated().map { index, entry in
-            let button = NSButton(title: pointsRight ? "→" : "←", target: self, action: #selector(accept(_:)))
+            let button = NSButton(title: entry.deletesContent ? "" : pointsRight ? "→" : "←", target: self, action: #selector(accept(_:)))
+            if entry.deletesContent { button.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil) }
             button.tag = index
             button.isBordered = false
             button.font = .systemFont(ofSize: 13, weight: .semibold)
-            button.contentTintColor = color
+            let tint = entry.deletesContent ? NSColor.systemRed : color
+            button.contentTintColor = tint
             button.wantsLayer = true
             button.layer?.cornerRadius = 5
             button.layer?.borderWidth = 1
-            button.layer?.borderColor = color.withAlphaComponent(0.25).cgColor
-            button.layer?.backgroundColor = color.withAlphaComponent(0.09).cgColor
+            button.layer?.borderColor = tint.withAlphaComponent(0.25).cgColor
+            button.layer?.backgroundColor = tint.withAlphaComponent(0.09).cgColor
             button.toolTip = entry.title
             button.setAccessibilityLabel(entry.title)
             addSubview(button)
@@ -77,7 +80,7 @@ final class ComparisonActionRail: NSView {
         for entry in entries {
             guard let rect = documentRect(entry) else { continue }
             let edge = NSRect(x: pointsRight ? bounds.width - 2 : 0, y: rect.minY - (scroll?.contentView.bounds.minY ?? 0), width: 2, height: rect.height).intersection(bounds)
-            color.withAlphaComponent(0.85).setFill()
+            (entry.deletesContent ? NSColor.systemRed : color).withAlphaComponent(0.85).setFill()
             edge.fill()
         }
     }

@@ -8,8 +8,8 @@ final class DialogButtonWidthTests: XCTestCase {
     func testNativeDialogButtonsKeepMinimumWidthAndGrowForLongTitles() {
         _ = NSApplication.shared
         for prominent in [false, true] {
-            let short = NSHostingView(rootView: Button("OK") {}.buttonStyle(RayGitDialogButtonStyle(prominent: prominent)))
-            let long = NSHostingView(rootView: Button("Confirm this repository operation") {}.buttonStyle(RayGitDialogButtonStyle(prominent: prominent)))
+            let short = NSHostingView(rootView: DialogButton("OK", prominent: prominent) {})
+            let long = NSHostingView(rootView: DialogButton("Confirm this repository operation", prominent: prominent) {})
             XCTAssertGreaterThanOrEqual(short.fittingSize.width, 80)
             XCTAssertGreaterThan(long.fittingSize.width, short.fittingSize.width)
         }

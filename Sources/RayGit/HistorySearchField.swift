@@ -34,6 +34,7 @@ struct HistorySearchField: NSViewRepresentable {
         field.isEditable = true; field.isSelectable = true
         field.isBezeled = false; field.isBordered = false; field.drawsBackground = false
         field.focusRingType = .default
+        NativeFocusAppearance.rememberOriginalRing(for: field)
         field.font = .systemFont(ofSize: 13)
         field.textColor = .labelColor
         field.cell?.usesSingleLineMode = true

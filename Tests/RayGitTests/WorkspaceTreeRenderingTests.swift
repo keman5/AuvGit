@@ -85,6 +85,7 @@ final class WorkspaceTreeRenderingTests: XCTestCase {
         window.contentView = host
         for _ in 0..<5 { host.layoutSubtreeIfNeeded(); await Task.yield() }
         let table = try XCTUnwrap(findTable(host) as? WorkspaceTreeTable.TreeTable)
+        XCTAssertTrue(table.usesAlternatingRowBackgroundColors)
         let coordinator = try XCTUnwrap(table.coordinator)
         table.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
         XCTAssertEqual(model.selection, ["src/a"])

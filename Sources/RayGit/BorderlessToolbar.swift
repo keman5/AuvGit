@@ -83,6 +83,8 @@ struct BorderlessToolbarView<CommandContent: View>: View {
             Button { customizing = true } label: { Image(systemName: "slider.horizontal.3").frame(width: 32, height: 28).contentShape(Rectangle()) }.buttonStyle(ToolbarRowButtonStyle(height: 28, minimumWidth: 32)).help(shellToolbarText("customize"))
         }.padding(.horizontal, 10).frame(minHeight: 36).background(RayGitStyle.toolbar)
             .frame(height: 36)
+            .overlay(alignment: .top) { Rectangle().fill(RayGitStyle.border).frame(height: 0.5) }
+            .overlay(alignment: .bottom) { Rectangle().fill(RayGitStyle.border).frame(height: 0.5) }
             .contextMenu { Button(shellToolbarText("customize")) { customizing = true }; Toggle(shellToolbarText("iconAndText"), isOn: $model.showsText) }
             .rayGitSheet(isPresented: $customizing) { palette }
             .onAppear { model.setCommands(commands) }
@@ -109,7 +111,7 @@ struct BorderlessToolbarView<CommandContent: View>: View {
                 Button(shellToolbarText("space")) { model.insert("space") }
                 Button(shellToolbarText("flexibleSpace")) { model.insert("flexibleSpace") }
             }
-            HStack { Button(shellToolbarText("restoreDefaults")) { model.reset() }; Button(shellToolbarText("done")) { customizing = false }.keyboardShortcut(.defaultAction) }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
+            HStack { DialogButton(shellToolbarText("restoreDefaults")) { model.reset() }; DialogButton(shellToolbarText("done"), prominent: true, role: .cancel) { customizing = false } }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.padding(20).frame(width: 360)
     }
 }

@@ -24,11 +24,11 @@ struct MainWindow: View {
     @AppStorage("preferences.filterCase") private var preferenceFilterCase = "insensitive"
     @AppStorage(L10n.preferenceKey) private var languageCode = "system"
     @State private var namePrompt: NamePrompt?
-    @State private var promptValue = ""
     @FocusState private var commitFocused: Bool
     struct NamePrompt: Identifiable {
         let id = UUID()
         let title: String
+        let initial: String
         let action: (String) -> Void
     }
     @State private var showWorkspaceSearch = false
@@ -450,21 +450,19 @@ struct MainWindow: View {
                     ForEach(store.branches.filter(\.isRemote)) { branch in Text(branch.name).tag("refs/remotes/" + branch.name) }
                 }.labelsHidden()
                 HStack {
-                    Button(workflowText("Cancel")) { trackingBranch = nil; trackingRepository = nil }.keyboardShortcut(.cancelAction)
-                    Button(sidebarRefinementText("Set Tracking Branch…")) {
+                    DialogButton(workflowText("Cancel"), role: .cancel) { trackingBranch = nil; trackingRepository = nil }
+                    DialogButton(sidebarRefinementText("Set Tracking Branch…"), prominent: true) {
                         guard let branch = trackingBranch, let repository = trackingRepository, store.repository === repository else { trackingBranch = nil; trackingRepository = nil; return }
                         let upstream = selectedUpstream; trackingBranch = nil; trackingRepository = nil
                         store.operation(sidebarRefinementText("Set Tracking Branch…")) { try await $0.setUpstream(branch: branch, remoteBranch: upstream) }
-                    }.keyboardShortcut(.defaultAction).disabled(selectedUpstream.isEmpty || store.isBusy)
+                    }.disabled(selectedUpstream.isEmpty || store.isBusy)
                 }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
             }.padding(24).frame(width: 360)
         }
         .rayGitSheet(item: $namePrompt) { prompt in
-            VStack(alignment: .leading, spacing: 18) {
-                Text(prompt.title).font(.headline)
-                StableTextField(interactionText("Name"), text: $promptValue, onSubmit: { submitName(prompt) }).textFieldStyle(.roundedBorder)
-                HStack { Button(mainText("cancel")) { namePrompt = nil }; Button(mainText("continue")) { submitName(prompt) }.buttonStyle(RayGitDialogButtonStyle(prominent: true)).disabled(promptValue.trimmingCharacters(in: .whitespaces).isEmpty) }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
-            }.padding(20).frame(width: 360)
+            NamePromptSheet(prompt: prompt, onCancel: { namePrompt = nil }) { value in
+                namePrompt = nil; prompt.action(value)
+            }.id(prompt.id)
         }
         .rayGitSheet(isPresented: $showWorkspaceSearch) { WorkspaceSearchSheet(store: store) }
         .rayGitSheet(item: $store.workspaceCommitRequest) { request in
@@ -484,7 +482,7 @@ struct MainWindow: View {
         .rayGitSheet(isPresented: $showCreate) { CreateRepositorySheet(store: store, initialClone: createClone) }
         .rayGitSheet(isPresented: Binding(get: { blamePath != nil }, set: { if !$0 { blamePath = nil } })) {
             if let repository = store.repository, let path = blamePath {
-                VStack { StructuredHistoryView(repository: repository, blamePath: path, revision: "HEAD"); Button(workflowText("Close")) { blamePath = nil }.buttonStyle(RayGitDialogButtonStyle()).keyboardShortcut(.cancelAction) }.padding().frame(width: 1000, height: 700)
+                VStack { StructuredHistoryView(repository: repository, blamePath: path, revision: "HEAD"); DialogButton(workflowText("Close"), prominent: true, role: .cancel) { blamePath = nil }.buttonStyle(RayGitDialogButtonStyle()) }.padding().frame(width: 1000, height: 700)
             }
         }
         .rayGitSheet(item: $resetRequest) { HistoryResetSheet(store: store, request: $0) }
@@ -503,8 +501,8 @@ struct MainWindow: View {
                     }
                 }
                 HStack {
-                    Button(mainText("cancel")) { mergeAction = nil }
-                    Button(mainText("continue")) {
+                    DialogButton(mainText("cancel"), role: .cancel) { mergeAction = nil }
+                    DialogButton(mainText("continue"), prominent: true) {
                         guard store.repositoryURL == prompt.repositoryURL, !store.isBusy, prompt.commit.parents.indices.contains(mainlineParent - 1) else { mergeAction = nil; return }
                         let selected = mainlineParent
                         mergeAction = nil
@@ -512,7 +510,7 @@ struct MainWindow: View {
                             if prompt.action == .cherryPick { try await repository.cherryPick(hash: prompt.commit.hash, mainline: selected) }
                             else { try await repository.revert(hash: prompt.commit.hash, mainline: selected) }
                         }
-                    }.buttonStyle(RayGitDialogButtonStyle(prominent: true))
+                    }
                 }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
             }.padding(20).frame(width: 360)
         }
@@ -777,7 +775,7 @@ struct MainWindow: View {
                         .disabled(store.repository == nil || aiCommit.isLoading)
                     Divider()
                     Button("Signed-off-by", action: addSignoff)
-                    Menu {
+                    Section(refinementText("Recent commit messages")) {
                         if store.recentCommitMessages.isEmpty {
                             Text(refinementText("No recent commit messages"))
                         } else {
@@ -791,8 +789,6 @@ struct MainWindow: View {
                         Button(refinementText("Clear commit history"), role: .destructive) {
                             store.clearRecentCommitMessages()
                         }.disabled(store.recentCommitMessages.isEmpty)
-                    } label: {
-                        Label(refinementText("Recent commit messages"), systemImage: "clock.arrow.circlepath")
                     }.disabled(store.repository == nil)
                 } label: { Label(refinementText("More"), systemImage: "ellipsis").frame(minHeight: 24).contentShape(Rectangle()) }
                     .menuIndicator(.hidden).menuStyle(.borderlessButton).fixedSize()
@@ -832,7 +828,7 @@ extension MainWindow {
     private func historyPane(compact: Bool) -> some View {
         VStack(spacing: 0) {
             if compact { HStack { Label(interactionText("Log"), systemImage: "clock.arrow.circlepath").font(.system(size: 12, weight: .semibold)); HistorySearchControl(search: $store.historySearch, focusRequest: historySearchFocusRequest).frame(maxWidth: .infinity); HistoryDisplayMenu(showMergedCommits: Binding(get: { store.showMergedCommits }, set: { store.setShowMergedCommits($0) })); Button { if let repo = store.repository { LogPresenter.show(repository: repo) } } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(.plain).help(interactionText("Expand History")) }.padding(.horizontal, 12).frame(height: 36).rayGitChrome() }
-            HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch, isLoading: store.loadingHistory, hasMore: store.hasMore, onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy, onAction: historyAction, onShowChanges: { if let path = store.selectedCommitPath { compareCommitFile(path) } }, compact: compact, showsSearch: !compact, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), localUnpushedCommitHashes: store.localUnpushedCommitHashes, navigationGeneration: store.historyNavigationGeneration, onJump: jumpToCommit, firstParentGraph: store.followsCurrentBranch && !store.showMergedCommits, onFind: { historySearchFocusRequest = UUID() }, authorFilter: $store.historyAuthor)
+            HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch, isLoading: store.loadingHistory, hasMore: store.hasMore, onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy, onAction: historyAction, onShowChanges: { if let path = store.selectedCommitPath { compareCommitFile(path) } }, compact: compact, showsSearch: !compact, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), currentBranch: store.branches.first { $0.isCurrent && !$0.isRemote }, localUnpushedCommitHashes: store.localUnpushedCommitHashes, navigationGeneration: store.historyNavigationGeneration, onJump: jumpToCommit, firstParentGraph: store.followsCurrentBranch && !store.showMergedCommits, onFind: { historySearchFocusRequest = UUID() }, authorFilter: $store.historyAuthor)
                 .background(WorkspaceFileFocusRegion(focus: historyFocus).allowsHitTesting(false).accessibilityHidden(true))
         }
     }
@@ -912,10 +908,8 @@ extension MainWindow {
     }
     private func askName(_ title: String, initial: String = "", action: @escaping (String) -> Void) {
         let root = store.repositoryURL
-        promptValue = initial
-        namePrompt = NamePrompt(title: title) { value in guard store.repositoryURL == root, !store.isBusy else { return }; action(value) }
+        namePrompt = NamePrompt(title: title, initial: initial) { value in guard store.repositoryURL == root, !store.isBusy else { return }; action(value) }
     }
-    private func submitName(_ prompt: NamePrompt) { let value = promptValue.trimmingCharacters(in: .whitespaces); guard !value.isEmpty else { return }; namePrompt = nil; prompt.action(value) }
     private func compareCommitFile(_ path: String) {
         guard let repository = store.repository, let hash = store.selectedCommit else { return }
         ComparePresenter.show(title: "\(String(hash.prefix(8))) / \(path)", repository: repository, target: .commit(hash: hash, path: path))
@@ -1050,11 +1044,80 @@ extension MainWindow {
             selectedUpstream = store.branches.first(where: \.isRemote).map { "refs/remotes/" + $0.name } ?? ""
             trackingBranch = value
         case .rename: askName(interactionText("Rename Branch…"), initial: value) { name in store.operation(interactionText("Rename Branch…")) { try await $0.renameBranch(oldName: value, newName: name) } }
-        case .delete: confirm(interactionText("Delete Branch…"), interactionText("Delete Branch Message", value)) { store.operation(interactionText("Delete Branch…")) { try await $0.deleteBranch(name: value) } }
+        case .delete:
+            let repository = store.repository
+            confirm(interactionText("Delete Branch…"), interactionText("Delete Branch Message", value)) {
+                guard store.repository === repository else { return }
+                store.operation(interactionText("Delete Branch…"), onFailure: { error in
+                    guard let refusal = error as? BranchDeletionNeedsForce, store.repository === repository else { return }
+                    confirm(sidebarRefinementText("Force Delete Branch…"), sidebarRefinementText("Force Delete Branch Message", value)) {
+                        guard store.repository === repository else { return }
+                        store.operation(sidebarRefinementText("Force Delete Branch…")) {
+                            try await $0.deleteBranch(name: value, force: true, expectedHash: refusal.hash)
+                        }
+                    }
+                }) { try await $0.deleteBranch(name: value) }
+            }
+        case .deleteRemote:
+            let repository = store.repository
+            confirm(sidebarRefinementText("Delete Remote Branch…"), sidebarRefinementText("Delete Remote Branch Message", value)) {
+                guard let repository, store.repository === repository else { return }
+                executeRemoteBranchDeletion(repository, reference: value)
+            }
         case .stashShow: store.showStashHistory(ref: value)
         case .stashApply: confirm(mainText("applyTitle", value), mainText("applyMessage")) { store.operation("应用贮藏") { try await $0.applyStash(ref: value) } }
         case .stashDrop: confirm(interactionText("Drop Stash…"), interactionText("Drop Stash Message", value)) { store.operation(interactionText("Drop Stash…")) { try await $0.dropStash(ref: value) } }
         }
+    }
+    private func executeRemoteBranchDeletion(_ repository: GitRepository, reference: String, credential supplied: NetworkCredential? = nil, saveCredential: Bool = false) {
+        guard store.repository === repository, !store.isBusy else { return }
+        Task { @MainActor in
+            do {
+                let target = try await repository.remoteBranchDestination(reference)
+                let credential: NetworkCredential?
+                if let supplied { credential = supplied }
+                else { credential = await authentication.savedCredential(for: repository, operation: .push, remoteName: target.remote) }
+                guard store.repository === repository, !store.isBusy else { return }
+                store.operation(sidebarRefinementText("Delete Remote Branch…"), onFailure: { error in
+                    Task { @MainActor in
+                        guard store.repository === repository else { return }
+                        _ = await authentication.presentIfNeeded(error: error, repository: repository, operation: .push, remoteName: target.remote) { retry in
+                            executeRemoteBranchDeletion(repository, reference: reference, credential: retry.credential, saveCredential: retry.saveCredential)
+                        }
+                    }
+                }) { active in
+                    try await authentication.perform(with: credential) { try await active.deleteRemoteBranch(reference: reference, credential: credential) }
+                    if saveCredential, let credential { try await authentication.save(credential, for: active, operation: .push, remoteName: target.remote) }
+                }
+            } catch { if store.repository === repository { store.report(error) } }
+        }
+    }
+}
+
+private struct NamePromptSheet: View {
+    let prompt: MainWindow.NamePrompt
+    let onCancel: () -> Void
+    let onSubmit: (String) -> Void
+    @State private var value: String
+    init(prompt: MainWindow.NamePrompt, onCancel: @escaping () -> Void, onSubmit: @escaping (String) -> Void) {
+        self.prompt = prompt; self.onCancel = onCancel; self.onSubmit = onSubmit
+        _value = State(initialValue: prompt.initial)
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(prompt.title).font(.headline)
+            StableTextField(interactionText("Name"), text: $value, onSubmit: submit, initialFocus: true).textFieldStyle(.roundedBorder)
+            HStack {
+                KeyViewProxy(label: L10n.text("cancel", table: "Main"), keyEquivalent: "\u{1b}", minimumWidth: RayGitDialogButtonStyle.minimumWidth, action: onCancel)
+                KeyViewProxy(label: L10n.text("continue", table: "Main"), prominent: true, minimumWidth: RayGitDialogButtonStyle.minimumWidth, action: submit)
+                    .disabled(value.trimmingCharacters(in: .whitespaces).isEmpty)
+            }.frame(maxWidth: .infinity)
+        }.padding(20).frame(width: 360)
+    }
+    private func submit() {
+        let name = value.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        onSubmit(name)
     }
 }
 
@@ -1150,9 +1213,9 @@ final class WorkspaceSplitView: NSSplitView, NSSplitViewDelegate {
     }
     private func initializeDistribution() {
         guard subviews.count == 3, bounds.height >= fileMinimum + diffMinimum + footerMinimum + 2 * dividerThickness else { return }
-        distribute(fileHeight: 300, footerHeight: compact ? 160 : 180)
+        distribute(fileHeight: 340, footerHeight: compact ? 160 : 180)
         // Startup can pass through a smaller frame before the window reaches its final size.
-        initialized = subviews[0].frame.height >= 300
+        initialized = subviews[0].frame.height >= 340
     }
     private func distribute(fileHeight: CGFloat, footerHeight: CGFloat) {
         guard subviews.count == 3 else { return }

@@ -2,6 +2,32 @@ import XCTest
 @testable import GitCore
 
 final class GitRepositoryTests: XCTestCase {
+    func testBranchTrackingMetadataAndConfigOnlyRefresh() async throws {
+        let (url, repo) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        _ = try await GitProcess.run(at: url, arguments: ["config", "commit.gpgsign", "false"])
+        try "base\n".write(to: url.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+        try await repo.stage(paths: ["tracked.txt"]); try await repo.commit(message: "Initial")
+        _ = try await GitProcess.run(at: url, arguments: ["remote", "add", "origin", "/unused-local-remote"])
+        _ = try await GitProcess.run(at: url, arguments: ["update-ref", "refs/remotes/origin/main", "HEAD"])
+        _ = try await GitProcess.run(at: url, arguments: ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"])
+        let before = try await repo.changeState(files: [])
+        try await repo.setUpstream(branch: "main", remoteBranch: "refs/remotes/origin/main")
+        let tracked = try await repo.branches()
+        XCTAssertEqual(tracked.first { !$0.isRemote }?.upstream, "origin/main")
+        XCTAssertTrue(tracked.filter(\.isRemote).allSatisfy { $0.upstream == nil })
+        XCTAssertFalse(tracked.contains { $0.name == "origin/HEAD" })
+        let after = try await repo.changeState(files: [])
+        XCTAssertNotEqual(before.history, after.history)
+        try await repo.setUpstream(branch: "main", remoteBranch: nil)
+        let untracked = try await repo.branches()
+        XCTAssertNil(untracked.first { !$0.isRemote }?.upstream)
+        let cleared = try await repo.changeState(files: [])
+        XCTAssertEqual(before.history, cleared.history)
+        let old = Data(#"{"name":"main","isCurrent":true,"isRemote":false}"#.utf8)
+        XCTAssertNil(try JSONDecoder().decode(GitBranch.self, from: old).upstream)
+        XCTAssertEqual(try JSONDecoder().decode(GitBranch.self, from: JSONEncoder().encode(tracked[0])), tracked[0])
+    }
     private func fixture() async throws -> (URL, GitRepository) {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

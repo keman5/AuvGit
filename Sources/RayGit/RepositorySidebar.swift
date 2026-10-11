@@ -6,7 +6,7 @@ func sidebarRefinementText(_ key: String, _ arguments: CVarArg...) -> String {
     L10n.text(key, table: "SidebarRefinement", arguments: arguments)
 }
 
-enum SidebarAction { case openRepository, revealRepository, removeRecent, checkout, createLocalBranch, history, rename, delete, copy, stashShow, stashApply, stashDrop, merge, stopTracking, setTracking }
+enum SidebarAction { case openRepository, revealRepository, removeRecent, checkout, createLocalBranch, history, rename, delete, deleteRemote, copy, stashShow, stashApply, stashDrop, merge, stopTracking, setTracking }
 
 private struct RepositoryRowButtonStyle: ButtonStyle {
     var selected: Bool
@@ -32,17 +32,38 @@ struct RepositorySidebar: View {
     @State private var branchSelection: String?
     @State private var contextTarget: RepositoryContextTarget?
     @AppStorage("sidebar.localBranchesExpanded") private var localBranchesExpanded = true
-    @AppStorage("sidebar.remoteBranchesExpanded") private var remoteBranchesExpanded = true
     @AppStorage("sidebar.stashesExpanded") private var stashesExpanded = true
     var body: some View {
-        VSplitView {
-            VStack(spacing: 0) {
-                HStack { Text(interactionText("Repositories")).font(.system(size: 13, weight: .semibold)); Spacer(); Button { store.chooseRepository() } label: { Image(systemName: "plus").font(.system(size: 11, weight: .medium)).frame(width: 18, height: 18).contentShape(Rectangle()) }.buttonStyle(.plain).disabled(store.isBusy) }.padding(.horizontal, 16).frame(height: 32)
+        RepositorySidebarSplit(repositories: repositoryPane, branches: branchPane)
+        .controlSize(.small)
+        .background(RayGitStyle.sidebar)
+        .rayGitSheet(item: $contextTarget) { target in RepositoryContextEditor(store: store, target: target) }
+        .rayGitSheet(isPresented: Binding(get: { rebaseReference != nil }, set: { if !$0 { rebaseReference = nil } })) {
+            RebaseWorkflowView(store: store, onClose: { rebaseReference = nil }, initialBase: rebaseReference ?? "HEAD~1")
+                .frame(width: 1000, height: 700).padding(20)
+        }
+        .rayGitSheet(isPresented: Binding(get: { renameStash != nil }, set: { if !$0 { renameStash = nil } })) {
+            VStack(alignment: .leading, spacing: 18) {
+                Text(shortcutText("Rename Stash")).font(.headline)
+                TextField(workflowText("Stash message"), text: $stashName).textFieldStyle(.roundedBorder)
+                HStack {
+                    DialogButton(workflowText("Cancel"), role: .cancel) { renameStash = nil }
+                    DialogButton(shortcutText("Rename Stash"), prominent: true) {
+                        guard let reference = renameStash else { return }; let name = stashName; renameStash = nil
+                        store.operation(shortcutText("Rename Stash")) { _ = try await $0.renameStash(reference: reference, message: name) }
+                    }.disabled(stashName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
+            }.padding(24).frame(width: 360)
+        }
+    }
+    private var repositoryPane: some View {
+        VStack(spacing: 0) {
+                HStack { Text(interactionText("Repositories")).font(.system(size: 13, weight: .semibold)); Spacer(); Button { store.chooseRepository() } label: { Image(systemName: "plus").font(.system(size: 11, weight: .medium)).frame(width: 18, height: 18).contentShape(Rectangle()) }.buttonStyle(.plain).disabled(store.isBusy) }.padding(.horizontal, 10).frame(height: 32)
                 ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 2) {
                         ForEach(store.recentPaths, id: \.self) { path in repositoryRow(path) }
-                    }.padding(.horizontal, 12)
+                    }.padding(.horizontal, 6)
                 }.font(.system(size: 12))
                     .onChange(of: repositoryFocusRequest) { _, _ in
                         guard let path = store.highlightedRepositoryPath ?? store.recentPaths.first else { return }
@@ -57,37 +78,18 @@ struct RepositorySidebar: View {
                     }
                 }
             }.frame(minHeight: 130, idealHeight: 300)
-            VStack(spacing: 0) {
-                HStack { Text(interactionText("Branches")).font(.system(size: 13, weight: .semibold)); Spacer(); RayGitBadge(String(store.branches.count), tint: .secondary) }.padding(.horizontal, 16).frame(height: 42)
+    }
+    private var branchPane: some View {
+        VStack(spacing: 0) {
+                HStack { Text(interactionText("Branches")).font(.system(size: 13, weight: .semibold)); Spacer(); RayGitBadge(String(store.branches.count), tint: .secondary) }.padding(.horizontal, 10).frame(height: 32)
                 NativeBranchTable(branches: store.branches, stashes: store.stashes,
                     repositoryPath: store.repositoryURL?.path, repositoryIdentity: store.repository.map { ObjectIdentifier($0) }, currentBranch: store.branch, isBusy: store.isBusy,
-                    localExpanded: $localBranchesExpanded, remoteExpanded: $remoteBranchesExpanded,
-                    stashesExpanded: $stashesExpanded, selection: $branchSelection,
+                    localExpanded: $localBranchesExpanded, stashesExpanded: $stashesExpanded, selection: $branchSelection,
                     onAction: onAction, onRenameStash: prepareStashRename, onShortcut: handleShortcut)
                     .background { if let branchFocus { WorkspaceFileFocusRegion(focus: branchFocus).allowsHitTesting(false).accessibilityHidden(true) } }
             }.frame(minHeight: 170)
-        }
-        .controlSize(.small)
-        .background(RayGitStyle.sidebar)
-        .rayGitSheet(item: $contextTarget) { target in RepositoryContextEditor(store: store, target: target) }
-        .rayGitSheet(isPresented: Binding(get: { rebaseReference != nil }, set: { if !$0 { rebaseReference = nil } })) {
-            RebaseWorkflowView(store: store, onClose: { rebaseReference = nil }, initialBase: rebaseReference ?? "HEAD~1")
-                .frame(width: 1000, height: 700).padding(20)
-        }
-        .rayGitSheet(isPresented: Binding(get: { renameStash != nil }, set: { if !$0 { renameStash = nil } })) {
-            VStack(alignment: .leading, spacing: 18) {
-                Text(shortcutText("Rename Stash")).font(.headline)
-                TextField(workflowText("Stash message"), text: $stashName).textFieldStyle(.roundedBorder)
-                HStack {
-                    Button(workflowText("Cancel")) { renameStash = nil }.keyboardShortcut(.cancelAction)
-                    Button(shortcutText("Rename Stash")) {
-                        guard let reference = renameStash else { return }; let name = stashName; renameStash = nil
-                        store.operation(shortcutText("Rename Stash")) { _ = try await $0.renameStash(reference: reference, message: name) }
-                    }.disabled(stashName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).keyboardShortcut(.defaultAction)
-                }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
-            }.padding(24).frame(width: 360)
-        }
     }
+
     private func prepareStashRename(_ reference: String) {
         stashName = store.stashes.first { $0.ref == reference }?.subject ?? ""
         renameStash = reference
@@ -142,7 +144,7 @@ struct RepositorySidebar: View {
                         .padding(.horizontal, 5).padding(.vertical, 1)
                         .background((active ? Color.white : Color.secondary).opacity(0.14), in: RoundedRectangle(cornerRadius: 5))
                 }
-            }.padding(.horizontal, 10).frame(height: 26).frame(maxWidth: .infinity, alignment: .leading)
+            }.padding(.horizontal, 6).frame(height: 26).frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
         }.buttonStyle(RepositoryRowButtonStyle(selected: active, allowsSelection: store.canOpenRepository)).help(path).transaction { $0.animation = nil }
             .accessibilityAddTraits(active ? .isSelected : [])

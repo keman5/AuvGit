@@ -159,7 +159,7 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 10) { statuses; Spacer(minLength: 4); controls }
                 VStack(spacing: 8) { HStack { statuses; Spacer() }; HStack { controls; Spacer() } }
-            }.controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).padding(.horizontal, 10).padding(.vertical, 6).rayGitChrome()
+            }.controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).padding(.horizontal, 10).padding(.vertical, 3).rayGitChrome()
             Divider()
             if treeMode && statusFailure == nil { treeContent(treeVisiblePaths).disabled(preparing).background { if let fileFocus { WorkspaceFileFocusRegion(focus: fileFocus).allowsHitTesting(false).accessibilityHidden(true) } } }
             else {

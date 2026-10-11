@@ -36,7 +36,7 @@
 "Cherry-Pick Message" = "将 %@ 的修改应用到当前分支并创建新提交。需要干净工作区；遇到冲突会停止。";
 "Revert Commit" = "还原提交";
 "Revert Message" = "创建新提交以撤销 %@ 的修改。需要干净工作区；遇到冲突会停止。";
-"Delete Branch Message" = "删除分支 %@。未合并分支将由 Git 拒绝删除。";
+"Delete Branch Message" = "删除本地分支 %@？工作区文件和贮藏记录将保留。";
 "Drop Stash Message" = "将永久删除 %@ 贮藏记录。请先确认其中内容已不再需要。";
 
 "Discard Workspace Message" = "已跟踪文件的未暂存修改将恢复为索引版本。未跟踪文件将被永久删除，无法在应用内撤销。已暂存内容保持不变。";

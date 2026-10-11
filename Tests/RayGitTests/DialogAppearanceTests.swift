@@ -1,10 +1,320 @@
 import AppKit
 import SwiftUI
 import XCTest
+import GitCore
 @testable import RayGit
 
 @MainActor
 final class DialogAppearanceTests: XCTestCase {
+    func testLatePrimaryRegistrationOverridesRewrittenCancelShortcut() throws {
+        let window = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 180),
+                             styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let content = NSView(frame: window.contentLayoutRect)
+        window.contentView = content
+        let cancel = KeyViewProxy.Button(title: "Cancel", target: nil, action: nil)
+        cancel.declaredKeyEquivalent = "\u{1b}"
+        cancel.keyEquivalent = "\u{1b}"
+        content.addSubview(cancel)
+        DialogAppearance.configureDefaultButton(in: window)
+        XCTAssertTrue(window.defaultButtonCell === cancel.cell)
+        cancel.keyEquivalent = "\r" // AppKit can rewrite the early default's live shortcut.
+        let pull = KeyViewProxy.Button(title: "Pull", target: nil, action: nil)
+        pull.declaredKeyEquivalent = "\r"; pull.keyEquivalent = "\r"; pull.isPrimaryAction = true
+        content.addSubview(pull)
+        DialogAppearance.configureDefaultButton(in: window)
+        XCTAssertTrue(window.defaultButtonCell === pull.cell)
+        pull.isEnabled = false
+        DialogAppearance.configureDefaultButton(in: window)
+        XCTAssertTrue(window.defaultButtonCell === cancel.cell)
+        pull.isEnabled = true
+        DialogAppearance.configureDefaultButton(in: window)
+        XCTAssertTrue(window.defaultButtonCell === pull.cell)
+        var cancelled = false
+        cancel.activate = { cancelled = true }
+        let escape = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+            characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
+        XCTAssertTrue(cancel.performKeyEquivalent(with: escape))
+        XCTAssertTrue(cancelled)
+    }
+    func testPullDefaultActionIsPullWithoutTakingKeyboardFocus() throws {
+        try runApplicationFixture {
+            _ = NSApplication.shared
+            let policy = NSApp.activationPolicy()
+            NSApp.setActivationPolicy(.regular)
+            defer { NSApp.setActivationPolicy(policy) }
+            var executed: NetworkOperation?
+            var cancelled = false
+            let window = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: PullOperationConfirmation(hint: nil, cancel: { cancelled = true }, execute: { executed = $0 }).nativeFocusRoot())
+            defer { window.close() }
+            try await self.activateFixture(window)
+            try await Task.sleep(for: .milliseconds(150))
+            DialogAppearance.configureDefaultButton(in: window)
+            let cell = try XCTUnwrap(window.defaultButtonCell)
+            XCTAssertEqual(cell.keyEquivalent, "\r", "Pull must be the default, not Cancel or Fetch")
+            XCTAssertTrue(window.firstResponder === window)
+            XCTAssertFalse(NativeFocusAppearance.isVisible(in: window))
+            let button = try XCTUnwrap(cell.controlView as? NSButton)
+            XCTAssertEqual(button.title, networkText("pull"))
+            let tab = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                characters: "\t", charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: 48))
+            NSApp.sendEvent(tab)
+            XCTAssertTrue(NativeFocusAppearance.isVisible(in: window))
+            XCTAssertTrue(window.firstResponder is KeyViewProxy.Button)
+            let escape = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
+            XCTAssertTrue(window.performKeyEquivalent(with: escape))
+            XCTAssertTrue(cancelled)
+            window.makeFirstResponder(window)
+            let enter = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36))
+            XCTAssertTrue(window.performKeyEquivalent(with: enter))
+            try await Task.sleep(for: .milliseconds(50))
+            XCTAssertEqual(executed, .pull)
+        }
+    }
+    func testRemoteBranchNamePromptUsesClickableNativeSaveButton() throws {
+        try runApplicationFixture {
+            let app = NSApplication.shared, policy = NSApplication.shared.activationPolicy()
+            app.setActivationPolicy(.regular)
+            defer { app.setActivationPolicy(policy) }
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let repo = try await GitRepository.initialize(at: root)
+            for (key, value) in [("user.name", "Branch Fixture"), ("user.email", "fixture@example.invalid"), ("commit.gpgsign", "false")] {
+                _ = try await repo.workflowRead(["config", key, value])
+            }
+            _ = try await repo.workflowRead(["commit", "--allow-empty", "-m", "Base"])
+            let oid = try await repo.workflowRevision("HEAD")
+            _ = try await repo.workflowRead(["update-ref", "refs/remotes/origin/website/app-store", oid])
+            try "Unsaved workspace draft".write(to: root.appendingPathComponent("draft.txt"), atomically: true, encoding: .utf8)
+            let store = RepositoryStore(persistsSession: false)
+            defer { store.closeTransientSession() }
+            await store.open(root)
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 800), styleMask: [.titled], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            let host = NSHostingView(rootView: MainWindow(store: store, usesBorderlessToolbar: true).nativeFocusRoot())
+            window.contentView = host; window.center()
+            defer { if let sheet = window.attachedSheet { window.endSheet(sheet) }; window.close() }
+            try await self.activateFixture(window)
+            host.layoutSubtreeIfNeeded(); window.displayIfNeeded()
+            @MainActor func branchCoordinator(in view: NSView) -> NativeBranchTable.Coordinator? {
+                if let table = view as? NSTableView, let coordinator = table.delegate as? NativeBranchTable.Coordinator { return coordinator }
+                return view.subviews.lazy.compactMap { branchCoordinator(in: $0) }.first
+            }
+            let coordinator = try XCTUnwrap(branchCoordinator(in: host))
+            let row = try XCTUnwrap(coordinator.rows.firstIndex { $0.id == "remote:origin/website/app-store" })
+            let menu = try XCTUnwrap(coordinator.menu(row: row))
+            coordinator.performMenuAction(try XCTUnwrap(menu.items.first))
+            for _ in 0..<40 { try await Task.sleep(for: .milliseconds(10)) }
+            let sheet = try XCTUnwrap(window.attachedSheet)
+            let visible = DialogAppearance.visibleWindow(for: sheet)
+            let button = try XCTUnwrap(visible.defaultButtonCell?.controlView as? KeyViewProxy.Button)
+            XCTAssertTrue(button.isEnabled)
+            XCTAssertEqual(button.keyEquivalent, "\r")
+            XCTAssertGreaterThanOrEqual(button.frame.width, RayGitDialogButtonStyle.minimumWidth)
+            let content = try XCTUnwrap(visible.contentView)
+            let point = button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: content.superview)
+            XCTAssertTrue(content.hitTest(point) === button, "The visible Continue button must receive mouse hits")
+            let operationCount = store.operationLog.filter { $0.userInitiated }.count
+            button.performClick(nil)
+            for _ in 0..<300 where store.operationLog.filter({ $0.userInitiated }).count == operationCount || store.isBusy {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertGreaterThan(store.operationLog.filter { $0.userInitiated }.count, operationCount)
+            XCTAssertFalse(store.isBusy)
+            XCTAssertNil(store.error)
+            let created = try await repo.workflowRevision("refs/heads/website/app-store")
+            let current = try await repo.currentBranch()
+            XCTAssertEqual(created, oid); XCTAssertEqual(current, "main")
+            XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("draft.txt"), encoding: .utf8), "Unsaved workspace draft")
+        }
+    }
+    private final class PullSheetModel: ObservableObject {
+        @Published var presented = false
+        var operations: [NetworkOperation] = []
+        var cancellations = 0
+    }
+    private struct PullSheetFixture: View {
+        @ObservedObject var model: PullSheetModel
+        var body: some View {
+            Text("Parent").frame(width: 500, height: 400)
+                .rayGitSheet(isPresented: $model.presented) {
+                    PullOperationConfirmation(hint: nil, cancel: {
+                        model.cancellations += 1; model.presented = false
+                    }, execute: {
+                        model.operations.append($0); model.presented = false
+                    })
+                }
+        }
+    }
+    func testRealPullSheetFocusesPullAndCyclesButtonsOnEveryPresentation() throws {
+        try runApplicationFixture {
+            let app = NSApplication.shared, policy = NSApplication.shared.activationPolicy()
+            app.setActivationPolicy(.regular)
+            defer { app.setActivationPolicy(policy) }
+            let model = PullSheetModel()
+            let host = NSHostingView(rootView: PullSheetFixture(model: model))
+            let parent = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+            parent.isReleasedWhenClosed = false; parent.contentView = host
+            defer { if let sheet = parent.attachedSheet { parent.endSheet(sheet) }; parent.close() }
+            @MainActor func key(_ window: NSWindow, code: UInt16, characters: String, flags: NSEvent.ModifierFlags = []) -> NSEvent {
+                NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags,
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                    characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code)!
+            }
+            for presentation in 0..<3 {
+                try await self.activateFixture(parent)
+                model.presented = true
+                for _ in 0..<40 { try await Task.sleep(for: .milliseconds(10)) }
+                try await self.ensureApplicationActive()
+                let visible = DialogAppearance.visibleWindow(for: try XCTUnwrap(parent.attachedSheet))
+                let primary = try XCTUnwrap(visible.defaultButtonCell?.controlView as? KeyViewProxy.Button)
+                XCTAssertEqual(primary.title, networkText("pull"))
+                XCTAssertTrue(visible.isKeyWindow)
+                XCTAssertTrue(visible.firstResponder === primary, "Pull must have keyboard focus as soon as the sheet opens")
+                XCTAssertTrue(NativeFocusAppearance.isVisible(in: visible))
+                XCTAssertNotEqual(primary.focusRingType, .none)
+                for title in [networkText("fetch"), networkText("cancel"), networkText("pull")] {
+                    app.sendEvent(key(visible, code: 48, characters: "\t"))
+                    XCTAssertEqual((visible.firstResponder as? NSButton)?.title, title)
+                    XCTAssertNotEqual((visible.firstResponder as? NSButton)?.focusRingType, NSFocusRingType.none)
+                }
+                if presentation == 0 {
+                    app.sendEvent(key(visible, code: 48, characters: "\u{19}", flags: .shift))
+                    XCTAssertEqual((visible.firstResponder as? NSButton)?.title, networkText("cancel"))
+                    app.sendEvent(key(visible, code: 49, characters: " "))
+                } else if presentation == 1 {
+                    app.sendEvent(key(visible, code: 36, characters: "\r"))
+                } else {
+                    app.sendEvent(key(visible, code: 53, characters: "\u{1b}"))
+                }
+                for _ in 0..<40 { try await Task.sleep(for: .milliseconds(10)) }
+                XCTAssertFalse(model.presented)
+                XCTAssertNil(parent.attachedSheet)
+            }
+            XCTAssertEqual(model.operations, [.pull])
+            XCTAssertEqual(model.cancellations, 2)
+        }
+    }
+    func testDimmingSurvivesSheetAnimationAndParentRedraw() throws {
+        try runApplicationFixture {
+            let app = NSApplication.shared, policy = NSApplication.shared.activationPolicy()
+            app.setActivationPolicy(.regular)
+            defer { app.setActivationPolicy(policy) }
+            for borderless in [false, true] {
+                let model = SheetModel()
+                let host = NSHostingView(rootView: RealSheetFixture(model: model).background(Color.white))
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 434),
+                    styleMask: borderless ? [.borderless] : [.titled], backing: .buffered, defer: false)
+                window.isReleasedWhenClosed = false
+                window.contentView = borderless ? EightPointFrameView(content: host) : host
+                window.center()
+                defer { if let sheet = window.attachedSheet { window.endSheet(sheet) }; window.close() }
+                try await self.activateFixture(window)
+                @MainActor func luminance() throws -> CGFloat {
+                    let output = URL(fileURLWithPath: "/tmp/raygit-sheet-dimming-\(borderless ? "shell" : "native").png")
+                    let process = Process()
+                    process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                    let top = try XCTUnwrap(NSScreen.screens.first).frame.maxY
+                    process.arguments = ["-x", "-R", "\(Int(window.frame.minX + 20)),\(Int(top - window.frame.maxY + 60)),8,8", output.path]
+                    process.standardOutput = Pipe(); process.standardError = Pipe()
+                    try process.run(); process.waitUntilExit()
+                    XCTAssertEqual(process.terminationStatus, 0)
+                    let image = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: output)))
+                    let color = try XCTUnwrap(image.colorAt(x: image.pixelsWide / 2, y: image.pixelsHigh / 2)?.usingColorSpace(.deviceRGB))
+                    return (color.redComponent + color.greenComponent + color.blueComponent) / 3
+                }
+                let captures = ProcessInfo.processInfo.environment["RAYGIT_DIALOG_CAPTURE"] == "1"
+                let baseline = captures ? try luminance() : 0
+                model.presented = true
+                for delay in [100, 300, 700] {
+                    try await Task.sleep(for: .milliseconds(delay))
+                    window.contentView?.needsDisplay = true
+                    window.contentView?.layoutSubtreeIfNeeded(); window.displayIfNeeded()
+                    if captures {
+                        let value = try luminance()
+                        print("SHEET_DIMMING shell=\(borderless) elapsedStepMs=\(delay) baseline=\(baseline) value=\(value)")
+                        XCTAssertLessThan(value, baseline - (delay == 100 ? 0.02 : 0.12), "The native mask must remain visible after sheet animation and redraw")
+                    }
+                }
+                model.presented = false
+                try await Task.sleep(for: .milliseconds(400))
+                XCTAssertNil(window.attachedSheet)
+                if captures { XCTAssertEqual(try luminance(), baseline, accuracy: 0.03) }
+                model.presented = true
+                try await Task.sleep(for: .milliseconds(75))
+                model.presented = false
+                try await Task.sleep(for: .milliseconds(75))
+                model.presented = true
+                try await Task.sleep(for: .milliseconds(500))
+                let reopened = try XCTUnwrap(window.attachedSheet)
+                XCTAssertTrue(DialogAppearance.visibleWindow(for: reopened).isVisible)
+                if captures { XCTAssertLessThan(try luminance(), baseline - 0.12) }
+                model.presented = false
+                try await Task.sleep(for: .milliseconds(400))
+                XCTAssertNil(window.attachedSheet)
+                if captures { XCTAssertEqual(try luminance(), baseline, accuracy: 0.03) }
+            }
+        }
+    }
+    func testPresentationFocusSelectsInitialInputOnce() throws {
+        try runApplicationFixture { try await self.verifyInitialInputFocus() }
+    }
+
+    private func verifyInitialInputFocus() async throws {
+        let app = NSApplication.shared, policy = NSApplication.shared.activationPolicy()
+        app.setActivationPolicy(.regular)
+        defer { app.setActivationPolicy(policy) }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 180), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let first = NSTextField(frame: NSRect(x: 20, y: 100, width: 300, height: 24))
+        let next = NSTextField(frame: NSRect(x: 20, y: 60, width: 300, height: 24))
+        first.stringValue = "Prefilled branch"
+        window.contentView?.addSubview(first); window.contentView?.addSubview(next)
+        let scope = NativeFocusCoordinator(); scope.focusesOnPresentation = true
+        defer { scope.cancel(); window.close() }
+        scope.register(first, initial: true); scope.register(next); scope.attach(to: window)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertNil(first.currentEditor(), "An unshown dialog must wait until presentation")
+        try await activateFixture(window)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertTrue(first.currentEditor() === window.firstResponder)
+        XCTAssertEqual((first.currentEditor() as? NSTextView)?.selectedRange(), NSRange(location: 0, length: first.stringValue.utf16.count))
+        XCTAssertTrue(NativeFocusAppearance.isVisible(in: window))
+        next.selectText(nil)
+        scope.schedule()
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertTrue(next.currentEditor() === window.firstResponder, "Updating a dialog must retain the user's focus")
+    }
+
+    func testPresentationFocusUsesEnabledDefaultWhenThereIsNoInput() async throws {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 180), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let disabled = KeyViewProxy.Button(title: "Save", target: nil, action: nil)
+        disabled.keyEquivalent = "\r"; disabled.isEnabled = false
+        let cancel = KeyViewProxy.Button(title: "Cancel", target: nil, action: nil)
+        cancel.keyEquivalent = "\u{1b}"
+        window.contentView?.addSubview(disabled); window.contentView?.addSubview(cancel)
+        DialogAppearance.configureDefaultButton(in: window)
+        let scope = NativeFocusCoordinator(); scope.focusesOnPresentation = true
+        defer { scope.cancel(); window.close() }
+        scope.register(disabled); scope.register(cancel); scope.attach(to: window)
+        window.makeKeyAndOrderFront(nil)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertTrue(window.defaultButtonCell === cancel.cell)
+        XCTAssertTrue(window.firstResponder === cancel)
+        XCTAssertTrue(NativeFocusAppearance.isVisible(in: window))
+    }
+
     func testSheetUsesSharedRadiusWithoutSystemModalFrame() {
         let window = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 180),
                              styleMask: [.titled, .docModalWindow, .resizable], backing: .buffered, defer: false)
@@ -18,7 +328,7 @@ final class DialogAppearanceTests: XCTestCase {
         for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             XCTAssertNotEqual(window.standardWindowButton(button)?.isHidden, false)
         }
-        XCTAssertEqual(window.contentView?.superview?.layer?.cornerRadius, 8)
+        XCTAssertEqual(window.contentView?.superview?.layer?.cornerRadius, 12)
         XCTAssertEqual(window.contentView?.superview?.layer?.masksToBounds, true)
         XCTAssertFalse(window.isOpaque)
     }
@@ -29,7 +339,7 @@ final class DialogAppearanceTests: XCTestCase {
         window.isReleasedWhenClosed = false
         defer { window.close() }
         window.contentView = EightPointFrameView(content: NSView())
-        XCTAssertEqual(window.contentView?.superview?.layer?.cornerRadius, 8)
+        XCTAssertEqual(window.contentView?.superview?.layer?.cornerRadius, 12)
         XCTAssertEqual(window.contentView?.superview?.layer?.masksToBounds, true)
     }
     func testAlertDefaultSkipsDisabledActionsAndPrefersCancelToDestructive() {
@@ -109,10 +419,14 @@ final class DialogAppearanceTests: XCTestCase {
     }
 
     func testRealSwiftUISheetUsesSharedOuterSilhouetteAndNativeDismissal() throws {
+        try runApplicationFixture { try await self.verifyRealSheet() }
+    }
+
+    private func runApplicationFixture(_ body: @escaping @MainActor () async throws -> Void) throws {
         let app = NSApplication.shared
         var failure: Error?
         Task { @MainActor in
-            do { try await verifyRealSheet() } catch { failure = error }
+            do { try await body() } catch { failure = error }
             app.stop(nil)
             if let wake = NSEvent.otherEvent(with: .applicationDefined, location: .zero, modifierFlags: [],
                 timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: 0, context: nil, subtype: 0, data1: 0, data2: 0) {
@@ -126,8 +440,12 @@ final class DialogAppearanceTests: XCTestCase {
     }
 
     private func activateFixture(_ window: NSWindow) async throws {
-        let app = NSApplication.shared
         window.makeKeyAndOrderFront(nil)
+        try await ensureApplicationActive()
+    }
+
+    private func ensureApplicationActive() async throws {
+        let app = NSApplication.shared
         let deadline = ContinuousClock.now + .seconds(2)
         repeat {
             NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
@@ -135,7 +453,7 @@ final class DialogAppearanceTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(50))
         } while !app.isActive && ContinuousClock.now < deadline
         XCTAssertTrue(app.isActive, "Real-window keyboard/pixel gates require an active fixture host")
-        _ = try XCTUnwrap(app.isActive ? window : nil)
+        _ = try XCTUnwrap(app.isActive ? app : nil)
     }
 
     private func verifyRealSheet() async throws {
@@ -158,6 +476,7 @@ final class DialogAppearanceTests: XCTestCase {
             host.layoutSubtreeIfNeeded(); window.displayIfNeeded()
             try await Task.sleep(for: .milliseconds(10))
         }
+        try await ensureApplicationActive()
         let sheet = try XCTUnwrap(window.attachedSheet)
         XCTAssertTrue(sheet.sheetParent === window)
         XCTAssertTrue(sheet.canBecomeKey)
@@ -235,6 +554,7 @@ final class DialogAppearanceTests: XCTestCase {
         try await activateFixture(window)
         model.presented = true
         for _ in 0..<40 { try await Task.sleep(for: .milliseconds(10)) }
+        try await ensureApplicationActive()
         let reopenedAnchor = try XCTUnwrap(window.attachedSheet)
         let reopened = DialogAppearance.visibleWindow(for: reopenedAnchor)
         XCTAssertFalse(reopened === visible)
@@ -274,18 +594,7 @@ final class DialogAppearanceTests: XCTestCase {
     }
 
     func testLongAlertMessagesScrollWhileActionsStayVisibleAndKeyboardReachable() throws {
-        let app = NSApplication.shared
-        var failure: Error?
-        Task { @MainActor in
-            do { try await verifyLongAlerts() } catch { failure = error }
-            app.stop(nil)
-            if let wake = NSEvent.otherEvent(with: .applicationDefined, location: .zero, modifierFlags: [],
-                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: 0, context: nil, subtype: 0, data1: 0, data2: 0) {
-                app.postEvent(wake, atStart: false)
-            }
-        }
-        app.run()
-        if let failure { throw failure }
+        try runApplicationFixture { try await self.verifyLongAlerts() }
     }
 
     private func verifyLongAlerts() async throws {
@@ -305,6 +614,7 @@ final class DialogAppearanceTests: XCTestCase {
             model.lineCount = lines
             model.presented = true
             for _ in 0..<40 { try await Task.sleep(for: .milliseconds(10)) }
+            try await ensureApplicationActive()
             let anchor = try XCTUnwrap(window.attachedSheet)
             let visible = DialogAppearance.visibleWindow(for: anchor)
             let content = try XCTUnwrap(visible.contentView)
@@ -315,8 +625,10 @@ final class DialogAppearanceTests: XCTestCase {
             func keyViews(_ view: NSView) -> [NSView] {
                 (view.canBecomeKeyView ? [view] : []) + view.subviews.flatMap(keyViews)
             }
-            let actions = keyViews(content)
-            XCTAssertGreaterThanOrEqual(actions.count, 2)
+            // Selectable text participates in the key loop, but its scroll
+            // document can exceed the panel. Only action buttons must fit.
+            let actions = keyViews(content).compactMap { $0 as? NSButton }
+            XCTAssertEqual(actions.count, 2)
             for action in actions {
                 XCTAssertTrue(content.bounds.contains(action.convert(action.bounds, to: content)),
                               "Keyboard actions must remain inside the visible panel for \(lines) lines")

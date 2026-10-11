@@ -14,7 +14,7 @@ struct WorkspaceSearchSheet: View {
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 StableTextField(designWorkspaceText("Search files, commits, branches…"), text: $query, rounded: false, initialFocus: true)
-                Button(designWorkspaceText("Close")) { dismiss() }
+                DialogButton(designWorkspaceText("Close"), prominent: true, role: .cancel) { dismiss() }
             }.buttonStyle(RayGitDialogButtonStyle()).padding(16)
             Divider()
             List {

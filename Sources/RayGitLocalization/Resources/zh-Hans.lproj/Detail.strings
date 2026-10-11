@@ -14,7 +14,8 @@
 "history.searchPlaceholder" = "搜索提交说明（包含正文）";
 "history.searchAccessibility" = "搜索提交历史";
 "history.clearSearch" = "清除历史搜索";
-"history.graph" = "提交图";
+"history.graph" = "图谱";
+"history.graphLegend" = "橙色：未推送提交。蓝色：当前分支及其上游；灰色：其他分支。实线：当前分支已发布历史；圆头短虚线：本地支线或未推送提交；点线：仅远程历史。实心：本地提交；空心：仅远程提交；环内点：合并提交；外环：HEAD。";
 "history.message" = "提交说明";
 "history.author" = "作者";
 "history.date" = "日期";

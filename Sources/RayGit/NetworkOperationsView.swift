@@ -149,16 +149,16 @@ struct NetworkOperationsView: View {
             HStack(spacing: 10) {
                 if previewReady { Label(designText("Push preview is ready"), systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green) }
                 if task != nil {
-                    Button(networkText("cancel")) { task?.cancel() }.keyboardShortcut(.cancelAction)
+                    DialogButton(networkText("cancel"), role: .cancel) { task?.cancel() }
                 } else {
-                    Button(networkText("close")) { dismiss() }.keyboardShortcut(.cancelAction)
+                    DialogButton(networkText("close"), role: .cancel) { dismiss() }
                 }
                 if operation == .pushPreview && previewReady {
                     Button(networkText("preview")) { run(operation) }.disabled(task != nil || store.isBusy || store.repository == nil)
-                    Button(networkText("executePush")) { run(.push) }.buttonStyle(RayGitDialogButtonStyle(prominent: true)).disabled(task != nil || store.isBusy)
+                    DialogButton(networkText("executePush"), prominent: true) { run(.push) }.disabled(task != nil || store.isBusy)
                 } else {
-                    Button(networkText(operation == .pushPreview ? "preview" : "run")) { run(operation) }
-                        .buttonStyle(RayGitDialogButtonStyle(prominent: true)).disabled(task != nil || store.isBusy || store.repository == nil)
+                    DialogButton(networkText(operation == .pushPreview ? "preview" : "run"), prominent: true) { run(operation) }
+                        .disabled(task != nil || store.isBusy || store.repository == nil)
                 }
             }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity).padding(.horizontal, 24).padding(.vertical, 16)
         }.tint(.blue).background(Color(nsColor: .windowBackgroundColor)).frame(width: 800, height: 720)

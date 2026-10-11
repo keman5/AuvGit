@@ -23,12 +23,13 @@ public actor GitRepository {
         return result
     }
     public func branches() async throws -> [GitBranch] {
-        let output = try await run(["for-each-ref", "--format=%(HEAD)%00%(refname)%00%(symref)", "refs/heads", "refs/remotes"])
+        let output = try await run(["for-each-ref", "--format=%(HEAD)%00%(refname)%00%(symref)%00%(upstream:short)%00%(worktreepath)", "refs/heads", "refs/remotes"])
         return output.text.split(separator: "\n").compactMap { line in
             let parts = line.split(separator: "\0", omittingEmptySubsequences: false).map(String.init)
-            guard parts.count == 3, parts[2].isEmpty else { return nil }
+            guard parts.count == 5, parts[2].isEmpty else { return nil }
             let remote = parts[1].hasPrefix("refs/remotes/")
-            return GitBranch(name: String(parts[1].dropFirst(remote ? 13 : 11)), isCurrent: parts[0] == "*", isRemote: remote)
+            return GitBranch(name: String(parts[1].dropFirst(remote ? 13 : 11)), isCurrent: parts[0] == "*", isRemote: remote,
+                             upstream: remote || parts[3].isEmpty ? nil : parts[3], worktreePath: parts[4].isEmpty ? nil : parts[4])
         }
     }
     public func currentBranch() async throws -> String {
@@ -43,6 +44,15 @@ public actor GitRepository {
         let hash = upstream.text.trimmingCharacters(in: .newlines)
         let output = try await run(["rev-list", "--max-count=" + String(limit), hash + "..HEAD", "--"])
         return Set(output.text.split(separator: "\n").map(String.init))
+    }
+    /// Query publication independently of the displayed refs, filters and page
+    /// size. Remote-tracking refs reflect the most recent fetch or push.
+    public func unpublishedCommitHashes(in commits: [GitCommit]) async throws -> Set<String> {
+        guard !commits.isEmpty else { return [] }
+        let head = try await run(["rev-parse", "--verify", "HEAD"], allowedCodes: [0, 128])
+        let revisions = head.code == 0 ? ["HEAD"] : []
+        let output = try await run(["rev-list", "--branches"] + revisions + ["--not", "--remotes", "--"])
+        return Set(output.text.split(separator: "\n").map(String.init)).intersection(commits.map(\.hash))
     }
     public func worktrees() async throws -> [GitWorktree] {
         GitWorktree.parsePorcelain(try await run(["worktree", "list", "--porcelain", "-z"]).data)
@@ -202,12 +212,23 @@ public actor GitRepository {
         try await validateBranch(oldName); try await validateBranch(newName)
         _ = try await run(["branch", "-m", "--", oldName, newName])
     }
-    public func deleteBranch(name: String) async throws {
+    public func deleteBranch(name: String, force: Bool = false, expectedHash: String? = nil) async throws {
         try await validateBranch(name)
-        _ = try await run(["branch", "-d", "--", name])
+        let hash = try await validatedCommit("refs/heads/" + name)
+        if let expectedHash, hash != expectedHash { throw GitError("Branch changed since deletion was confirmed. Review it before deleting.") }
+        do { _ = try await run(["branch", force ? "-D" : "-d", "--", name]) }
+        catch let error as GitError {
+            if !force, error.message.contains("is not fully merged") { throw BranchDeletionNeedsForce(name: name, hash: hash) }
+            throw error
+        }
     }
     public func createBranch(name: String, startPoint: String) async throws {
         try await validateBranch(name)
+        if startPoint.hasPrefix("refs/remotes/") {
+            _ = try await validatedCommit(startPoint)
+            _ = try await run(["branch", "--track=direct", "--", name, startPoint])
+            return
+        }
         let commit = try await validatedCommit(startPoint)
         _ = try await run(["branch", "--", name, commit])
     }

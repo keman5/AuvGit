@@ -26,7 +26,8 @@ private final class CommitDetailWindowController: NSWindowController, NSWindowDe
         window.title = commit.shortHash + " — " + commit.subject
         window.minSize = NSSize(width: 700, height: 480)
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: CommitDetailView(commit: commit, repository: repository).nativeFocusRoot())
+        window.contentView = NSHostingView(rootView: CommitDetailView(commit: commit, repository: repository).nativeFocusRoot().background(WindowFrameStyle()))
+        WindowFrameAppearance.clip(window)
         super.init(window: window)
         window.delegate = self
         window.center()

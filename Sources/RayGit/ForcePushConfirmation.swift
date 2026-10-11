@@ -37,9 +37,9 @@ struct PullOperationConfirmation: View {
             Text(hint.map(networkPreflightMessage) ?? L10n.text("pullMessage", table: "Main"))
             HStack {
                 Spacer()
-                Button(L10n.text("cancel", table: "Network"), action: cancel).keyboardShortcut(.cancelAction)
-                Button(L10n.text("pull", table: "Network")) { execute(.pull) }.keyboardShortcut(.defaultAction).buttonStyle(RayGitDialogButtonStyle(prominent: true))
-                Button(L10n.text("fetch", table: "Network")) { execute(.fetch) }
+                DialogButton(L10n.text("cancel", table: "Network"), role: .cancel, action: cancel)
+                DialogButton(L10n.text("pull", table: "Network"), prominent: true) { execute(.pull) }
+                DialogButton(L10n.text("fetch", table: "Network")) { execute(.fetch) }
                 Spacer()
             }.buttonStyle(RayGitDialogButtonStyle())
         }.padding(24).frame(width: 360)
@@ -75,9 +75,8 @@ struct ForcePushConfirmation: View {
             Text(forcePushText("explanation")).foregroundStyle(.secondary)
             HStack {
                 Spacer()
-                Button(forcePushText("cancel"), action: cancel)
-                    .keyboardShortcut(.defaultAction)
-                Button(forcePushText("action"), role: .destructive, action: execute)
+                DialogButton(forcePushText("cancel"), prominent: true, role: .cancel, action: cancel)
+                DialogButton(forcePushText("action"), role: .destructive, action: execute)
                 Spacer()
             }.buttonStyle(RayGitDialogButtonStyle())
         }.padding(24).frame(width: 360).onExitCommand(perform: cancel)

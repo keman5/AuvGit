@@ -15,6 +15,7 @@
 "history.searchAccessibility" = "コミット履歴を検索";
 "history.clearSearch" = "履歴検索をクリア";
 "history.graph" = "グラフ";
+"history.graphLegend" = "オレンジ：未 push のコミット。青：現在のブランチとその上流、グレー：他のブランチ。実線：現在の公開済み履歴、丸端の短い破線：ローカルの支線または未 push、点線：リモートのみ。塗りつぶし：ローカル、中抜き：リモートのみ、内側に点のあるリング：マージ、外側のリング：HEAD。";
 "history.message" = "メッセージ";
 "history.author" = "作成者";
 "history.date" = "日時";

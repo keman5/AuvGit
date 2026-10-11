@@ -70,6 +70,7 @@ struct RayGitApp: App {
         }
         Settings {
             PreferencesWindow(store: store)
+                .background(WindowFrameStyle())
                 .nativeFocusRoot()
                 .environment(\.locale, L10n.locale)
         }
@@ -1223,13 +1224,13 @@ final class RepositoryStore: ObservableObject {
             guard historyVersion == version else { return }
             let page = Array(rows.prefix(requestedCount))
             let updatedCommits = reset ? page : commits + page.filter { row in !commits.contains(where: { $0.hash == row.hash }) }
-            let unpushed = followsCurrentBranch ? try await repository.localUnpushedCommitHashes(limit: max(1, updatedCommits.count)) : nil
+            let unpushed = try await repository.unpublishedCommitHashes(in: updatedCommits)
             guard historyVersion == version else { return }
             if commits != updatedCommits { commits = updatedCommits }
             historyLoadedCount = skip + page.count
             hasMore = rows.count > requestedCount
             if reset { historyRestoreDepth = nil }
-            if followsCurrentBranch { localUnpushedCommitHashes = unpushed }
+            localUnpushedCommitHashes = unpushed
             if reset, selectFirstHistoryCommit {
                 selectFirstHistoryCommit = false; selectedCommit = rows.first?.hash
                 await loadCommitFiles()

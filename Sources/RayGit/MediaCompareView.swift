@@ -190,7 +190,7 @@ struct ExternalComparisonButton: View {
         .rayGitSheet(isPresented: $settings) {
             VStack {
                 ExternalToolsPreferencesView()
-                HStack { Button(compareExtra("done")) { settings = false }.keyboardShortcut(.defaultAction) }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity).padding()
+                HStack { DialogButton(compareExtra("done"), prominent: true, role: .cancel) { settings = false } }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity).padding()
             }.frame(width: 600, height: 560)
         }
         .rayGitAlert(advancedText("external"), isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) { RayGitAlertButton("OK") { error = nil } } message: { Text(error ?? "") }

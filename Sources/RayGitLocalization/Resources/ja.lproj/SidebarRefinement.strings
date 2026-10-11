@@ -20,3 +20,9 @@
 "Project is unavailable" = "プロジェクトが見つかりません";
 "Remove missing project message" = "プロジェクトのフォルダまたは Git データが存在しません。プロジェクト一覧から削除しますか？\n\n%@\n\n一覧の項目だけが削除されます。";
 "Remove from project list" = "プロジェクト一覧から削除";
+
+"Tracking %@" = "追跡先 %@";
+"Delete Remote Branch…" = "リモートブランチを削除…";
+"Delete Remote Branch Message" = "リモートブランチ %@ を削除しますか？サーバー上のブランチが削除され、すべての共同作業者に影響します。ローカルブランチは保持されます。";
+"Force Delete Branch…" = "ブランチを強制削除…";
+"Force Delete Branch Message" = "ブランチ %@ に未マージのコミットがあります。強制削除しますか？このブランチだけが参照するコミットは失われる可能性があります。";

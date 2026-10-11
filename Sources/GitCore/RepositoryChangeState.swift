@@ -26,6 +26,8 @@ public extension GitRepository {
         async let refs = GitProcess.run(at: url, arguments: ["--no-optional-locks", "show-ref", "--head"], allowedCodes: [0, 1]).text
         async let head = GitProcess.run(at: url, arguments: ["--no-optional-locks", "symbolic-ref", "--quiet", "HEAD"], allowedCodes: [0, 1]).text
         async let index = workflowRead(["--no-optional-locks", "ls-files", "--stage", "-z"])
-        return try await RepositoryChangeState(history: head + refs, index: index, files: files, root: url)
+        async let tracking = GitProcess.run(at: url, arguments: ["--no-optional-locks", "config", "--local", "--null", "--get-regexp", "^branch\\..*\\.(remote|merge)$"], allowedCodes: [0, 1]).text
+        let trackingText = try await tracking
+        return try await RepositoryChangeState(history: head + refs + (trackingText.isEmpty ? "" : "\0" + trackingText), index: index, files: files, root: url)
     }
 }

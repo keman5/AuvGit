@@ -6,6 +6,132 @@ import GitCore
 
 @MainActor
 final class NativeCompactHistoryTableTests: XCTestCase {
+    func testRetinaNodeRenderingSeparatesCurrentOtherLocalRemoteAndMerge() throws {
+        func commit(_ hash: String, parents: [String] = [], refs: [String] = []) -> GitCommit {
+            GitCommit(hash: hash, parents: parents, author: "Test", date: .distantPast,
+                subject: hash, body: "", refs: refs)
+        }
+        let commits = [
+            commit("incoming-current", parents: ["merge"], refs: ["origin/main"]),
+            commit("incoming-other", parents: ["base"], refs: ["origin/review"]),
+            commit("merge", parents: ["local", "side"], refs: ["HEAD -> main"]),
+            commit("local", parents: ["base"]),
+            commit("side", parents: ["base"], refs: ["feature/login"]),
+            commit("base", refs: ["tag: v1.0"])
+        ]
+        let graph = CommitGraph(commits: commits)
+        let styles = HistoryGraphStylePlan(commits: commits, remoteBranchNames: ["origin/main", "origin/review"],
+            localUnpushedHashes: ["merge", "local", "side"])
+        let view = NativeCompactHistoryTable(commits: commits, graph: graph, styles: styles,
+            selection: .constant(nil), navigationGeneration: nil, graphWidth: 48, nameWidth: 70, dateWidth: 65,
+            showAvatars: false, showNames: false, showRemoteLabels: true, showTagLabels: true,
+            isBusy: false, hasMore: false, isLoading: false, onLoadMore: {}, onAction: { _, _ in })
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 1300, pixelsHigh: 264,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+            let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: bitmap))
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: context.cgContext, flipped: true)
+            context.cgContext.scaleBy(x: 2, y: -2)
+            context.cgContext.translateBy(x: 0, y: -132)
+            let effectiveAppearance = try XCTUnwrap(NSAppearance(named: appearance))
+            effectiveAppearance.performAsCurrentDrawingAppearance {
+                NSColor.textBackgroundColor.setFill()
+                NSRect(x: 0, y: 0, width: 650, height: 132).fill()
+                for index in commits.indices {
+                    context.cgContext.saveGState()
+                    context.cgContext.translateBy(x: 0, y: CGFloat(index) * 22)
+                    let cell = CompactHistoryCell(frame: NSRect(x: 0, y: 0, width: 650, height: 22))
+                    cell.configure(parent: view, index: index)
+                    cell.draw(cell.bounds)
+                    context.cgContext.restoreGState()
+                }
+            }
+            NSGraphicsContext.restoreGraphicsState()
+            for index in 0..<5 {
+                let row = graph.rows[index]
+                let x = Int((12 + HistoryColumnLayout.laneSpacing / 2 + CGFloat(row.nodeLane) * HistoryColumnLayout.laneSpacing) * 2)
+                let y = index * 44 + 22
+                let center = try XCTUnwrap(bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+                let background = try XCTUnwrap(bitmap.colorAt(x: 5, y: y)?.usingColorSpace(.deviceRGB))
+                if index < 2 {
+                    XCTAssertEqual(center.redComponent, background.redComponent, accuracy: 0.02, "Remote-only nodes must remain hollow")
+                } else {
+                    let contrast = max(abs(center.redComponent - background.redComponent),
+                        abs(center.greenComponent - background.greenComponent), abs(center.blueComponent - background.blueComponent))
+                    XCTAssertGreaterThan(contrast, 0.2, "Local nodes and merge inner dots must stay visible")
+                }
+                if index == 2 {
+                    let gap = try XCTUnwrap(bitmap.colorAt(x: x + 4, y: y)?.usingColorSpace(.deviceRGB))
+                    XCTAssertEqual(gap.redComponent, background.redComponent, accuracy: 0.1, "The merge dot must be separated from its ring")
+                }
+            }
+            if let preview = ProcessInfo.processInfo.environment["RAYGIT_GRAPH_PREVIEW"] {
+                let data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                try data.write(to: URL(fileURLWithPath: preview + (appearance == .aqua ? "-light.png" : "-dark.png")))
+            }
+        }
+    }
+
+    func testRetinaGraphDrawsRoundedReferenceDashesAndBecomesSolidAfterPush() throws {
+        let commits = ["head", "base", "root"].enumerated().map { index, hash in
+            GitCommit(hash: hash, parents: index < 2 ? [index == 0 ? "base" : "root"] : [],
+                author: "Test", date: .distantPast, subject: hash, body: "", refs: index == 0 ? ["HEAD -> main"] : [])
+        }
+        var samples: [[Bool]] = []
+        for unpushed: Set<String> in [["head", "base"], []] {
+            let view = NativeCompactHistoryTable(commits: commits, graph: CommitGraph(commits: commits),
+                styles: HistoryGraphStylePlan(commits: commits, remoteBranchNames: [], localUnpushedHashes: unpushed),
+                selection: .constant(nil), navigationGeneration: nil, graphWidth: 24, nameWidth: 70, dateWidth: 65,
+                showAvatars: false, showNames: false, showRemoteLabels: false, showTagLabels: false,
+                isBusy: false, hasMore: false, isLoading: false, onLoadMore: {}, onAction: { _, _ in })
+            let cell = CompactHistoryCell(frame: NSRect(x: 0, y: 0, width: 650, height: 22))
+            cell.configure(parent: view, index: 1)
+            let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 1300, pixelsHigh: 44,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+            let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: bitmap))
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = context
+            context.cgContext.scaleBy(x: 2, y: 2)
+            cell.draw(cell.bounds)
+            NSGraphicsContext.restoreGraphicsState()
+            // Stop before the node's background-colored outer halo.
+            samples.append(try (0..<12).map { y in
+                let color = try XCTUnwrap(bitmap.colorAt(x: 36, y: y)?.usingColorSpace(.deviceRGB))
+                return abs(color.blueComponent - color.redComponent) > 0.2
+            })
+        }
+        let dashed = samples[0], solid = samples[1]
+        let strokes = dashed.indices.filter { dashed[$0] && ($0 == 0 || !dashed[$0 - 1]) }.count
+        XCTAssertTrue((1...2).contains(strokes), "The short visible segment must show distinct short strokes instead of dense ticks")
+        XCTAssertTrue(dashed.contains(false), "Dashes must retain visible gaps")
+        XCTAssertTrue(solid.allSatisfy { $0 }, "Pushing must render an uninterrupted solid line")
+    }
+
+    func testDoubleClickOpensLogForClickedCommitInsteadOfPreviousSelection() {
+        final class ClickedHistoryTable: NSTableView {
+            override var clickedRow: Int { 1 }
+        }
+        let commits = ["first", "second"].map {
+            GitCommit(hash: $0, parents: [], author: "Test", date: .distantPast, subject: $0, body: "", refs: [])
+        }
+        var performed: (HistoryAction, String)?
+        let view = NativeCompactHistoryTable(commits: commits, graph: CommitGraph(commits: commits),
+            styles: HistoryGraphStylePlan(commits: commits, remoteBranchNames: []),
+            selection: .constant("first"), navigationGeneration: nil, graphWidth: 24, nameWidth: 70, dateWidth: 65,
+            showAvatars: false, showNames: true, showRemoteLabels: true, showTagLabels: true,
+            isBusy: false, hasMore: false, isLoading: false, onLoadMore: {},
+            onAction: { performed = ($0, $1.hash) })
+        let coordinator = view.makeCoordinator()
+        let table = ClickedHistoryTable()
+        coordinator.table = table
+        coordinator.showCommit()
+        XCTAssertEqual(performed?.0, .viewLog)
+        XCTAssertEqual(performed?.1, "second")
+    }
+
     private func pane(_ hash: String, selection: Binding<String?> = .constant(nil), action: @escaping (HistoryAction, GitCommit) -> Void = { _, _ in }) -> NativeCompactHistoryTable {
         let commits = [GitCommit(hash: hash, parents: [], author: "Test", date: .distantPast, subject: "Commit", body: "", refs: [])]
         return NativeCompactHistoryTable(commits: commits, graph: CommitGraph(commits: commits),
@@ -59,10 +185,14 @@ final class NativeCompactHistoryTableTests: XCTestCase {
         XCTAssertEqual(selected, "second")
         let menu = NSMenu()
         coordinator.menuNeedsUpdate(menu)
-        let copy = menu.items.first { ($0.representedObject as? (HistoryAction, GitCommit))?.0 == .copyHash }
+        let copy = menu.items.first { ($0.representedObject as? (HistoryAction, GitCommit, UUID?))?.0 == .copyHash }
         XCTAssertNotNil(copy)
         if let copy { coordinator.performAction(copy) }
         XCTAssertEqual(performed, "second")
+        performed = nil
+        coordinator.parent = pane("third", selection: binding, action: { _, commit in performed = commit.hash })
+        if let copy { coordinator.performAction(copy) }
+        XCTAssertNil(performed, "A menu retained across repository changes cannot target the new repository")
     }
     func testBusyMenuDisablesMutationsAndKeepsCopyAvailable() {
         var view = pane("first")
@@ -81,7 +211,7 @@ final class NativeCompactHistoryTableTests: XCTestCase {
         let menu = NSMenu()
         coordinator.menuNeedsUpdate(menu)
         for item in menu.items {
-            guard let (action, _) = item.representedObject as? (HistoryAction, GitCommit) else { continue }
+            guard let (action, _, _) = item.representedObject as? (HistoryAction, GitCommit, UUID?) else { continue }
             XCTAssertEqual(item.isEnabled, !action.isMutation)
         }
     }

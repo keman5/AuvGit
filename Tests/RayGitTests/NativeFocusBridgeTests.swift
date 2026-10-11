@@ -38,6 +38,64 @@ final class NativeFocusBridgeTests: XCTestCase {
     }
     private final class SplitModel: ObservableObject { @Published var revision = 0 }
     private final class PresentationModel: ObservableObject { @Published var presented = false }
+    private struct SearchPopoverFixture: View {
+        @ObservedObject var presentation: PresentationModel
+        var body: some View {
+            Text("Parent").frame(width: 450, height: 300).nativeFocusRoot()
+                .popover(isPresented: $presentation.presented) {
+                    ComparisonSearchPopover(options: .constant(ComparisonSearchOptions()),
+                        replacement: .constant(""), matchCount: 0, onNavigate: { _ in })
+                }
+        }
+    }
+    func testRealSwiftUISearchPopoverWaitsForTab() throws {
+        let app = NSApplication.shared
+        var failure: Error?
+        Task { @MainActor in
+            do { try await verifyRealSearchPopover() } catch { failure = error }
+            app.stop(nil)
+            if let wake = NSEvent.otherEvent(with: .applicationDefined, location: .zero, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: 0, context: nil, subtype: 0, data1: 0, data2: 0) {
+                app.postEvent(wake, atStart: false)
+            }
+        }
+        app.run()
+        if let failure { throw failure }
+    }
+    private func verifyRealSearchPopover() async throws {
+        let app = NSApplication.shared, policy = NSApplication.shared.activationPolicy()
+        app.setActivationPolicy(.regular)
+        defer { app.setActivationPolicy(policy) }
+        let model = PresentationModel()
+        let host = NSHostingView(rootView: SearchPopoverFixture(presentation: model))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 450, height: 300),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        defer { model.presented = false; window.close() }
+        let activationDeadline = ContinuousClock.now + .seconds(2)
+        repeat {
+            NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+            app.activate(ignoringOtherApps: true)
+            try await Task.sleep(for: .milliseconds(50))
+        } while !app.isActive && ContinuousClock.now < activationDeadline
+        XCTAssertTrue(app.isActive, "The real popover requires an active GUI host")
+        model.presented = true
+        var query: NSTextField?
+        for _ in 0..<30 {
+            try await Task.sleep(for: .milliseconds(50))
+            query = app.windows.filter { $0 !== window && $0.isVisible }.compactMap(\.contentView)
+                .flatMap(fields).first { $0.accessibilityLabel() == comparisonSearchText("Find") }
+            if let query, let popup = query.window, popup.isKeyWindow { break }
+        }
+        let field = try XCTUnwrap(query), popup = try XCTUnwrap(field.window)
+        XCTAssertTrue(popup.isKeyWindow)
+        XCTAssertFalse(ownsFocus(field, popup))
+        XCTAssertFalse(NativeFocusAppearance.isVisible(in: popup))
+        NSApplication.shared.sendEvent(tabEvent(in: popup))
+        XCTAssertTrue(ownsFocus(field, popup))
+        XCTAssertTrue(NativeFocusAppearance.isVisible(in: popup))
+    }
     private struct CloneSheetFixture: View {
         @ObservedObject var presentation: PresentationModel
         let store: RepositoryStore
@@ -76,8 +134,11 @@ final class NativeFocusBridgeTests: XCTestCase {
         }
         let reachable = candidates(content)
         XCTAssertEqual(reachable.count, 2, "Only the two enabled actions should participate in the loop")
-        XCTAssertTrue(sheet.firstResponder === sheet)
-        NSApplication.shared.sendEvent(tabEvent(in: sheet))
+        XCTAssertTrue(sheet.firstResponder === sheet.defaultButtonCell?.controlView)
+        XCTAssertEqual((sheet.firstResponder as? NSButton)?.title, "Continue")
+        XCTAssertTrue(NativeFocusAppearance.isVisible(in: sheet))
+        sheet.sendEvent(tabEvent(in: sheet))
+        XCTAssertTrue(NativeFocusAppearance.isVisible(in: sheet))
         let first = try XCTUnwrap(sheet.firstResponder as? NSView)
         XCTAssertTrue(reachable.contains { $0 === first })
         sheet.selectNextKeyView(nil)
@@ -92,8 +153,27 @@ final class NativeFocusBridgeTests: XCTestCase {
             timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
             characters: backwards ? "\u{19}" : "\t", charactersIgnoringModifiers: backwards ? "\u{19}" : "\t", isARepeat: false, keyCode: 48)!
     }
-    func testRealCloneSheetFirstTabEntersLoopFromWindowResponder() throws {
-        _ = NSApplication.shared
+    func testRealCloneSheetFocusesEnabledDefaultThenTabVisitsInputs() throws {
+        try runApplicationFixture { try await self.verifyRealCloneSheet() }
+    }
+    private func runApplicationFixture(_ body: @escaping @MainActor () async throws -> Void) throws {
+        let app = NSApplication.shared
+        var failure: Error?
+        Task { @MainActor in
+            do { try await body() } catch { failure = error }
+            app.stop(nil)
+            if let wake = NSEvent.otherEvent(with: .applicationDefined, location: .zero, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: 0, context: nil, subtype: 0, data1: 0, data2: 0) {
+                app.postEvent(wake, atStart: false)
+            }
+        }
+        app.run()
+        if let failure { throw failure }
+    }
+    private func verifyRealCloneSheet() async throws {
+        let app = NSApplication.shared, policy = NSApplication.shared.activationPolicy()
+        app.setActivationPolicy(.regular)
+        defer { app.setActivationPolicy(policy) }
         let defaults = UserDefaults.standard
         let draft = defaults.object(forKey: RepositoryCreationDraft.preference)
         defaults.removeObject(forKey: RepositoryCreationDraft.preference)
@@ -111,17 +191,35 @@ final class NativeFocusBridgeTests: XCTestCase {
             window.close(); drain(host)
         }
         drain(host)
+        NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        app.activate(ignoringOtherApps: true)
+        try await Task.sleep(for: .milliseconds(200))
         model.presented = true; drain(host)
+        try await Task.sleep(for: .milliseconds(400))
+        let activationDeadline = ContinuousClock.now + .seconds(2)
+        repeat {
+            NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+            app.activate(ignoringOtherApps: true)
+            try await Task.sleep(for: .milliseconds(50))
+        } while !app.isActive && ContinuousClock.now < activationDeadline
+        XCTAssertTrue(app.isActive)
         let anchor = try XCTUnwrap(window.attachedSheet)
         let sheet = DialogAppearance.visibleWindow(for: anchor)
         let content = try XCTUnwrap(sheet.contentView)
         drain(content)
         let source = try XCTUnwrap(fields(content).first { $0.accessibilityLabel() == workflowText("Clone URL or local path") })
         XCTAssertTrue(sheet.canBecomeKey, "Styling must preserve the sheet's keyboard eligibility")
-        XCTAssertTrue(sheet.firstResponder === sheet, "Opening a sheet must leave controls unfocused")
-        XCTAssertEqual(source.focusRingType, .none)
-        sheet.sendEvent(tabEvent(in: sheet))
-        XCTAssertTrue(ownsFocus(source, sheet), "First real Tab must enter the loop when the sheet owns first responder")
+        XCTAssertTrue(sheet.isKeyWindow)
+        XCTAssertTrue(sheet.firstResponder === sheet.defaultButtonCell?.controlView)
+        XCTAssertEqual((sheet.firstResponder as? NSButton)?.title, workflowText("Cancel"), "The disabled Create action must not receive focus")
+        XCTAssertTrue(NativeFocusAppearance.isVisible(in: sheet))
+        for _ in 0..<8 where !ownsFocus(source, sheet) {
+            NSApplication.shared.sendEvent(tabEvent(in: sheet)); drain(content)
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(ownsFocus(source, sheet))
+        drain(content)
+        XCTAssertEqual(source.focusRingType, .default)
         sheet.sendEvent(tabEvent(in: sheet))
         let destination = try XCTUnwrap(fields(content).first { $0.accessibilityLabel() == workflowText("Destination folder") })
         XCTAssertTrue(ownsFocus(destination, sheet))
@@ -138,7 +236,7 @@ final class NativeFocusBridgeTests: XCTestCase {
             )
         }
     }
-    func testComparisonSearchWaitsForTabAfterAttachingToWindow() throws {
+    func testComparisonSearchFocusesQueryAfterAttachingToWindow() throws {
         _ = NSApplication.shared
         let host = NSHostingView(rootView: ComparisonSearchPopover(options: .constant(ComparisonSearchOptions()),
             replacement: .constant(""), matchCount: 0, onNavigate: { _ in }))
@@ -151,7 +249,7 @@ final class NativeFocusBridgeTests: XCTestCase {
         let query = try XCTUnwrap(fields(host).first { $0.accessibilityLabel() == comparisonSearchText("Find") })
         XCTAssertFalse(ownsFocus(query, window))
         window.sendEvent(tabEvent(in: window))
-        XCTAssertTrue(ownsFocus(query, window), "First Tab enters search after its presentation attaches")
+        XCTAssertTrue(ownsFocus(query, window))
     }
     func testComparisonPopoverDoesNotRebindParentScope() throws {
         _ = NSApplication.shared
@@ -290,8 +388,10 @@ final class NativeFocusBridgeTests: XCTestCase {
         defer { window.close() }; drain(host)
         func candidates(_ view: NSView) -> [NSView] { (view.canBecomeKeyView ? [view] : []) + view.subviews.flatMap(candidates) }
         let reachable = candidates(host)
-        XCTAssertEqual(reachable.filter { !($0 is NSTextField) && type(of: $0) != NSView.self && String(describing: type(of: $0)) == "KeyViewProxy" }.count, 2,
-            "The operation picker and enabled Close action retain SwiftUI's native key-view proxies")
+        XCTAssertEqual(reachable.filter { String(describing: type(of: $0)) == "KeyViewProxy" }.count, 1,
+            "The operation picker retains its SwiftUI key-view proxy")
+        XCTAssertTrue(reachable.contains { ($0 as? KeyViewProxy.Button)?.title == workflowText("Close") },
+            "The enabled Close action is reachable through its native button")
     }
     func testPreferencesFormRetainsNativeKeyboardStops() throws {
         _ = NSApplication.shared
@@ -456,16 +556,27 @@ final class NativeFocusBridgeTests: XCTestCase {
     }
 
     func testSheetPreventsParentRequestFromTakingFocus() throws {
+        try runApplicationFixture { try await self.verifySheetPreventsParentRequestFromTakingFocus() }
+    }
+    private func verifySheetPreventsParentRequestFromTakingFocus() async throws {
+        let app = NSApplication.shared, policy = NSApplication.shared.activationPolicy()
+        app.setActivationPolicy(.regular)
+        defer { app.setActivationPolicy(policy) }
         let parent = Model(), sheet = Model()
         let (window, host) = hosted(parent), (panel, panelHost) = hosted(sheet)
         defer { window.endSheet(panel); panel.close(); window.close() }
         panel.orderOut(nil)
-        window.beginSheet(panel)
+        window.beginSheet(panel, completionHandler: nil)
         drain(panelHost)
+        NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        app.activate(ignoringOtherApps: true)
+        try await Task.sleep(for: .milliseconds(200))
+        panel.makeKey()
+        XCTAssertTrue(panel.isKeyWindow)
         parent.usernameVisible = true; parent.request = UUID(); drain(host)
         let source = try XCTUnwrap(fields(panelHost).first { $0.accessibilityLabel() == "Source" })
         XCTAssertFalse(ownsFocus(source, panel))
-        panel.sendEvent(tabEvent(in: panel))
+        app.sendEvent(tabEvent(in: panel))
         XCTAssertTrue(ownsFocus(source, panel))
         XCTAssertFalse(ownsFocus(try XCTUnwrap(fields(host).first { $0.accessibilityLabel() == "Username" }), window))
     }
@@ -482,7 +593,7 @@ final class NativeFocusBridgeTests: XCTestCase {
         window.sendEvent(tabEvent(in: window))
         XCTAssertTrue(ownsFocus(username, window))
     }
-    func testClonePresentationWaitsForTabWithoutStealingFocusOnUpdate() throws {
+    func testClonePresentationFocusesSourceWithoutStealingFocusOnUpdate() throws {
         _ = NSApplication.shared
         let defaults = UserDefaults.standard
         let draft = defaults.object(forKey: RepositoryCreationDraft.preference)
@@ -496,7 +607,7 @@ final class NativeFocusBridgeTests: XCTestCase {
         defer { window.close() }
         drain(host)
         let source = try XCTUnwrap(fields(host).first { $0.placeholderString == workflowText("Clone URL or local path") || $0.accessibilityLabel() == workflowText("Clone URL or local path") })
-        XCTAssertFalse(ownsFocus(source, window), "Opening clone must leave its source unfocused")
+        XCTAssertFalse(ownsFocus(source, window), "Opening clone must wait for Tab")
         window.sendEvent(tabEvent(in: window))
         XCTAssertTrue(ownsFocus(source, window))
         XCTAssertTrue(window.autorecalculatesKeyViewLoop, "The presentation should enable native key-view recalculation")

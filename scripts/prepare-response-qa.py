@@ -26,6 +26,9 @@ git(seed, "commit", "-m", "Response fixture")
 git(seed, "branch", "feature/ui/icons")
 git(seed, "branch", "feature/ui/layout")
 git(seed, "branch", "release/preview")
+git(seed, "switch", "-c", "website/app-store")
+git(seed, "commit", "--allow-empty", "-m", "Remote website tip")
+git(seed, "switch", "main")
 paths = []
 for name in ["Empty", "Changed"] + [f"Project-{i:02}" for i in range(16)]:
     target = root / name
@@ -45,6 +48,14 @@ git(preview, "config", "user.name", "Preview Fixture")
 git(preview, "config", "user.email", "fixture@example.invalid")
 git(preview, "config", "commit.gpgsign", "false")
 git(preview, "commit", "--allow-empty", "-m", "HTML preview fixture")
+scroll_lines = [f"Row {index:03}: unchanged scroll fixture" for index in range(600)]
+(preview / "scroll.txt").write_text('\n'.join(scroll_lines) + '\n')
+git(preview, "add", "scroll.txt")
+git(preview, "commit", "-m", "Scroll comparison fixture")
+scroll_lines[40:40] = ["Added first line", "Added second line", "Added third line"]
+scroll_lines[303:303] = ["Added middle line"]
+scroll_lines.extend(["Added final line", "Added final second line"])
+(preview / "scroll.txt").write_text('\n'.join(scroll_lines) + '\n')
 longest = [12550, 8723, 6365, 2763, 2309, 1521, 1311, 1309, 935, 925]
 markup = '<span class="feature" data-index="123">Native preview</span>'
 lines = []
@@ -72,6 +83,7 @@ preferences = {
     "preferences.backgroundRefresh": True, "editor.wrapLines": True,
     "recentRepositories": paths, "repositorySession.v1": json.dumps(session).encode(),
     "repository.cloneParent.v1": str(root),
+    "commitMessageHistory.v1": {key: ["Polish scroll fixture\n\nFull recent message body", "Keep comparison aligned"] for key in {str(preview), str(preview.resolve())}},
 }
 preference_path = Path.home() / "Library/Preferences" / (bundle_id + ".plist")
 preference_path.write_bytes(plistlib.dumps(preferences))

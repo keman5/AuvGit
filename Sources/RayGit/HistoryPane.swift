@@ -48,6 +48,7 @@ struct HistoryPane: View {
     var showsSearch: Bool = true
     var showsDetails: Bool = true
     var remoteBranchNames: Set<String> = []
+    var currentBranch: GitBranch? = nil
     var localUnpushedCommitHashes: Set<String>? = nil
     var navigationGeneration: UUID? = nil
     var onJump: (String) -> Void = { _ in }
@@ -65,7 +66,7 @@ struct HistoryPane: View {
     @State private var pendingNavigationScroll = true
     @State private var jumpHash = ""
     @State private var authorWidth: CGFloat = 110
-    @State private var graphColumnWidth: CGFloat = 55
+    @State private var graphColumnWidth: CGFloat = HistoryColumn.graph.minimumWidth
     @State private var messageWidth: CGFloat = 360
     @State private var hashWidth: CGFloat = 75
     @State private var dateWidth: CGFloat = 150
@@ -75,7 +76,7 @@ struct HistoryPane: View {
         GeometryReader { geometry in
         let visible = commits
         let graph = graphCache.graph(commits: visible, firstParent: firstParentGraph)
-        let graphStyles = graphCache.styles(commits: visible, remoteBranchNames: remoteBranchNames, localUnpushedHashes: localUnpushedCommitHashes)
+        let graphStyles = graphCache.styles(commits: visible, remoteBranchNames: remoteBranchNames, localUnpushedHashes: localUnpushedCommitHashes, currentBranch: currentBranch)
         let showColumns = !compact && (showAvatars || showNames)
         let compactNameWidth = compact && showNames ? graphCache.compactNameWidth(commits: visible, showsAvatar: showAvatars) : 0
         let compactDateWidth = compact ? graphCache.compactDateWidth(commits: visible) : 0
@@ -102,6 +103,7 @@ struct HistoryPane: View {
             HStack(spacing: 8) {
                 columnHeader(historyText("history.graph"), column: .graph, width: $graphColumnWidth,
                              minimumWidth: HistoryColumnLayout.graphWidth(laneCount: graph.laneCount))
+                    .help(historyText("history.graphLegend"))
                 columnHeader(historyText("history.message"), column: .message, width: $messageWidth)
                 if showColumns {
                     if showNames { columnHeader(historyText("history.author"), column: .author, width: $authorWidth) }
@@ -137,16 +139,16 @@ struct HistoryPane: View {
                             baseMessageWidth: compact ? 220 : messageWidth
                         )
                         HStack(spacing: compact ? 4 : 8) {
-                            CommitGraphCell(row: row, styles: graphStyles, selected: selection == commit.hash)
+                            CommitGraphCell(row: row, rowIndex: index, styles: graphStyles, selected: selection == commit.hash)
                                 .frame(width: rowWidths.graph, height: HistoryColumnLayout.rowHeight(compact: compact)).clipped()
                             HStack(spacing: 5) {
                                 ForEach(visibleRefs(commit, compact: compact, styles: graphStyles), id: \.self) { ref in
                                     let tint = graphStyles.referenceStyle(for: ref, commitHash: commit.hash).color.color
-                                    Text(referenceLabel(ref)).font(.system(size: 10, weight: .medium))
-                                        .padding(.horizontal, 5).padding(.vertical, 2)
+                                    Text(graphStyles.referenceLabel(ref)).font(.system(size: 10, weight: .medium))
+                                        .padding(.horizontal, 4).padding(.vertical, 1)
                                         .foregroundStyle(tint)
                                         .background(selection == commit.hash ? Color.white.opacity(0.92) : tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 4))
-                                        .overlay { RoundedRectangle(cornerRadius: 4).stroke(tint.opacity(0.8), lineWidth: 0.8) }
+                                        .overlay { RoundedRectangle(cornerRadius: 4).stroke(tint.opacity(0.4), lineWidth: 0.5) }
                                         .lineLimit(1).frame(maxWidth: compact ? 90 : 120, alignment: .leading)
                                         .help(ref)
                                 }
@@ -262,10 +264,6 @@ struct HistoryPane: View {
         let values = commit.refs.filter { (showRemoteLabels || !styles.isRemoteReference($0)) && (showTagLabels || !styles.isTagReference($0)) }
         return compact ? Array(values.prefix(1)) : values
     }
-    private func referenceLabel(_ reference: String) -> String {
-        if reference.hasPrefix("tag: ") { return "tag " + String(reference.dropFirst(5)) }
-        return reference.replacingOccurrences(of: " -> ", with: " → ")
-    }
     private var searchControl: some View { HistorySearchControl(search: $search, focusRequest: searchFocusRequest) }
     private var filterControls: some View {
         HStack(spacing: 8) {
@@ -301,6 +299,7 @@ private final class HistoryGraphCache: ObservableObject {
     private var colorCommits: [GitCommit] = []
     private var colorRemoteBranchNames: Set<String> = []
     private var colorLocalUnpushedHashes: Set<String>?
+    private var colorCurrentBranch: GitBranch?
     private var cachedStyles: HistoryGraphStylePlan?
     private var measuredAuthors: [String] = []
     private var measuredNameWidth: CGFloat = 0
@@ -337,12 +336,13 @@ private final class HistoryGraphCache: ObservableObject {
         return graph
     }
 
-    func styles(commits: [GitCommit], remoteBranchNames: Set<String>, localUnpushedHashes: Set<String>?) -> HistoryGraphStylePlan {
-        if let cachedStyles, colorCommits == commits, colorRemoteBranchNames == remoteBranchNames, colorLocalUnpushedHashes == localUnpushedHashes { return cachedStyles }
-        let styles = HistoryGraphStylePlan(commits: commits, remoteBranchNames: remoteBranchNames, localUnpushedHashes: localUnpushedHashes)
+    func styles(commits: [GitCommit], remoteBranchNames: Set<String>, localUnpushedHashes: Set<String>?, currentBranch: GitBranch?) -> HistoryGraphStylePlan {
+        if let cachedStyles, colorCommits == commits, colorRemoteBranchNames == remoteBranchNames, colorLocalUnpushedHashes == localUnpushedHashes, colorCurrentBranch == currentBranch { return cachedStyles }
+        let styles = HistoryGraphStylePlan(commits: commits, remoteBranchNames: remoteBranchNames, localUnpushedHashes: localUnpushedHashes, currentBranch: currentBranch)
         colorCommits = commits
         colorRemoteBranchNames = remoteBranchNames
         colorLocalUnpushedHashes = localUnpushedHashes
+        colorCurrentBranch = currentBranch
         cachedStyles = styles
         return styles
     }
@@ -442,6 +442,7 @@ final class HistoryResizeHandleView: NSView {
 
 private struct CommitGraphCell: View {
     let row: CommitGraph.Row
+    let rowIndex: Int
     let styles: HistoryGraphStylePlan
     var selected = false
     var body: some View {
@@ -454,32 +455,36 @@ private struct CommitGraphCell: View {
                 let end = CGPoint(x: spacing / 2 + CGFloat(segment.toLane) * spacing, y: size.height * segment.toY)
                 path.move(to: start)
                 path.addCurve(to: end, control1: CGPoint(x: start.x, y: (start.y + end.y) / 2), control2: CGPoint(x: end.x, y: (start.y + end.y) / 2))
-                let style = styles.lineStyle(for: segment.lineageHash)
-                context.stroke(path, with: .color(halo), style: StrokeStyle(lineWidth: style.lineWidth + 4, lineCap: .round, lineJoin: .round))
-                context.stroke(path, with: .color(style.color.color), style: StrokeStyle(
+                let style = styles.lineStyle(for: segment)
+                context.stroke(path, with: .color(halo), style: StrokeStyle(lineWidth: style.lineWidth + 2, lineCap: .round, lineJoin: .round))
+                let tint = selected && style.color != .orange ? Color.white.opacity(style.color == .blue ? 1 : 0.65) : style.color.color
+                context.stroke(path, with: .color(tint), style: StrokeStyle(
                     lineWidth: style.lineWidth,
                     lineCap: .round,
                     lineJoin: .round,
                     dash: style.dashPattern.map { CGFloat($0) },
-                    dashPhase: CGFloat(style.variant * 2)
+                    dashPhase: CGFloat(style.dashPhase(rowIndex: rowIndex, fromY: segment.fromY, rowHeight: Double(size.height)))
                 ))
             }
             let node = styles.nodeStyle(for: row.hash)
-            let color = node.color.color
-            let point = CGRect(x: spacing / 2 - 5 + CGFloat(row.nodeLane) * spacing,
-                               y: size.height / 2 - 5, width: 10, height: 10)
-            context.fill(Path(ellipseIn: point.insetBy(dx: -2.5, dy: -2.5)), with: .color(halo))
+            let color = selected && node.color != .orange ? Color.white.opacity(node.color == .blue ? 1 : 0.65) : node.color.color
+            let diameter = HistoryColumnLayout.nodeDiameter(for: node.kind)
+            let point = CGRect(x: spacing / 2 - diameter / 2 + CGFloat(row.nodeLane) * spacing,
+                               y: size.height / 2 - diameter / 2, width: diameter, height: diameter)
+            context.fill(Path(ellipseIn: point.insetBy(dx: -2, dy: -2)), with: .color(halo))
             switch node.kind {
             case .ordinary:
                 context.fill(Path(ellipseIn: point), with: .color(color))
             case .merge:
-                context.stroke(Path(ellipseIn: point), with: .color(color), lineWidth: 2.5)
-                context.fill(Path(ellipseIn: point.insetBy(dx: 3, dy: 3)), with: .color(color))
+                context.fill(Path(ellipseIn: point), with: .color(color))
+                context.fill(Path(ellipseIn: point.insetBy(dx: 1.5, dy: 1.5)), with: .color(halo))
+                context.fill(Path(ellipseIn: point.insetBy(dx: 2.8, dy: 2.8)), with: .color(color))
             case .remoteOnly:
-                context.stroke(Path(ellipseIn: point), with: .color(color), lineWidth: 2.5)
+                context.stroke(Path(ellipseIn: point), with: .color(color), lineWidth: 1.2)
             }
             if node.isHead {
-                context.stroke(Path(ellipseIn: point.insetBy(dx: -3.5, dy: -3.5)), with: .color(color), lineWidth: 2)
+                let inset: CGFloat = node.kind == .merge ? -1 : -2
+                context.stroke(Path(ellipseIn: point.insetBy(dx: inset, dy: inset)), with: .color(color), lineWidth: 1.2)
             }
         }.accessibilityHidden(true)
     }

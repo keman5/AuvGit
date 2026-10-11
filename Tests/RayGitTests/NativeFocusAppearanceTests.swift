@@ -5,6 +5,47 @@ import XCTest
 
 @MainActor
 final class NativeFocusAppearanceTests: XCTestCase {
+    func testKeyboardRingReturnsAfterWindowReactivationWithoutMovingFocus() throws {
+        let window = window()
+        defer { window.close() }
+        let button = KeyViewProxy.Button(title: "Pull", target: nil, action: nil)
+        button.focusRingType = .exterior
+        window.contentView?.addSubview(button)
+        let appearance = NativeFocusAppearance.forWindow(window)
+        appearance.beginNavigation()
+        XCTAssertTrue(window.makeFirstResponder(button))
+        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
+        XCTAssertFalse(appearance.isVisible)
+        XCTAssertEqual(button.focusRingType, .none)
+        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
+        XCTAssertTrue(appearance.isVisible)
+        XCTAssertEqual(button.focusRingType, .exterior)
+        XCTAssertTrue(window.firstResponder === button)
+        let mouse = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: .zero,
+            modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+            context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        appearance.handle(mouse)
+        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
+        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
+        XCTAssertFalse(appearance.isVisible, "Mouse interaction must retain its normal hidden-ring mode")
+    }
+    func testMovingHiddenControlToPanelPreservesItsNavigationRing() {
+        let parent = window(), panel = window()
+        defer { parent.close(); panel.close() }
+        let button = KeyViewProxy.Button(title: "Pull", target: nil, action: nil)
+        button.focusRingType = .default
+        parent.contentView?.addSubview(button)
+        let parentAppearance = NativeFocusAppearance.forWindow(parent)
+        parentAppearance.apply()
+        XCTAssertEqual(button.focusRingType, .none)
+        panel.contentView?.addSubview(button)
+        let panelAppearance = NativeFocusAppearance.forWindow(panel)
+        XCTAssertEqual(button.focusRingType, .none)
+        panelAppearance.beginNavigation()
+        XCTAssertEqual(button.focusRingType, .default)
+        parentAppearance.apply()
+        XCTAssertEqual(button.focusRingType, .default, "The previous window must not hide a transferred control's ring")
+    }
     private final class CountingView: NSView {
         var subtreeReads = 0
         override var subviews: [NSView] {

@@ -1,7 +1,7 @@
 import GitCore
 
 enum HistoryGraphColorToken: CaseIterable, Equatable {
-    case blue, cyan, coral, purple, amber, pink, green, gray
+    case blue, cyan, coral, orange, purple, amber, pink, green, gray
 }
 
 enum HistoryGraphStrokeKind: Equatable {
@@ -17,9 +17,15 @@ struct HistoryGraphLineStyle: Equatable {
     var dashPattern: [Double] {
         switch stroke {
         case .solid: []
-        case .dashed: [7 + Double(variant % 3), 5]
-        case .dotted: [1, 4 + Double(variant % 3)]
+        case .dashed: [4, 3]
+        case .dotted: [0.5, 3]
         }
+    }
+
+    func dashPhase(rowIndex: Int, fromY: Double, rowHeight: Double) -> Double {
+        let period = dashPattern.reduce(0, +)
+        guard period > 0 else { return 0 }
+        return ((Double(rowIndex) + fromY) * rowHeight + Double(variant * 2)).truncatingRemainder(dividingBy: period)
     }
 }
 
@@ -47,11 +53,16 @@ struct HistoryGraphStylePlan {
     private let currentCommitHashes: Set<String>
     private let remoteBranchNames: Set<String>
     private let remoteNames: Set<String>
+    private let currentBranchName: String?
+    private let currentRemoteBranchName: String?
+    private let unpushedHashes: Set<String>
 
-    init(commits: [GitCommit], remoteBranchNames: Set<String>, localUnpushedHashes: Set<String>? = nil) {
-        _ = localUnpushedHashes
+    init(commits: [GitCommit], remoteBranchNames: Set<String>, localUnpushedHashes: Set<String>? = nil, currentBranch: GitBranch? = nil) {
+        let unpushed = localUnpushedHashes ?? []
+        unpushedHashes = unpushed
         self.remoteBranchNames = remoteBranchNames
-        remoteNames = Set(remoteBranchNames.compactMap { $0.split(separator: "/", maxSplits: 1).first.map(String.init) })
+        let remoteNames = Set(remoteBranchNames.compactMap { $0.split(separator: "/", maxSplits: 1).first.map(String.init) })
+        self.remoteNames = remoteNames
         commitsByHash = Dictionary(uniqueKeysWithValues: commits.map { ($0.hash, $0) })
         let parents = Dictionary(uniqueKeysWithValues: commits.map { ($0.hash, $0.parents) })
 
@@ -67,86 +78,96 @@ struct HistoryGraphStylePlan {
         currentCommitHashes = current
         local = Self.uniqueBranches(local)
         remote = Self.uniqueBranches(remote)
+        let currentReference = commits.flatMap(\.refs).first { $0.hasPrefix("HEAD -> ") }
+        let currentName = currentBranch?.name ?? currentReference.flatMap {
+            Self.branch($0, tip: "", remoteBranchNames: remoteBranchNames, remoteNames: remoteNames)?.name
+        }
+        currentBranchName = currentName
+        let upstream = currentBranch?.upstream ?? (currentBranch == nil ? remote.first(where: { Self.localCounterpart(of: $0.name) == currentName })?.name : nil)
+        currentRemoteBranchName = upstream
 
-        let localReachable = Self.reachable(from: local.map(\.tip), parents: parents)
+        let localReachable = Self.reachable(from: local.map(\.tip) + current.sorted(), parents: parents)
         let remoteReachable = Self.reachable(from: remote.map(\.tip), parents: parents)
-        remoteOnlyHashes = remoteReachable.subtracting(localReachable)
-
-        let longLived = local.filter { Self.isLongLived($0.name) }
-        let features = local.filter { !Self.isLongLived($0.name) }.sorted { $0.name < $1.name }
-        let longLivedReachable = Self.reachable(from: longLived.map(\.tip), parents: parents)
+        let remoteOnly = remoteReachable.subtracting(localReachable)
+        remoteOnlyHashes = remoteOnly
 
         var styles: [String: HistoryGraphLineStyle] = [:]
-        for branch in longLived {
-            styles[branch.name] = Self.longLivedStyle(branch.name)
-        }
-        let featurePalette: [HistoryGraphColorToken] = [.coral, .pink, .green, .gray]
-        for (index, branch) in features.enumerated() {
-            styles[branch.name] = HistoryGraphLineStyle(
-                color: featurePalette[index % featurePalette.count],
-                stroke: longLivedReachable.contains(branch.tip) ? .dashed : .dotted,
-                lineWidth: 2.5,
-                variant: index / featurePalette.count
-            )
-        }
-        let localByName = Dictionary(uniqueKeysWithValues: local.compactMap { branch -> (String, HistoryGraphLineStyle)? in
-            styles[branch.name].map { (branch.name, $0) }
-        })
-        let remoteOnly = remote.filter { branch in
-            localByName[Self.localCounterpart(of: branch.name)] == nil
-        }.sorted { $0.name < $1.name }
-        for branch in remote {
-            if let matching = localByName[Self.localCounterpart(of: branch.name)] {
-                styles[branch.name] = matching
-            }
-        }
-        for (index, branch) in remoteOnly.enumerated() {
-            styles[branch.name] = HistoryGraphLineStyle(color: .purple, stroke: .dotted, lineWidth: 2.5, variant: index)
+        for branch in local + remote {
+            let isCurrent = branch.remote ? branch.name == upstream : branch.name == currentName
+            styles[branch.name] = Self.style(current: isCurrent, unpushed: !branch.remote && unpushed.contains(branch.tip), remoteOnly: remoteOnly.contains(branch.tip))
         }
         branchStyles = styles
 
         var hashes: [String: HistoryGraphLineStyle] = [:]
-        for branch in longLived.sorted(by: {
-            let left = Self.longLivedPriority($0), right = Self.longLivedPriority($1)
-            return left == right ? $0.name < $1.name : left < right
-        }) {
-            Self.assignFirstParentLineage(from: branch.tip, style: styles[branch.name]!, parents: parents, to: &hashes)
+        // Current first-parent lanes win shared ancestry; merged side branches
+        // remain muted. A shared commit is local even if a remote also reaches it.
+        for tip in current.sorted() {
+            Self.assignFirstParentLineage(from: tip, style: Self.style(current: true, unpushed: false), parents: parents, to: &hashes)
         }
-        for branch in features {
-            Self.assignFirstParentLineage(from: branch.tip, style: styles[branch.name]!, parents: parents, to: &hashes)
+        let ordered = (local + remote).sorted {
+            let left = $0.remote ? $0.name == upstream : $0.name == currentName
+            let right = $1.remote ? $1.name == upstream : $1.name == currentName
+            if left != right { return left }
+            if $0.remote != $1.remote { return !$0.remote }
+            return $0.name < $1.name
         }
-        for branch in remote.sorted(by: { $0.name < $1.name }) {
+        for branch in ordered {
             Self.assignFirstParentLineage(from: branch.tip, style: styles[branch.name]!, parents: parents, to: &hashes)
         }
         for commit in commits where hashes[commit.hash] == nil {
-            let fallback = Self.fallbackStyle(for: commit.hash, merged: longLivedReachable.contains(commit.hash))
+            let fallback = Self.style(current: false, unpushed: false)
             Self.assignFirstParentLineage(from: commit.hash, style: fallback, parents: parents, to: &hashes)
         }
-        lineStyles = hashes
+        lineStyles = Dictionary(uniqueKeysWithValues: hashes.map { hash, style in
+            (hash, Self.style(current: style.color == .blue, unpushed: unpushed.contains(hash), remoteOnly: remoteOnly.contains(hash)))
+        })
     }
 
     func lineStyle(for hash: String) -> HistoryGraphLineStyle {
-        lineStyles[hash] ?? Self.fallbackStyle(for: hash, merged: false)
+        unpushedTint(lineStyles[hash] ?? Self.style(current: false, unpushed: false), hash: hash)
+    }
+
+    func lineStyle(for segment: CommitGraph.Segment) -> HistoryGraphLineStyle {
+        let source = lineStyles[segment.sourceHash] ?? Self.style(current: false, unpushed: false)
+        // First-parent edges belong to the child lane all the way to a shared
+        // ancestor. Merge edges use the incoming side branch's lane instead.
+        let lane = commitsByHash[segment.sourceHash]?.parents.first == segment.lineageHash
+            ? source : (lineStyles[segment.lineageHash] ?? Self.style(current: false, unpushed: false))
+        let style = lane.stroke == .dotted || lane.color == .gray
+            ? lane : Self.style(current: true, unpushed: unpushedHashes.contains(segment.sourceHash))
+        return unpushedTint(style, hash: segment.sourceHash)
+    }
+
+    private func unpushedTint(_ style: HistoryGraphLineStyle, hash: String) -> HistoryGraphLineStyle {
+        guard unpushedHashes.contains(hash) else { return style }
+        return .init(color: .orange, stroke: style.stroke, lineWidth: style.lineWidth, variant: style.variant)
     }
 
     func nodeStyle(for hash: String) -> HistoryGraphNodeStyle {
         let kind: HistoryGraphNodeKind
-        if (commitsByHash[hash]?.parents.count ?? 0) > 1 { kind = .merge }
-        else if remoteOnlyHashes.contains(hash) { kind = .remoteOnly }
+        if remoteOnlyHashes.contains(hash) { kind = .remoteOnly }
+        else if (commitsByHash[hash]?.parents.count ?? 0) > 1 { kind = .merge }
         else { kind = .ordinary }
         return HistoryGraphNodeStyle(kind: kind, color: lineStyle(for: hash).color, isHead: currentCommitHashes.contains(hash))
     }
 
     func referenceStyle(for reference: String, commitHash: String) -> HistoryGraphLineStyle {
-        if isTagReference(reference) { return .init(color: .amber, stroke: .solid, lineWidth: 2, variant: 0) }
+        if isTagReference(reference) { return .init(color: .amber, stroke: .solid, lineWidth: 1.2, variant: 0) }
         if let branch = Self.branch(reference, tip: commitHash, remoteBranchNames: remoteBranchNames, remoteNames: remoteNames) {
-            if branch.remote {
-                return .init(color: .purple, stroke: .dotted, lineWidth: 2.5,
-                             variant: Int(Self.stableHash(branch.name) % 4))
-            }
-            if let style = branchStyles[branch.name] { return style }
+            if let style = branchStyles[branch.name] { return branch.remote ? style : unpushedTint(style, hash: commitHash) }
+            return Self.style(current: branch.remote ? branch.name == currentRemoteBranchName : branch.name == currentBranchName, unpushed: !branch.remote && lineStyle(for: commitHash).stroke == .dashed)
         }
         return lineStyle(for: commitHash)
+    }
+
+    func referenceLabel(_ reference: String) -> String {
+        if isTagReference(reference) {
+            return "tag " + reference.replacingOccurrences(of: "tag: ", with: "").replacingOccurrences(of: "refs/tags/", with: "")
+        }
+        if let branch = Self.branch(reference, tip: "", remoteBranchNames: remoteBranchNames, remoteNames: remoteNames) {
+            return (isCurrentReference(reference) ? "→ " : branch.remote ? "○ " : "● ") + branch.name
+        }
+        return reference
     }
 
     func isCurrentCommit(_ hash: String) -> Bool { currentCommitHashes.contains(hash) }
@@ -166,10 +187,11 @@ struct HistoryGraphStylePlan {
         guard raw != "HEAD", !isTagReference(raw) else { return nil }
         let current = raw.hasPrefix("HEAD -> ")
         var name = current ? String(raw.dropFirst(8)) : raw
+        let explicitRemote = name.hasPrefix("refs/remotes/")
         if name.hasPrefix("refs/heads/") { name = String(name.dropFirst(11)) }
         if name.hasPrefix("refs/remotes/") { name = String(name.dropFirst(13)) }
         guard !name.isEmpty else { return nil }
-        let remote = !current && (remoteBranchNames.contains(name) || remoteNames.contains { name.hasPrefix($0 + "/") })
+        let remote = !current && (explicitRemote || remoteBranchNames.contains(name) || remoteNames.contains { name.hasPrefix($0 + "/") })
         return Branch(name: name, tip: tip, remote: remote)
     }
 
@@ -183,23 +205,10 @@ struct HistoryGraphStylePlan {
         return value.hasPrefix("tag: ") || value.hasPrefix("refs/tags/")
     }
 
-    private static func isLongLived(_ branch: String) -> Bool {
-        let name = branch.split(separator: "/").last.map(String.init)?.lowercased() ?? branch.lowercased()
-        return ["main", "master", "develop"].contains(name)
-    }
-
-    private static func longLivedStyle(_ branch: String) -> HistoryGraphLineStyle {
-        let name = branch.split(separator: "/").last.map(String.init)?.lowercased() ?? branch.lowercased()
-        return .init(color: name == "develop" ? .cyan : .blue, stroke: .solid, lineWidth: name == "develop" ? 3 : 3.5, variant: 0)
-    }
-
-    private static func longLivedPriority(_ branch: Branch) -> Int {
-        let name = branch.name.split(separator: "/").last.map(String.init)?.lowercased() ?? branch.name.lowercased()
-        return switch name {
-        case "main": 0
-        case "master": 1
-        default: 2
-        }
+    private static func style(current: Bool, unpushed: Bool, remoteOnly: Bool = false) -> HistoryGraphLineStyle {
+        .init(color: current ? .blue : .gray,
+              stroke: remoteOnly ? .dotted : (unpushed || !current ? .dashed : .solid),
+              lineWidth: unpushed ? (current ? 2 : 1.6) : (current ? 1.8 : 1.2), variant: 0)
     }
 
     private static func localCounterpart(of remote: String) -> String {
@@ -224,14 +233,4 @@ struct HistoryGraphStylePlan {
         }
     }
 
-    private static func fallbackStyle(for hash: String, merged: Bool) -> HistoryGraphLineStyle {
-        let palette: [HistoryGraphColorToken] = [.coral, .pink, .green, .gray]
-        let value = stableHash(hash)
-        return .init(color: palette[Int(value % UInt64(palette.count))], stroke: merged ? .dashed : .dotted,
-                     lineWidth: 2.5, variant: Int((value / UInt64(palette.count)) % 4))
-    }
-
-    private static func stableHash(_ value: String) -> UInt64 {
-        value.utf8.reduce(14_695_981_039_346_656_037) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }
-    }
 }

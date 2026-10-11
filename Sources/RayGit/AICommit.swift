@@ -34,11 +34,11 @@ struct AICommitScopeSheet: View {
                 .font(.caption).foregroundStyle(.secondary)
             Toggle(aiCommitText("Remember my choice"), isOn: $remember)
             HStack {
-                Button(aiCommitText("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(aiCommitText("Generate")) {
+                DialogButton(aiCommitText("Cancel"), role: .cancel) { dismiss() }
+                DialogButton(aiCommitText("Generate"), prominent: true) {
                     AICommitScopeChoice.save(scope, remember: remember)
                     generate(scope)
-                }.keyboardShortcut(.defaultAction).buttonStyle(RayGitDialogButtonStyle(prominent: true))
+                }
             }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.padding(24).frame(width: 380)
     }
@@ -319,10 +319,10 @@ struct AICommitSettingsSheet: View {
             }
             Text(aiCommitText("Increase the patch limit in AI settings, or generate from file names and change counts. Summary mode cannot describe code details.")).font(.caption).foregroundStyle(.secondary)
 
-            HStack { if !error.isEmpty { FloatingNotice(message: error) }; Button(aiCommitText("Cancel")) { dismiss() }; Button(aiCommitText("Save")) {
+            HStack { if !error.isEmpty { FloatingNotice(message: error) }; DialogButton(aiCommitText("Cancel"), role: .cancel) { dismiss() }; DialogButton(aiCommitText("Save"), prominent: true) {
                 do { if !key.isEmpty { try AICommitSecret.save(key) }; configuration.save(); dismiss() }
                 catch { self.error = OperationFailure.message(error) }
-            }.buttonStyle(RayGitDialogButtonStyle(prominent: true)).disabled(configuration.provider.isEmpty || configuration.model.trimmingCharacters(in: .whitespaces).isEmpty || !(30...4000).contains(configuration.maximumPatchKB)) }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
+            }.disabled(configuration.provider.isEmpty || configuration.model.trimmingCharacters(in: .whitespaces).isEmpty || !(30...4000).contains(configuration.maximumPatchKB)) }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.textFieldStyle(.roundedBorder).padding(22).frame(width: 520)
     }
 }

@@ -73,13 +73,6 @@ struct DiffPane: View {
             else {
                 if diff.isBinary { Label(diffText("diff.binary"), systemImage: "doc.zipper").font(.caption).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(Color.orange.opacity(0.1)) }
                 if diff.isTruncated { Text(diffText("diff.truncated", 20000)).font(.caption).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(Color.orange.opacity(0.15)) }
-                if sideBySide {
-                    HStack(spacing: 1) {
-                        Text(leftRevisionTitle ?? diffText("diff.original")).frame(maxWidth: .infinity, alignment: .leading)
-                        Text(rightRevisionTitle ?? diffText("diff.modified")).frame(maxWidth: .infinity, alignment: .leading)
-                    }.font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 16).frame(height: 26).rayGitChrome()
-                    Divider()
-                }
                 DiffTextSurface(diff: diff, sourceText: text, languagePath: title, documentIdentity: documentIdentity, sideBySide: sideBySide, selectedHunk: hunk, dark: colorScheme == .dark, wraps: wraps, lineNumbers: lineNumbers, synchronized: synchronized, fontSize: CGFloat(fontSize), compact: forceCompact || compact, searchOptions: searchOptions, searchStep: searchStep, matchCount: $matchCount, matchIndex: $matchIndex, searchError: $searchError, scrollsToFirstChange: openedDocumentIdentity != documentIdentity, onFirstScroll: { openedDocumentIdentity = documentIdentity })
             }
         }.background(ComparisonKeyboardRegion(standalone: standaloneShortcuts, action: performShortcut))
@@ -186,7 +179,7 @@ struct DiffTextSurface: NSViewRepresentable {
     func makeNSView(context: Context) -> NSStackView {
         let stack = AlignedDiffStackView(); stack.onResize = { [weak coordinator = context.coordinator] in coordinator?.alignWrappedRows() }; stack.orientation = .horizontal; stack.spacing = 1; stack.distribution = .fillEqually
         for _ in 0..<2 {
-            let scroll = ComparisonOverviewScrollView(); scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true; scroll.autohidesScrollers = true
+            let scroll = ComparisonOverviewScrollView(); scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true
             scroll.verticalScrollElasticity = .none; scroll.horizontalScrollElasticity = .none
             let view = ReadOnlyDiffTextView(); view.isEditable = false; view.isSelectable = true; view.isRichText = false; view.allowsUndo = false
             view.isHorizontallyResizable = true; view.isVerticallyResizable = true
@@ -355,6 +348,7 @@ struct DiffTextSurface: NSViewRepresentable {
             }
             if sideBySide, line == nil {
                 output.addAttribute(.rayGitDiffDecoration, value: true, range: NSRange(location: rowOffset, length: output.length - rowOffset))
+                output.removeAttribute(.backgroundColor, range: NSRange(location: rowOffset, length: output.length - rowOffset))
             }
             if sideBySide, kind == .addition || kind == .deletion {
                 let color = kind == .addition ? EditorPreferences.color(additionColor, fallback: .systemGreen) : EditorPreferences.color(deletionColor, fallback: .systemRed)
@@ -375,9 +369,16 @@ struct DiffTextSurface: NSViewRepresentable {
                 ranges[hunk] = [NSRange(location: left.length, length: 1), NSRange(location: right.length, length: sideBySide ? 1 : 0)]
             }
             if sideBySide {
+                let leftStart = left.length, rightStart = right.length
                 let leftOffset = left.length + (lineNumbers ? 8 : 0) + 2, rightOffset = right.length + (lineNumbers ? 8 : 0) + 2
                 append(row.left, to: left, number: row.left?.oldNumber)
                 append(row.right, to: right, number: row.right?.newNumber)
+                if row.left == nil, row.right?.kind == .addition {
+                    left.addAttribute(.rayGitDiffMissingRowColor, value: EditorPreferences.color(deletionColor, fallback: .systemRed), range: NSRange(location: leftStart, length: left.length - leftStart))
+                }
+                if row.right == nil, row.left?.kind == .deletion {
+                    right.addAttribute(.rayGitDiffMissingRowColor, value: EditorPreferences.color(additionColor, fallback: .systemGreen), range: NSRange(location: rightStart, length: right.length - rightStart))
+                }
                 if characterDiff, let a = row.left, let b = row.right, row.isChange {
                     let character = CharacterDiff(source: a.text, target: b.text)
                     for range in character.source { left.addAttribute(.backgroundColor, value: DiffVisualStyle.characterBackground(EditorPreferences.color(deletionColor, fallback: .systemRed), dark: dark), range: NSRange(location: leftOffset + range.location, length: range.length)) }
@@ -488,7 +489,7 @@ struct DiffTextSurface: NSViewRepresentable {
         private var lastAlignedWrap: Bool?
         private var aligning = false
         func synchronizeScroll(from source: NSScrollView) {
-            guard !syncing, synchronized || wraps == false else { return }
+            guard !syncing, !aligning, (source as? ComparisonOverviewScrollView)?.isUpdatingGeometry != true, synchronized || wraps == false else { return }
             syncing = true; defer { syncing = false }
             // Elastic bounds lie outside the document. Forward only the legal
             // document position, and constrain it independently for each pane.
@@ -524,7 +525,10 @@ struct DiffTextSurface: NSViewRepresentable {
             guard scrolls.indices.contains(column), let view = scrolls[column].documentView as? NSTextView,
                   NSMaxRange(range) <= (view.string as NSString).length else { return }
             syncing = true
-            view.setSelectedRange(range); view.scrollRangeToVisible(range)
+            var missing = NSRange()
+            let isMissing = range.length > 0 && view.textStorage?.attribute(.rayGitDiffMissingRowColor, at: range.location, longestEffectiveRange: &missing, in: NSRange(location: 0, length: view.textStorage?.length ?? 0)) != nil && NSMaxRange(missing) >= NSMaxRange(range)
+            view.setSelectedRange(isMissing ? NSRange(location: range.location, length: 0) : range)
+            view.scrollRangeToVisible(range)
             let y = scrolls[column].contentView.bounds.origin.y
             for scroll in scrolls where !scroll.isHidden {
                 scroll.contentView.scroll(to: NSPoint(x: scroll.contentView.bounds.origin.x, y: y))
@@ -559,18 +563,26 @@ struct DiffTextSurface: NSViewRepresentable {
                 }
                 scroll.overview.onSelect = { [weak self] index in
                     guard let self, self.hunkRanges.indices.contains(index) else { return }
-                    self.lastHunk = index; self.navigate(column: column, range: self.hunkRanges[index][column])
+                    self.navigate(column: column, range: self.hunkRanges[index][column])
                 }
             }
         }
         func alignWrappedRows() {
-            guard !aligning else { return }
+            guard !aligning, scrolls.allSatisfy({ ($0 as? ComparisonOverviewScrollView)?.isUpdatingGeometry != true }) else { return }
             let widths = scrolls.map { $0.contentSize.width }
             guard widths.allSatisfy({ $0 > 2 * 8 }) else { return }
             guard lastAlignedSignature != signature || lastAlignedWidths != widths || lastAlignedWrap != wraps else { return }
             lastAlignedSignature = signature; lastAlignedWidths = widths; lastAlignedWrap = wraps
+            let positions = scrolls.map { $0.contentView.bounds.origin }
             aligning = true
-            defer { aligning = false; refreshOverviews() }
+            defer {
+                for (scroll, position) in zip(scrolls, positions) {
+                    var bounds = scroll.contentView.bounds; bounds.origin = position
+                    scroll.contentView.scroll(to: scroll.contentView.constrainBoundsRect(bounds).origin)
+                    scroll.reflectScrolledClipView(scroll.contentView)
+                }
+                aligning = false; refreshOverviews()
+            }
             let views = scrolls.compactMap { $0.documentView as? NSTextView }
             guard split, views.count == 2 else { return }
             if wraps != true {
@@ -660,6 +672,7 @@ private final class AlignedDiffStackView: NSStackView {
 private extension NSAttributedString.Key {
     static let rayGitDiffRowBackground = NSAttributedString.Key("RayGitDiffRowBackground")
     static let rayGitDiffDecoration = NSAttributedString.Key("RayGitDiffDecoration")
+    static let rayGitDiffMissingRowColor = NSAttributedString.Key("RayGitDiffMissingRowColor")
 }
 
 /// The attributed preview contains visual gutters, but copying returns selected code.
@@ -672,6 +685,7 @@ final class ReadOnlyDiffTextView: NSTextView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         ComparisonCaret.draw(in: self, dirtyRect: dirtyRect)
+        drawMissingRows(in: dirtyRect)
     }
     override var shouldDrawInsertionPoint: Bool { ComparisonCaret.shouldDraw(in: self) }
     override func becomeFirstResponder() -> Bool {
@@ -691,6 +705,21 @@ final class ReadOnlyDiffTextView: NSTextView {
         needsDisplay = true
     }
     var highlightedRow: Int?
+    private func drawMissingRows(in rect: NSRect) {
+        guard let storage = textStorage, let layout = layoutManager, let container = textContainer, storage.length > 0 else { return }
+        let origin = textContainerOrigin
+        let glyphs = layout.glyphRange(forBoundingRect: rect.offsetBy(dx: -origin.x, dy: -origin.y), in: container)
+        let visible = layout.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
+        storage.enumerateAttribute(.rayGitDiffMissingRowColor, in: visible) { value, range, _ in
+            guard let color = value as? NSColor else { return }
+            var block = NSRange()
+            _ = storage.attribute(.rayGitDiffMissingRowColor, at: range.location, longestEffectiveRange: &block, in: NSRange(location: 0, length: storage.length))
+            let glyph = layout.glyphIndexForCharacter(at: block.location)
+            let y = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil).minY + origin.y
+            color.setFill()
+            NSRect(x: 0, y: y, width: self.bounds.width, height: 1).intersection(rect).fill()
+        }
+    }
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
         guard let storage = textStorage, let layout = layoutManager, let container = textContainer, storage.length > 0 else { return }
@@ -715,6 +744,7 @@ final class ReadOnlyDiffTextView: NSTextView {
             while offset < storage.length {
                 let line = source.lineRange(for: NSRange(location: offset, length: 0))
                 if row == highlightedRow {
+                    if storage.attribute(.rayGitDiffMissingRowColor, at: offset, effectiveRange: nil) != nil { break }
                     let glyphs = layout.glyphRange(forCharacterRange: line, actualCharacterRange: nil)
                     let bounds = layout.boundingRect(forGlyphRange: glyphs, in: container).offsetBy(dx: origin.x, dy: origin.y)
                     NSColor.controlAccentColor.withAlphaComponent(0.10).setFill()

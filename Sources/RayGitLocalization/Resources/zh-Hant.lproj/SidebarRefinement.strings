@@ -20,3 +20,9 @@
 "Project is unavailable" = "專案已不存在";
 "Remove missing project message" = "專案目錄或 Git 資料已不存在。是否從專案列表中移除？\n\n%@\n\n僅移除列表記錄。";
 "Remove from project list" = "從專案列表移除";
+
+"Tracking %@" = "追蹤 %@";
+"Delete Remote Branch…" = "刪除遠端分支…";
+"Delete Remote Branch Message" = "刪除遠端分支 %@？這會從伺服器刪除該分支，影響所有協作者。本地分支會保留。";
+"Force Delete Branch…" = "強制刪除分支…";
+"Force Delete Branch Message" = "分支 %@ 仍有未合併的提交。是否強制刪除？僅由該分支引用的提交可能遺失。";

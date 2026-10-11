@@ -24,15 +24,20 @@ struct ComparisonOverviewMarker: Equatable, Sendable {
 final class ComparisonOverviewScrollView: NSScrollView {
     let overview = ComparisonOverviewView()
     private var tilingOverview = false
+    var isUpdatingGeometry: Bool { tilingOverview }
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         scrollerStyle = .legacy
+        verticalScrollElasticity = .none
+        horizontalScrollElasticity = .none
+        autohidesScrollers = false
         addSubview(overview)
         overview.scroll = self
     }
     required init?(coder: NSCoder) { fatalError() }
     override func tile() {
         guard !tilingOverview else { return }
+        let position = contentView.bounds.origin
         tilingOverview = true; defer { tilingOverview = false }
         super.tile()
         let width = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
@@ -45,6 +50,8 @@ final class ComparisonOverviewScrollView: NSScrollView {
         // Changing the clip frame can make AppKit bottom-align a detached text
         // document. Comparison decorations and navigation use document-local y.
         if let text = documentView as? NSTextView { text.setFrameOrigin(.zero) }
+        var bounds = contentView.bounds; bounds.origin = position
+        contentView.scroll(to: contentView.constrainBoundsRect(bounds).origin)
         overview.needsDisplay = true
     }
     override func reflectScrolledClipView(_ clipView: NSClipView) {

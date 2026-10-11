@@ -111,7 +111,7 @@ struct NativeCompactHistoryTable: NSViewRepresentable {
         }
         @objc func showCommit() {
             guard let table, parent.commits.indices.contains(table.clickedRow) else { return }
-            parent.onAction(.show, parent.commits[table.clickedRow])
+            parent.onAction(.viewLog, parent.commits[table.clickedRow])
         }
         func requestMore() {
             guard let table else { return }
@@ -145,14 +145,18 @@ struct NativeCompactHistoryTable: NSViewRepresentable {
                         item.keyEquivalentModifierMask = binding.eventModifiers
                     }
                 }
-                item.representedObject = (action, commit)
+                item.representedObject = (action, commit, parent.navigationGeneration)
                 item.isEnabled = !action.isMutation || !parent.isBusy
                 menu.addItem(item)
             }
             menu.autoenablesItems = false
         }
         @objc func performAction(_ item: NSMenuItem) {
-            guard let (action, commit) = item.representedObject as? (HistoryAction, GitCommit), !action.isMutation || !parent.isBusy else { return }
+            guard item.isEnabled,
+                  let (action, commit, generation) = item.representedObject as? (HistoryAction, GitCommit, UUID?),
+                  generation == parent.navigationGeneration,
+                  parent.commits.contains(where: { $0.hash == commit.hash }),
+                  !action.isMutation || !parent.isBusy else { return }
             parent.onAction(action, commit)
         }
     }
@@ -219,40 +223,51 @@ final class CompactHistoryCell: NSView {
             let path = NSBezierPath()
             path.move(to: start)
             path.curve(to: end, controlPoint1: .init(x: start.x, y: (start.y + end.y) / 2), controlPoint2: .init(x: end.x, y: (start.y + end.y) / 2))
-            let style = parent.styles.lineStyle(for: segment.lineageHash)
+            let style = parent.styles.lineStyle(for: segment)
             path.lineCapStyle = .round
             path.lineJoinStyle = .round
-            path.lineWidth = style.lineWidth + 4
+            path.lineWidth = style.lineWidth + 2
             halo.setStroke(); path.stroke()
             path.lineWidth = style.lineWidth
-            path.setLineDash(style.dashPattern.map { CGFloat($0) }, count: style.dashPattern.count, phase: CGFloat(style.variant * 2))
-            NSColor(style.color.color).setStroke(); path.stroke()
+            path.lineCapStyle = .round
+            path.setLineDash(style.dashPattern.map { CGFloat($0) }, count: style.dashPattern.count,
+                phase: CGFloat(style.dashPhase(rowIndex: index, fromY: segment.fromY, rowHeight: Double(bounds.height))))
+            let tint = selected && style.color != .orange ? NSColor.white.withAlphaComponent(style.color == .blue ? 1 : 0.65) : NSColor(style.color.color)
+            tint.setStroke(); path.stroke()
         }
         let node = parent.styles.nodeStyle(for: row.hash)
-        let point = NSRect(x: 12 + spacing / 2 - 5 + CGFloat(row.nodeLane) * spacing, y: bounds.height / 2 - 5, width: 10, height: 10)
-        halo.setFill(); NSBezierPath(ovalIn: point.insetBy(dx: -2.5, dy: -2.5)).fill()
-        NSColor(node.color.color).setFill(); NSColor(node.color.color).setStroke()
+        let diameter = HistoryColumnLayout.nodeDiameter(for: node.kind)
+        let point = NSRect(x: 12 + spacing / 2 - diameter / 2 + CGFloat(row.nodeLane) * spacing, y: bounds.height / 2 - diameter / 2, width: diameter, height: diameter)
+        halo.setFill(); NSBezierPath(ovalIn: point.insetBy(dx: -2, dy: -2)).fill()
+        let tint = selected && node.color != .orange ? NSColor.white.withAlphaComponent(node.color == .blue ? 1 : 0.65) : NSColor(node.color.color)
+        tint.setFill(); tint.setStroke()
         switch node.kind {
         case .ordinary: NSBezierPath(ovalIn: point).fill()
-        case .merge, .remoteOnly:
-            let circle = NSBezierPath(ovalIn: point); circle.lineWidth = 2.5; circle.stroke()
-            if node.kind == .merge { NSBezierPath(ovalIn: point.insetBy(dx: 3, dy: 3)).fill() }
+        case .merge:
+            NSBezierPath(ovalIn: point).fill()
+            halo.setFill(); NSBezierPath(ovalIn: point.insetBy(dx: 1.5, dy: 1.5)).fill()
+            tint.setFill(); NSBezierPath(ovalIn: point.insetBy(dx: 2.8, dy: 2.8)).fill()
+        case .remoteOnly:
+            let circle = NSBezierPath(ovalIn: point); circle.lineWidth = 1.2; circle.stroke()
         }
-        if node.isHead { let ring = NSBezierPath(ovalIn: point.insetBy(dx: -3.5, dy: -3.5)); ring.lineWidth = 2; ring.stroke() }
+        if node.isHead {
+            let inset: CGFloat = node.kind == .merge ? -1 : -2
+            let ring = NSBezierPath(ovalIn: point.insetBy(dx: inset, dy: inset)); ring.lineWidth = 1.2; ring.stroke()
+        }
         NSGraphicsContext.restoreGraphicsState()
         var x = 12 + widths.graph + 4
         let messageEnd = x + widths.message
         NSGraphicsContext.saveGraphicsState()
         NSRect(x: x, y: 0, width: widths.message, height: bounds.height).clip()
         if let ref = commit.refs.first(where: { (parent.showRemoteLabels || !parent.styles.isRemoteReference($0)) && (parent.showTagLabels || !parent.styles.isTagReference($0)) }) {
-            let label = ref.hasPrefix("tag: ") ? "tag " + String(ref.dropFirst(5)) : ref.replacingOccurrences(of: " -> ", with: " → ")
+            let label = parent.styles.referenceLabel(ref)
             let font = NSFont.systemFont(ofSize: 10, weight: .medium)
             let width = min(90, (label as NSString).size(withAttributes: [.font: font]).width + 10)
-            let rect = NSRect(x: x, y: (bounds.height - 18) / 2, width: width, height: 18)
+            let rect = NSRect(x: x, y: (bounds.height - 16) / 2, width: width, height: 16)
             let tint = NSColor(parent.styles.referenceStyle(for: ref, commitHash: commit.hash).color.color)
             let badge = NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4)
             (selected ? NSColor.white.withAlphaComponent(0.92) : tint.withAlphaComponent(0.13)).setFill(); badge.fill()
-            tint.withAlphaComponent(0.8).setStroke(); badge.lineWidth = 0.8; badge.stroke()
+            tint.withAlphaComponent(0.4).setStroke(); badge.lineWidth = 0.5; badge.stroke()
             drawText(label, x: x + 5, width: width - 10, font: font, color: tint)
             x += width + 5
         }

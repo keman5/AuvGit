@@ -24,6 +24,7 @@ struct WorkspaceTreeTable: NSViewRepresentable {
         table.coordinator = context.coordinator
         table.delegate = context.coordinator; table.dataSource = context.coordinator
         table.rowHeight = 22; table.usesAutomaticRowHeights = false
+        table.usesAlternatingRowBackgroundColors = true
         table.intercellSpacing = NSSize(width: 3, height: 0)
         table.allowsMultipleSelection = true; table.allowsEmptySelection = true
         table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
