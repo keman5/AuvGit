@@ -6,6 +6,31 @@ import GitCore
 
 @MainActor
 final class NativeBranchTableTests: XCTestCase {
+    func testLocalBranchCreationTargetsClickedBranchAndIsDisabledWhileBusy() throws {
+        var received: String?
+        var view = pane()
+        view = NativeBranchTable(branches: view.branches, stashes: [], repositoryPath: view.repositoryPath,
+            currentBranch: view.currentBranch, isBusy: false, localExpanded: .constant(true),
+            stashesExpanded: .constant(true), selection: .constant(nil),
+            onAction: { action, value in if action == .createBranchFromLocal { received = value } },
+            onRenameStash: { _ in }, onShortcut: { _ in false })
+        let coordinator = view.makeCoordinator(); coordinator.update(view)
+        for (index, row) in coordinator.rows.enumerated() where row.id.hasPrefix("branch:") {
+            let menu = try XCTUnwrap(coordinator.menu(row: index))
+            let item = try XCTUnwrap(menu.items.first {
+                ($0.representedObject as? NativeBranchTable.Coordinator.MenuAction)?.action == .createBranchFromLocal
+            })
+            XCTAssertTrue(item.isEnabled)
+            coordinator.performMenuAction(item)
+            XCTAssertEqual(received, row.target)
+        }
+        coordinator.update(pane(busy: true))
+        let index = try XCTUnwrap(coordinator.rows.firstIndex { $0.id.hasPrefix("branch:") })
+        let item = try XCTUnwrap(coordinator.menu(row: index)?.items.first {
+            ($0.representedObject as? NativeBranchTable.Coordinator.MenuAction)?.action == .createBranchFromLocal
+        })
+        XCTAssertFalse(item.isEnabled)
+    }
     func testDisclosureUsesFixedSlotAndNoScrollTopInset() {
         let parent = pane()
         let coordinator = parent.makeCoordinator()

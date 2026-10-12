@@ -57,7 +57,7 @@ public actor GitRepository {
     public func worktrees() async throws -> [GitWorktree] {
         GitWorktree.parsePorcelain(try await run(["worktree", "list", "--porcelain", "-z"]).data)
     }
-    public func log(limit: Int = 200, skip: Int = 0, search: String = "", path: String? = nil, ref: String? = nil, author: String = "", firstParent: Bool = false, refs: [String]? = nil, stashHashes: [String] = [], includeRecyclable: Bool = false) async throws -> [GitCommit] {
+    public func log(limit: Int = 200, skip: Int = 0, search: String = "", path: String? = nil, ref: String? = nil, author: String = "", firstParent: Bool = false, refs: [String]? = nil, stashHashes: [String] = [], includeRecyclable: Bool = false, incomingOnly: Bool = false) async throws -> [GitCommit] {
         if let refs, refs.isEmpty, stashHashes.isEmpty, !includeRecyclable { return [] }
         var args = ["log", "--topo-order", "-z", "--format=%H%x00%P%x00%an%x00%at%x00%s%x00%B%x00%D%x00%ae%x00%cn%x00%ce%x00%ct"]
         if firstParent { args.append("--first-parent") }
@@ -69,7 +69,10 @@ public actor GitRepository {
         if ref == "HEAD", refs == nil, head.code != 0, stashHashes.isEmpty { return [] }
         var revisionInput: URL?
         defer { if let revisionInput { try? FileManager.default.removeItem(at: revisionInput) } }
-        if includeRecyclable || !stashHashes.isEmpty {
+        if incomingOnly {
+            args += ["--remotes", "--not", "--branches"]
+            if head.code == 0 { args.append("HEAD") }
+        } else if includeRecyclable || !stashHashes.isEmpty {
             // Enumerate normal history independently so stash index/untracked parents
             // do not enter the log, and first-parent applies only to branch commits.
             var selected = Set(includeRecyclable ? try await recyclableCommitHashes() : [])

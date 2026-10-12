@@ -38,7 +38,13 @@ final class ProgressLines: @unchecked Sendable {
     }
     func finish() { lock.lock(); let value = pending; pending = ""; lock.unlock(); if let event = GitProgressParser.parse(value) { callback(event) } }
 }
-public struct NetworkOperationResult: Sendable { public let output: String }
+public struct NetworkOperationResult: Sendable {
+    public let output: String
+    public let pullOutcome: PullOperationOutcome?
+    public init(output: String, pullOutcome: PullOperationOutcome? = nil) {
+        self.output = output; self.pullOutcome = pullOutcome
+    }
+}
 public struct CredentialConfiguration: Sendable {
     public let helpers: [String]
     public let sshAgentAvailable: Bool
@@ -72,7 +78,7 @@ extension GitRepository {
         let args: [String]
         switch operation {
         case .fetch: args = ["fetch", "--all", "--progress"] + (GitRuntimePreferences.shared.fetchPrune ? ["--prune"] : ["--no-prune"])
-        case .pull: args = ["pull", "--ff-only", "--progress"]
+        case .pull: args = ["pull", "--no-rebase", "--ff", "--no-autostash", "--no-edit", "--progress"]
         case .pushPreview: args = ["push", "--dry-run", "--porcelain", "--progress"]
         case .push: args = ["push", "--porcelain", "--progress"]
         }
@@ -84,21 +90,31 @@ extension GitRepository {
         let lines = ProgressLines(progress)
         defer { lines.finish() }
         let result = try await GitCommandLog.$privateCredentials.withValue(lease?.privateValues ?? []) {
-            try await GitProcess.run(at: url, arguments: (lease?.gitArguments ?? NetworkAuthentication.arguments) + args,
+            if operation == .pull {
+                return try await pullWithRecovery(arguments: (lease?.gitArguments ?? NetworkAuthentication.arguments) + args,
+                    environment: lease?.environment ?? [:], progress: { lines.accept($0) })
+            }
+            let output = try await GitProcess.run(at: url, arguments: (lease?.gitArguments ?? NetworkAuthentication.arguments) + args,
                                      progress: { lines.accept($0) }, environmentOverrides: lease?.environment ?? [:])
+            return NetworkOperationResult(output: GitProgressParser.redact(output.text + (output.error.isEmpty ? "" : "\n" + output.error)))
         }
-        return NetworkOperationResult(output: GitProgressParser.redact(result.text + (result.error.isEmpty ? "" : "\n" + result.error)))
+        return result
     }
     /// Poll advertised heads first; fetch changed heads without touching the checked-out branch or worktree.
-    public func backgroundFetch() async throws {
+    public func backgroundFetch(credentialsByRemote: [String: NetworkCredential] = [:]) async throws {
         let remotes = try await GitProcess.run(at: url, arguments: ["remote"], timeout: 30, noninteractive: true).text.split(separator: "\n").map(String.init)
         var failure: Error?
         for remote in remotes {
             try Task.checkCancellation()
             do {
+                let lease: NetworkCredentialLease?
+                if let credential = credentialsByRemote[remote] {
+                    lease = try NetworkCredentialLease(endpoint: try await remoteAuthenticationTarget(for: .fetch, remoteName: remote).endpoint, credential: credential)
+                } else { lease = nil }
+                defer { lease?.remove() }
                 let endpoint = try await GitProcess.run(at: url, arguments: ["remote", "get-url", remote], timeout: 30).text.trimmingCharacters(in: .newlines)
                 var sshCommand: String?
-                if ["ssh://", "git+ssh://", "ssh+git://"].contains(where: endpoint.hasPrefix) || (!endpoint.contains("://") && !endpoint.hasPrefix("/") && endpoint.contains(":")) {
+                if lease == nil && (["ssh://", "git+ssh://", "ssh+git://"].contains(where: endpoint.hasPrefix) || (!endpoint.contains("://") && !endpoint.hasPrefix("/") && endpoint.contains(":"))) {
                     let configured = try await GitProcess.run(at: url, arguments: ["config", "--get", "core.sshCommand"], allowedCodes: [0, 1], timeout: 30).text.trimmingCharacters(in: .newlines)
                     let environment = GitRuntimePreferences.shared.environment(ProcessInfo.processInfo.environment)
                     let ssh = environment["GIT_SSH_COMMAND"] ?? (configured.isEmpty ? (environment["GIT_SSH"] ?? "ssh") : configured)
@@ -108,7 +124,9 @@ extension GitRepository {
                     }
                     sshCommand = executable + " -oBatchMode=yes" + ssh.dropFirst(executable.count)
                 }
-                let advertised = try await GitProcess.run(at: url, arguments: NetworkAuthentication.arguments + ["ls-remote", "--heads", "--", remote], timeout: 10, noninteractive: true, sshCommand: sshCommand).text
+                let advertised = try await GitCommandLog.$privateCredentials.withValue(lease?.privateValues ?? []) {
+                    try await GitProcess.run(at: url, arguments: (lease?.gitArguments ?? NetworkAuthentication.arguments) + ["ls-remote", "--heads", "--", remote], timeout: 10, environmentOverrides: lease?.environment ?? [:], noninteractive: lease == nil, sshCommand: sshCommand).text
+                }
                 let tracking = try await GitProcess.run(at: url, arguments: ["for-each-ref", "--format=%(objectname) %(refname)", "refs/remotes/" + remote + "/"], timeout: 10).text
                 let localHeads = Set(tracking.split(separator: "\n").map { line in
                     line.replacingOccurrences(of: " refs/remotes/" + remote + "/", with: " refs/heads/")
@@ -118,11 +136,13 @@ extension GitRepository {
                     return fields.count == 2 && !localHeads.contains(String(fields[0]) + " " + fields[1])
                 }
                 guard changed else { continue }
-                _ = try await GitProcess.run(at: url, arguments: NetworkAuthentication.arguments + [
+                _ = try await GitCommandLog.$privateCredentials.withValue(lease?.privateValues ?? []) {
+                    try await GitProcess.run(at: url, arguments: (lease?.gitArguments ?? NetworkAuthentication.arguments) + [
                     "fetch", "--quiet", "--no-prune", "--no-prune-tags", "--no-tags", "--no-recurse-submodules",
                     "--no-write-fetch-head", "--no-auto-maintenance", "--refmap=", "--", remote,
                     "+refs/heads/*:refs/remotes/" + remote + "/*"
-                ], timeout: 30, noninteractive: true, sshCommand: sshCommand)
+                    ], timeout: 30, environmentOverrides: lease?.environment ?? [:], noninteractive: lease == nil, sshCommand: sshCommand)
+                }
             }
             catch { if Task.isCancelled { throw CancellationError() }; failure = error }
         }

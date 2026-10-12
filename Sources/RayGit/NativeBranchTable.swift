@@ -282,6 +282,7 @@ struct NativeBranchTable: NSViewRepresentable {
             let remote = row.id.hasPrefix("remote:")
             let branch = parent.branches.first { $0.name == row.target && $0.isRemote == remote }
             switch action {
+            case .createBranchFromLocal: return !remote && branch != nil
             case .checkout: return !remote && branch?.isCurrent == false
             case .delete: return !remote && branch?.isCurrent == false && branch?.worktreePath == nil
             case .deleteRemote: return remote && branch != nil
@@ -310,6 +311,7 @@ struct NativeBranchTable: NSViewRepresentable {
             } else {
                 let remote = value.id.hasPrefix("remote:")
                 if !remote { add(interactionText("Check Out…"), .checkout, enabled: !parent.isBusy) }
+                if !remote { add(sidebarRefinementText("Create Branch from This Branch…"), .createBranchFromLocal) }
                 if remote { add(sidebarRefinementText("Create Local Branch…"), .createLocalBranch, enabled: !parent.isBusy) }
                 add(sidebarRefinementText("Merge into Current Branch"), .merge, enabled: !parent.isBusy && (remote || target != parent.currentBranch))
                 let tracked = remote ? parent.branches.contains { !$0.isRemote && ($0.upstream == target || $0.upstream == "refs/remotes/" + target) } : value.upstream != nil

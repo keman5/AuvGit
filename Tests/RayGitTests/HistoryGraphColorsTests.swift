@@ -3,12 +3,17 @@ import XCTest
 @testable import GitCore
 
 final class HistoryGraphColorsTests: XCTestCase {
+    func testAllBrokenLineKindsUseTheSameRoundedShortDashPattern() {
+        for stroke in [HistoryGraphStrokeKind.dashed, .dotted] {
+            XCTAssertEqual(HistoryGraphLineStyle(color: .gray, stroke: stroke, lineWidth: 1.2, variant: 0).dashPattern, [4, 3])
+        }
+    }
     private func commit(_ hash: String, parents: [String] = [], refs: [String] = []) -> GitCommit {
         GitCommit(hash: hash, parents: parents, author: "Test", date: .distantPast,
                   subject: hash, body: "", refs: refs)
     }
 
-    func testLocalSideBranchesUseDashesAndRemoteOnlyBranchesUseDots() {
+    func testLocalSideBranchesAndIncomingBranchesUseRoundedShortDashes() {
         let commits = [
             commit("head", parents: ["local"], refs: ["HEAD -> main"]),
             commit("local", parents: ["published"]),
@@ -24,7 +29,8 @@ final class HistoryGraphColorsTests: XCTestCase {
         }
         XCTAssertEqual(plan.lineStyle(for: "head").color, .orange)
         XCTAssertEqual(plan.lineStyle(for: "published").stroke, .solid)
-        XCTAssertEqual(plan.lineStyle(for: "incoming").stroke, .dotted)
+        XCTAssertEqual(plan.lineStyle(for: "incoming").stroke, .dashed)
+        XCTAssertEqual(plan.nodeStyle(for: "incoming").color, .green)
         XCTAssertEqual(plan.nodeStyle(for: "incoming").kind, .remoteOnly)
         XCTAssertEqual(plan.referenceStyle(for: "HEAD -> main", commitHash: "head").stroke, .dashed)
         XCTAssertEqual(plan.referenceStyle(for: "origin/main", commitHash: "published").stroke, .solid)
@@ -96,8 +102,8 @@ final class HistoryGraphColorsTests: XCTestCase {
 
         XCTAssertEqual(plan.lineStyle(for: "merged").stroke, .dashed)
         XCTAssertEqual(plan.lineStyle(for: "open").stroke, .dashed)
-        XCTAssertEqual(plan.lineStyle(for: "remote").color, .gray)
-        XCTAssertEqual(plan.lineStyle(for: "remote").stroke, .dotted)
+        XCTAssertEqual(plan.lineStyle(for: "remote").color, .green)
+        XCTAssertEqual(plan.lineStyle(for: "remote").stroke, .dashed)
         XCTAssertEqual(plan.referenceStyle(for: "tag: v1.0", commitHash: "base").color, .amber)
     }
 
@@ -127,11 +133,11 @@ final class HistoryGraphColorsTests: XCTestCase {
             remoteBranchNames: ["origin/main", "origin/review", "origin/feature/login"], localUnpushedHashes: [])
         XCTAssertEqual(plan.lineStyle(for: "head").stroke, .solid)
         XCTAssertEqual(plan.lineStyle(for: "side").stroke, .dashed)
-        XCTAssertEqual(plan.lineStyle(for: "remoteCurrent").stroke, .dotted)
-        XCTAssertEqual(plan.lineStyle(for: "remoteCurrent").color, .blue)
-        XCTAssertEqual(plan.lineStyle(for: "remoteOther").stroke, .dotted)
-        XCTAssertEqual(plan.lineStyle(for: "remoteOther").color, .gray)
-        XCTAssertEqual(plan.lineStyle(for: "remoteOther").dashPattern, [0.5, 3])
+        XCTAssertEqual(plan.lineStyle(for: "remoteCurrent").stroke, .dashed)
+        XCTAssertEqual(plan.lineStyle(for: "remoteCurrent").color, .green)
+        XCTAssertEqual(plan.lineStyle(for: "remoteOther").stroke, .dashed)
+        XCTAssertEqual(plan.lineStyle(for: "remoteOther").color, .green)
+        XCTAssertEqual(plan.lineStyle(for: "remoteOther").dashPattern, [4, 3])
     }
 
     func testOtherBranchesRemainMutedWhenCommitOrderChanges() {
@@ -158,8 +164,8 @@ final class HistoryGraphColorsTests: XCTestCase {
         XCTAssertEqual(plan.lineStyle(for: "head").color, .blue)
         XCTAssertEqual(plan.lineStyle(for: "base").color, .blue)
         XCTAssertEqual(plan.lineStyle(for: "side").color, .gray)
-        XCTAssertEqual(plan.lineStyle(for: "remote").color, .blue)
-        XCTAssertEqual(plan.lineStyle(for: "remote").stroke, .dotted)
+        XCTAssertEqual(plan.lineStyle(for: "remote").color, .green)
+        XCTAssertEqual(plan.lineStyle(for: "remote").stroke, .dashed)
         XCTAssertEqual(plan.nodeStyle(for: "remote").kind, .remoteOnly)
         XCTAssertEqual(plan.referenceStyle(for: "origin/feature/work", commitHash: "side").color, .gray)
         XCTAssertEqual(plan.referenceLabel("HEAD -> feature/work"), "→ feature/work")

@@ -410,13 +410,13 @@ struct MainWindow: View {
         observedContent
         .onDisappear { confirmation?.cancelled?(); confirmation = nil; authentication.cancel() }
         .background {
-        repositoryAvailabilityContent.rayGitAlert(item: $confirmation) { action in
+        repositoryAvailabilityContent.rayGitAlert(item: $confirmation, focusesOnPresentation: confirmation?.informational != true) { action in
             RayGitAlert(title: action.title, message: action.message, buttons: action.permanentlyDelete != nil ? [
                 RayGitAlertButton(fileContextText("permanentlyDelete"), role: .destructive) { confirmation = nil; action.permanentlyDelete?() },
                 RayGitAlertButton(mainText("cancel"), role: .cancel) { confirmation = nil },
                 RayGitAlertButton(fileContextText("moveToTrash")) { confirmation = nil; action.action() }
             ] : action.informational ? [
-                RayGitAlertButton(mainText("close")) { confirmation = nil }
+                RayGitAlertButton(mainText("close"), role: .cancel) { confirmation = nil }
             ] : [
                 RayGitAlertButton(mainText("cancel"), role: .cancel) { confirmation = nil; action.cancelled?() },
                 RayGitAlertButton(mainText("continue")) { confirmation = nil; action.action() }
@@ -531,13 +531,21 @@ struct MainWindow: View {
             let name = operation == .pull ? "Pull" : "Fetch"
             store.operation(name, onFailure: { error in
                 Task { @MainActor in
-                    _ = await authentication.presentIfNeeded(error: error, repository: repository, operation: operation) { retry in
+                    let prompted = await authentication.presentIfNeeded(error: error, repository: repository, operation: operation) { retry in
                         runToolbarNetwork(operation, credential: retry.credential, saveCredential: retry.saveCredential)
+                    }
+                    if operation == .pull, !prompted, store.repository === repository {
+                        confirmation = PendingAction(title: networkText("pullRecoveryTitle"), message: PullResultNotice(error: error).message, action: {}, informational: true)
                     }
                 }
             }) { active in
                 try await authentication.perform(with: credential) {
-                    if operation == .pull { try await active.pull(credential: credential) }
+                    if operation == .pull {
+                        let result = try await active.runNetwork(.pull, credential: credential, progress: { _ in })
+                        if let outcome = result.pullOutcome, outcome.needsNotice, store.repository === active {
+                            confirmation = PendingAction(title: networkText("pullRecoveryTitle"), message: PullResultNotice(outcome: outcome).message, action: {}, informational: true)
+                        }
+                    }
                     else { try await active.fetch(credential: credential) }
                 }
                 await saveToolbarCredentialAfterSuccess(credential, requested: saveCredential, repository: active, operation: operation)
@@ -1032,6 +1040,10 @@ extension MainWindow {
         case .checkout:
             store.switchBranch(to: value) { stash in
                 confirmation = PendingAction(title: sidebarRefinementText("Changes Saved in Stash"), message: sidebarRefinementText("Auto Stash Retained", String(stash.prefix(12))), action: {}, informational: true)
+            }
+        case .createBranchFromLocal:
+            askName(interactionText("Create Branch at %@", value)) { name in
+                store.operation(sidebarRefinementText("Create Branch from This Branch…")) { try await $0.createBranch(name: name, startPoint: "refs/heads/" + value) }
             }
         case .merge: confirm(sidebarRefinementText("Merge into Current Branch"), sidebarRefinementText("Merge Branch Message", value, store.branch)) { store.operation(sidebarRefinementText("Merge into Current Branch")) { _ = try await $0.advancedOperation(.merge, first: value, second: "") } }
         case .stopTracking:

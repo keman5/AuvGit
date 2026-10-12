@@ -24,7 +24,7 @@
 "knownStateTitle" = "Known remote state";
 "verifyRemote" = "Verify remote and continue";
 "knownPushBehind" = "The last fetched state of %@/%@ contains %d commits missing locally. A normal push may be rejected. Continue to verify the current remote state? No force push will be performed without a separate confirmation.";
-"knownPullDiverged" = "The last fetched state has diverged: %d local-only and %d remote-only commits. Fast-forward-only pull may fail. Continue to fetch and verify the current remote state?";
+"knownPullDiverged" = "The last fetched state has diverged: %d local-only and %d remote-only commits. Pull attempts an automatic merge; unresolved conflicts remain local with a notice.";
 "authenticationRequired" = "Authentication Required";
 "authenticationMethod" = "Authentication method";
 "accessTokenOrAppPassword" = "Access Token / App Password";
@@ -43,3 +43,8 @@
 "sshCredentialScope" = "The key path and secure bookmark are saved for this host, port, and username. An entered passphrase is stored in macOS Keychain.";
 "sshMigrationScope" = "RayGit verifies this key against the corresponding SSH URL first. After authentication succeeds, it permanently changes this remote to SSH, saves the key locally, and retries the operation.";
 "retry" = "Retry";
+"pullRecoveryTitle" = "Pull Result and Local Changes";
+"pullConflicts" = "Automatic merging left %d files requiring manual resolution. Conflicts remain in the local workspace. Resolve them in the conflict list, then finish the merge.";
+"pullSavedChanges" = "Workspace changes were automatically saved in stash %@, including staged, unstaged and untracked files. The stash has been retained.";
+"pullChangesRestored" = "Saved changes were automatically restored into the updated workspace.";
+"pullChangesRetained" = "Saved changes have not been fully restored. Resolve local conflicts first, then inspect the retained stash and restore any remaining changes. Do not overwrite remote files with the same name.";

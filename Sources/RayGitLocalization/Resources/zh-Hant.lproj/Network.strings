@@ -24,7 +24,7 @@
 "knownStateTitle" = "已知遠端狀態";
 "verifyRemote" = "核實遠端並繼續";
 "knownPushBehind" = "上次取得的 %@/%@ 中有 %d 個本機尚未包含的提交，一般推送可能遭拒。繼續連線核實最新狀態？強制推送仍需另行確認。";
-"knownPullDiverged" = "上次取得的狀態顯示分支已分岔：本機獨有 %d 個提交，遠端獨有 %d 個提交，僅快轉拉取可能失敗。繼續取得並核實最新遠端狀態？";
+"knownPullDiverged" = "上次取得的狀態顯示分支已分岔：本機獨有 %d 個提交，遠端獨有 %d 個提交。拉取會嘗試自動合併，無法解決的衝突保留在本機並顯示提示。";
 "authenticationRequired" = "需要驗證";
 "authenticationMethod" = "驗證方式";
 "accessTokenOrAppPassword" = "存取權杖 / App Password";
@@ -43,3 +43,8 @@
 "sshCredentialScope" = "依主機、連接埠和使用者名稱儲存私鑰路徑及安全書籤；輸入的密語存入 macOS 鑰匙圈。";
 "sshMigrationScope" = "RayGit 會先使用對應 SSH URL 驗證此金鑰。驗證成功後才永久將該 remote 改為 SSH，儲存金鑰並重試操作。";
 "retry" = "重試";
+"pullRecoveryTitle" = "拉取結果與本機更改";
+"pullConflicts" = "已嘗試自動合併，仍有 %d 個檔案需要手動解決。衝突已保留在本機，請在衝突清單處理後完成合併。";
+"pullSavedChanges" = "工作區更改已自動儲存至貯藏 %@（包含已暫存、未暫存和未追蹤檔案）。貯藏記錄已保留。";
+"pullChangesRestored" = "已儲存的更改已自動還原至更新後的工作區。";
+"pullChangesRetained" = "尚未完整還原已儲存的更改。請先解決本機衝突，再從貯藏記錄檢查並還原剩餘更改；不要覆蓋遠端同名檔案。";

@@ -26,3 +26,4 @@
 "Delete Remote Branch Message" = "リモートブランチ %@ を削除しますか？サーバー上のブランチが削除され、すべての共同作業者に影響します。ローカルブランチは保持されます。";
 "Force Delete Branch…" = "ブランチを強制削除…";
 "Force Delete Branch Message" = "ブランチ %@ に未マージのコミットがあります。強制削除しますか？このブランチだけが参照するコミットは失われる可能性があります。";
+"Create Branch from This Branch…" = "このブランチから新規ブランチを作成…";

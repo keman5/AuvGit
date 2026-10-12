@@ -18,7 +18,7 @@ struct HistoryGraphLineStyle: Equatable {
         switch stroke {
         case .solid: []
         case .dashed: [4, 3]
-        case .dotted: [0.5, 3]
+        case .dotted: [4, 3]
         }
     }
 
@@ -133,7 +133,7 @@ struct HistoryGraphStylePlan {
         // ancestor. Merge edges use the incoming side branch's lane instead.
         let lane = commitsByHash[segment.sourceHash]?.parents.first == segment.lineageHash
             ? source : (lineStyles[segment.lineageHash] ?? Self.style(current: false, unpushed: false))
-        let style = lane.stroke == .dotted || lane.color == .gray
+        let style = lane.color == .green || lane.color == .gray
             ? lane : Self.style(current: true, unpushed: unpushedHashes.contains(segment.sourceHash))
         return unpushedTint(style, hash: segment.sourceHash)
     }
@@ -206,8 +206,8 @@ struct HistoryGraphStylePlan {
     }
 
     private static func style(current: Bool, unpushed: Bool, remoteOnly: Bool = false) -> HistoryGraphLineStyle {
-        .init(color: current ? .blue : .gray,
-              stroke: remoteOnly ? .dotted : (unpushed || !current ? .dashed : .solid),
+        .init(color: remoteOnly ? .green : (current ? .blue : .gray),
+              stroke: remoteOnly || unpushed || !current ? .dashed : .solid,
               lineWidth: unpushed ? (current ? 2 : 1.6) : (current ? 1.8 : 1.2), variant: 0)
     }
 

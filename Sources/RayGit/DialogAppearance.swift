@@ -41,10 +41,10 @@ extension View {
                 .presentationCornerRadius(RayGitStyle.windowCornerRadius)
         }
     }
-    func rayGitSheet<Item: Identifiable, Content: View>(item: Binding<Item?>, onDismiss: (() -> Void)? = nil,
+    func rayGitSheet<Item: Identifiable, Content: View>(item: Binding<Item?>, onDismiss: (() -> Void)? = nil, focusesOnPresentation: Bool = true,
                                                        @ViewBuilder content: @escaping (Item) -> Content) -> some View {
         sheet(item: item, onDismiss: onDismiss) { value in
-            content(value).nativeFocusRoot(focusesOnPresentation: true).background(Color(nsColor: .windowBackgroundColor)).background(DialogFrameStyle())
+            content(value).nativeFocusRoot(focusesOnPresentation: focusesOnPresentation).background(Color(nsColor: .windowBackgroundColor)).background(DialogFrameStyle())
                 .presentationCornerRadius(RayGitStyle.windowCornerRadius)
         }
     }
@@ -59,9 +59,9 @@ extension View {
                      @RayGitAlertActions actions: @escaping () -> [RayGitAlertButton]) -> some View {
         rayGitAlert(title, isPresented: isPresented, actions: actions) { EmptyView() }
     }
-    func rayGitAlert<Item: Identifiable>(item: Binding<Item?>,
+    func rayGitAlert<Item: Identifiable>(item: Binding<Item?>, focusesOnPresentation: Bool = true,
                                          content: @escaping (Item) -> RayGitAlert) -> some View {
-        rayGitSheet(item: item) { value in
+        rayGitSheet(item: item, focusesOnPresentation: focusesOnPresentation) { value in
             let alert = content(value)
             RayGitAlertView(title: alert.title, message: Text(alert.message), buttons: alert.buttons) { item.wrappedValue = nil }
         }
@@ -109,8 +109,8 @@ private struct RayGitAlertView<Message: View>: View {
                 ForEach(buttons.indices, id: \.self) { index in
                     let button = buttons[index]
                     KeyViewProxy(label: button.title,
-                        keyEquivalent: index == DialogAppearance.defaultButtonIndex(buttons) ? "\r" :
-                            button.role == .cancel ? "\u{1b}" : "",
+                        keyEquivalent: button.role == .cancel ? "\u{1b}" :
+                            index == DialogAppearance.defaultButtonIndex(buttons) ? "\r" : "",
                         prominent: index == DialogAppearance.defaultButtonIndex(buttons),
                         minimumWidth: RayGitDialogButtonStyle.minimumWidth) { button.action(); close() }
                         .disabled(button.isDisabled)

@@ -18,6 +18,7 @@ struct NetworkOperationsView: View {
     @State private var credentials: CredentialConfiguration?
     @State private var keychainConfirm = false
     @State private var pullPrompt: PullOperationPrompt?
+    @State private var pullResultNotice: PullResultNotice?
     @State private var forcePushPrompt: ForcePushPrompt?
     @State private var preflightPrompt: NetworkPreflightPrompt?
     @State private var remoteNames: [String] = []
@@ -188,6 +189,11 @@ struct NetworkOperationsView: View {
                 runVerified(operation)
             }
         }
+        .rayGitAlert(item: $pullResultNotice, focusesOnPresentation: false) { notice in
+            RayGitAlert(title: networkText("pullRecoveryTitle"), message: notice.message, buttons: [
+                RayGitAlertButton(networkText("close"), role: .cancel) { pullResultNotice = nil }
+            ])
+        }
         .rayGitSheet(item: $forcePushPrompt) { prompt in
             ForcePushConfirmation(preview: prompt.preview) { forcePushPrompt = nil } execute: {
                 forcePushPrompt = nil
@@ -290,6 +296,9 @@ struct NetworkOperationsView: View {
                 }
                 let result = try await repository.runNetwork(operation, credential: credential, progress: { _ in })
                 output = result.output + "\n" + networkText("completed")
+                if let outcome = result.pullOutcome, outcome.needsNotice, store.repository === repository {
+                    pullResultNotice = PullResultNotice(outcome: outcome)
+                }
                 await saveCredentialAfterSuccess(credential, requested: saveCredential, repository: repository, operation: operation)
                 store.completeNetworkOperation(name, repository: repository)
             } } } } } catch is CancellationError {
@@ -304,10 +313,13 @@ struct NetworkOperationsView: View {
                     forcePushPrompt = ForcePushPrompt(repository: repository, preview: preview,
                                                       credential: credential, saveCredential: saveCredential)
                 } else {
-                    _ = await authentication.presentIfNeeded(error: error, repository: repository, operation: operation) { retry in
+                    let prompted = await authentication.presentIfNeeded(error: error, repository: repository, operation: operation) { retry in
                         guard store.repository === repository else { return }
                         runVerified(operation, credential: retry.credential, saveCredential: retry.saveCredential,
                                     acceptsMigratedPushIdentity: retry.acceptsMigratedPushIdentity)
+                    }
+                    if operation == .pull, !prompted, store.repository === repository {
+                        pullResultNotice = PullResultNotice(error: error)
                     }
                 }
                 store.finishUserOperation(name, repository: repository, failure: error)

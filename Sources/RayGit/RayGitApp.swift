@@ -43,6 +43,9 @@ struct RayGitApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
                     RepositoryStore.setApplicationActiveForAllStores(false)
                 }
+                .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+                    RepositoryStore.checkRemoteUpdatesForActivePanel()
+                }
                 .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in Task { await store.pollForChanges() } }
         }
         .windowToolbarStyle(.unified)
@@ -659,6 +662,7 @@ final class RepositoryStore: ObservableObject {
             cacheCurrentHistory(for: repo.url.path)
             observeRepository(repo.url)
             refreshRecentRepositoryStates()
+            Self.stores.allObjects.first(where: { $0.persistsSession })?.refreshRecentRepositoryStates()
             if persistsSession { prepareRecentProjects() }
             if needsWorkspaceComparison {
                 await loadDiff()
@@ -875,6 +879,9 @@ final class RepositoryStore: ObservableObject {
     static func setApplicationActiveForAllStores(_ active: Bool) {
         stores.allObjects.forEach { $0.setApplicationActive(active) }
     }
+    static func checkRemoteUpdatesForActivePanel() {
+        stores.allObjects.first(where: { $0.persistsSession })?.refreshRecentRepositoryStates()
+    }
     func setApplicationActive(_ active: Bool) {
         guard applicationActive != active else { return }
         applicationActive = active
@@ -898,7 +905,8 @@ final class RepositoryStore: ObservableObject {
     private var lastPoll = Date.distantPast
     func pollForChanges() async {
         guard applicationActive else { return }
-        refreshRecentRepositoryStates()
+        if persistsSession { refreshRecentRepositoryStates() }
+        else { Self.checkRemoteUpdatesForActivePanel() }
         guard RayGitPreferences.backgroundRefresh, Date().timeIntervalSince(lastPoll) >= max(30, RayGitPreferences.pollInterval) else { return }
         lastPoll = Date(); await refreshIfChanged()
     }
@@ -1091,8 +1099,17 @@ final class RepositoryStore: ObservableObject {
                 let repo = GitRepository(url: URL(fileURLWithPath: path))
                 if now >= (nextRemoteSync[path] ?? .distantPast) {
                     do {
-                        try await repo.backgroundFetch()
+                        let authentication = RemoteAuthenticationCoordinator()
+                        let remotes = (try await repo.workflowRead(["remote"])).split(separator: "\n").map(String.init)
+                        var credentials: [String: NetworkCredential] = [:]
+                        for remote in remotes {
+                            credentials[remote] = await authentication.savedCredential(for: repo, operation: .fetch, remoteName: remote)
+                        }
+                        try await repo.backgroundFetch(credentialsByRemote: credentials)
                         nextRemoteSync[path] = Date().addingTimeInterval(Double.random(in: 90...150))
+                        for store in Self.stores.allObjects where store.repositoryURL == repo.url {
+                            await store.refreshIfChanged()
+                        }
                     } catch {
                         if Task.isCancelled { break }
                         nextRemoteSync[path] = Date().addingTimeInterval(300)
@@ -1223,16 +1240,27 @@ final class RepositoryStore: ObservableObject {
             let rows = try await repository.log(limit: requestedCount + 1, skip: skip, search: historySearch, path: followsCurrentBranch ? nil : historyPath, ref: followsCurrentBranch ? "HEAD" : (historyPinnedCommit ?? historyRef), author: historyAuthor, firstParent: followsCurrentBranch && !showMergedCommits, refs: followsCurrentBranch || historyPinnedCommit != nil || historyStashHash != nil || historyRef?.hasPrefix("refs/tags/") == true ? nil : checkedHistoryRefs.map { HistoryBranchScope.revisionRefs($0, branches: branches, stashes: stashes) }, stashHashes: stashHashes, includeRecyclable: !followsCurrentBranch && historyPinnedCommit == nil && historyStashHash == nil && historyRef?.hasPrefix("refs/tags/") != true && checkedHistoryRefs?.contains(HistoryBranchScope.recyclable) == true)
             guard historyVersion == version else { return }
             let page = Array(rows.prefix(requestedCount))
-            let updatedCommits = reset ? page : commits + page.filter { row in !commits.contains(where: { $0.hash == row.hash }) }
+            let existing = reset ? page : commits + page.filter { row in !commits.contains(where: { $0.hash == row.hash }) }
+            let incoming: [GitCommit]
+            var hasMoreIncoming = false
+            if historyPinnedCommit == nil, historyStashHash == nil, historyPath == nil, historyRef?.hasPrefix("refs/tags/") != true {
+                let incomingLimit = reset ? requestedCount : commits.count + requestedCount
+                let incomingRows = try await repository.log(limit: incomingLimit + 1, search: historySearch, author: historyAuthor, incomingOnly: true)
+                incoming = Array(incomingRows.prefix(incomingLimit))
+                hasMoreIncoming = incomingRows.count > incomingLimit
+            } else { incoming = [] }
+            guard historyVersion == version else { return }
+            let incomingHashes = Set(incoming.map(\.hash))
+            let updatedCommits = incoming + existing.filter { !incomingHashes.contains($0.hash) }
             let unpushed = try await repository.unpublishedCommitHashes(in: updatedCommits)
             guard historyVersion == version else { return }
             if commits != updatedCommits { commits = updatedCommits }
             historyLoadedCount = skip + page.count
-            hasMore = rows.count > requestedCount
+            hasMore = rows.count > requestedCount || hasMoreIncoming
             if reset { historyRestoreDepth = nil }
             localUnpushedCommitHashes = unpushed
             if reset, selectFirstHistoryCommit {
-                selectFirstHistoryCommit = false; selectedCommit = rows.first?.hash
+                selectFirstHistoryCommit = false; selectedCommit = updatedCommits.first?.hash
                 await loadCommitFiles()
                 guard !Task.isCancelled, historyVersion == version else { return }
             }

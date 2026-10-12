@@ -4,6 +4,42 @@ import XCTest
 
 @MainActor
 final class RepositoryRemoteSyncTests: XCTestCase {
+    func testIncomingHistoryStaysAboveNewerLocalCommitsAcrossPages() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let remote = root.appendingPathComponent("remote.git"), producer = root.appendingPathComponent("producer"), local = root.appendingPathComponent("local")
+        _ = try await GitProcess.run(at: root, arguments: ["init", "--bare", remote.path])
+        _ = try await GitProcess.run(at: root, arguments: ["clone", remote.path, producer.path])
+        for args in [["config", "user.name", "Test"], ["config", "user.email", "test@example.invalid"], ["commit", "--allow-empty", "-m", "base"], ["push", "origin", "HEAD"]] {
+            _ = try await GitProcess.run(at: producer, arguments: args)
+        }
+        _ = try await GitProcess.run(at: root, arguments: ["clone", remote.path, local.path])
+        for index in 0..<26 {
+            _ = try await GitProcess.run(at: producer, arguments: ["commit", "--allow-empty", "-m", "incoming-\(index)"], environmentOverrides: ["GIT_AUTHOR_DATE": "2020-01-01T12:00:00Z", "GIT_COMMITTER_DATE": "2020-01-01T12:00:00Z"])
+        }
+        _ = try await GitProcess.run(at: producer, arguments: ["push", "origin", "HEAD"])
+        for args in [["config", "user.name", "Test"], ["config", "user.email", "test@example.invalid"], ["commit", "--allow-empty", "-m", "newer-local"]] {
+            _ = try await GitProcess.run(at: local, arguments: args)
+        }
+        let repo = GitRepository(url: local)
+        try await repo.backgroundFetch()
+        let key = "preferences.historyPageSize", previous = UserDefaults.standard.object(forKey: key)
+        UserDefaults.standard.set(25, forKey: key)
+        defer { if let previous { UserDefaults.standard.set(previous, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) } }
+        let store = RepositoryStore(persistsSession: false, followsCurrentBranch: true)
+        defer { store.closeTransientSession() }
+        store.repository = repo; store.repositoryURL = repo.url
+        await store.refresh()
+        XCTAssertEqual(store.commits.first?.subject, "incoming-25")
+        XCTAssertTrue(store.hasMore)
+        await store.loadHistory(reset: false)
+        XCTAssertEqual(store.commits.prefix(26).map(\.subject), (0..<26).reversed().map { "incoming-\($0)" })
+        XCTAssertEqual(store.commits.dropFirst(26).map(\.subject), ["newer-local", "base"])
+        XCTAssertEqual(Set(store.commits.map(\.hash)).count, store.commits.count)
+        XCTAssertFalse(store.hasMore)
+    }
+
     func testBackgroundSweepRefreshesActiveAndUnselectedProjectsWithoutChangingWorktree() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -36,7 +72,7 @@ final class RepositoryRemoteSyncTests: XCTestCase {
         _ = try await GitProcess.run(at: producer, arguments: ["push", "origin", "HEAD"])
         let store = RepositoryStore()
         store.recentPaths = paths.map(\.path); store.openRepositories = [paths[0].path]
-        store.repositoryURL = paths[0]; store.repository = GitRepository(url: paths[0])
+        store.repository = GitRepository(url: paths[0]); store.repositoryURL = store.repository?.url
         store.refreshRecentRepositoryStates()
         for _ in 0..<500 {
             if paths.allSatisfy({ store.repositorySyncStates[$0.path]?.behind == 1 }) { break }
@@ -52,6 +88,8 @@ final class RepositoryRemoteSyncTests: XCTestCase {
         let after = try await paths.asyncHeads()
         XCTAssertEqual(heads, after)
         XCTAssertFalse(store.isBusy)
+        XCTAssertEqual(store.commits.first?.subject, "remote change", "A successful background fetch must put incoming commits at the top of active history")
+        XCTAssertTrue(store.commits.contains { $0.subject == "base" })
         let dates = store.nextRemoteSync
         store.refreshRecentRepositoryStates(now: Date().addingTimeInterval(31))
         try await Task.sleep(nanoseconds: 200_000_000)

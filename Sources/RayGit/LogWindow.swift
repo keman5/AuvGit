@@ -63,6 +63,10 @@ private final class LogWindowController: NSWindowController, NSWindowDelegate {
         }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    func windowDidBecomeKey(_ notification: Notification) {
+        RepositoryStore.checkRemoteUpdatesForActivePanel()
+        Task { await store.refreshIfChanged() }
+    }
     func apply(path: String?, ref: String?, search: String?, selectedCommit: String?, stashCommit: String?, stashRef: String?) {
         requested = (path, ref, search, selectedCommit, stashCommit, stashRef)
         requestVersion = UUID()

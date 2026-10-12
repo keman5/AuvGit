@@ -182,10 +182,11 @@ final class GitRepositoryTests: XCTestCase {
         try "peer fork\n".write(to: peer.appendingPathComponent("peer-fork.txt"), atomically: true, encoding: .utf8)
         try await peerRepo.stage(paths: ["peer-fork.txt"]); try await peerRepo.commit(message: "Remote divergence")
         try await peerRepo.push()
-        do { try await repo.pull(); XCTFail("Diverged pull must refuse an implicit merge") } catch { }
+        try await repo.pull()
         let head = try await repo.log(limit: 1)
         let current = try await GitProcess.run(at: url, arguments: ["log", "-1", "--format=%s", "HEAD"])
-        XCTAssertEqual(current.text.trimmingCharacters(in: .newlines), "Local divergence")
+        XCTAssertTrue(current.text.contains("Merge"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.appendingPathComponent("peer-fork.txt").path))
         XCTAssertFalse(head.isEmpty)
     }
 

@@ -27,6 +27,31 @@ struct PullOperationPrompt: Identifiable {
     let hint: LocalNetworkPreflight?
 }
 
+struct PullResultNotice: Identifiable {
+    let id = UUID()
+    let message: String
+    init(outcome: PullOperationOutcome) {
+        var parts: [String] = []
+        if !outcome.conflicts.isEmpty {
+            parts.append(L10n.text("pullConflicts", table: "Network", arguments: [outcome.conflicts.count]))
+            parts.append(outcome.conflicts.prefix(8).joined(separator: "\n"))
+        }
+        if let stash = outcome.stashHash {
+            parts.append(L10n.text("pullSavedChanges", table: "Network", arguments: [String(stash.prefix(12))]))
+            parts.append(networkText(outcome.changesRestored ? "pullChangesRestored" : "pullChangesRetained"))
+        }
+        if let error = outcome.restorationError { parts.append(error) }
+        message = parts.joined(separator: "\n\n")
+    }
+    init(error: Error) {
+        if let recovery = error as? PullRecoveryFailure {
+            message = GitCommandLog.redact(recovery.message) + "\n\n" +
+                L10n.text("pullSavedChanges", table: "Network", arguments: [String(recovery.stashHash.prefix(12))]) +
+                "\n\n" + networkText("pullChangesRetained")
+        } else { message = GitCommandLog.redact(error.localizedDescription) }
+    }
+}
+
 struct PullOperationConfirmation: View {
     let hint: LocalNetworkPreflight?
     let cancel: () -> Void

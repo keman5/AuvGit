@@ -457,7 +457,7 @@ private struct CommitGraphCell: View {
                 path.addCurve(to: end, control1: CGPoint(x: start.x, y: (start.y + end.y) / 2), control2: CGPoint(x: end.x, y: (start.y + end.y) / 2))
                 let style = styles.lineStyle(for: segment)
                 context.stroke(path, with: .color(halo), style: StrokeStyle(lineWidth: style.lineWidth + 2, lineCap: .round, lineJoin: .round))
-                let tint = selected && style.color != .orange ? Color.white.opacity(style.color == .blue ? 1 : 0.65) : style.color.color
+                let tint = selected && style.color != .orange && style.color != .green ? Color.white.opacity(style.color == .blue ? 1 : 0.65) : style.color.color
                 context.stroke(path, with: .color(tint), style: StrokeStyle(
                     lineWidth: style.lineWidth,
                     lineCap: .round,
@@ -467,7 +467,7 @@ private struct CommitGraphCell: View {
                 ))
             }
             let node = styles.nodeStyle(for: row.hash)
-            let color = selected && node.color != .orange ? Color.white.opacity(node.color == .blue ? 1 : 0.65) : node.color.color
+            let color = selected && node.color != .orange && node.color != .green ? Color.white.opacity(node.color == .blue ? 1 : 0.65) : node.color.color
             let diameter = HistoryColumnLayout.nodeDiameter(for: node.kind)
             let point = CGRect(x: spacing / 2 - diameter / 2 + CGFloat(row.nodeLane) * spacing,
                                y: size.height / 2 - diameter / 2, width: diameter, height: diameter)

@@ -597,6 +597,45 @@ final class DialogAppearanceTests: XCTestCase {
         try runApplicationFixture { try await self.verifyLongAlerts() }
     }
 
+    private final class PullNoticeModel: ObservableObject {
+        @Published var notice: PullResultNotice?
+    }
+    private struct PullNoticeFixture: View {
+        @ObservedObject var model: PullNoticeModel
+        var body: some View {
+            Text("Parent").frame(width: 500, height: 400)
+                .rayGitAlert(item: $model.notice, focusesOnPresentation: false) { notice in
+                    RayGitAlert(title: networkText("pullRecoveryTitle"), message: notice.message,
+                        buttons: [RayGitAlertButton(networkText("close"), role: .cancel) { model.notice = nil }])
+                }
+        }
+    }
+    func testPullResultNoticeDoesNotFocusControlsAndEscapeDismissesIt() throws {
+        try runApplicationFixture {
+            let app = NSApplication.shared, policy = NSApplication.shared.activationPolicy()
+            app.setActivationPolicy(.regular)
+            defer { app.setActivationPolicy(policy) }
+            let model = PullNoticeModel()
+            let parent = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+            parent.isReleasedWhenClosed = false
+            parent.contentView = NSHostingView(rootView: PullNoticeFixture(model: model))
+            defer { if let sheet = parent.attachedSheet { parent.endSheet(sheet) }; parent.close() }
+            try await self.activateFixture(parent)
+            model.notice = PullResultNotice(error: GitError("Local conflicts: shared.txt. Changes retained in stash."))
+            for _ in 0..<40 { try await Task.sleep(for: .milliseconds(10)) }
+            try await self.ensureApplicationActive()
+            let panel = DialogAppearance.visibleWindow(for: try XCTUnwrap(parent.attachedSheet))
+            XCTAssertFalse(panel.firstResponder is NSControl)
+            XCTAssertFalse(NativeFocusAppearance.isVisible(in: panel))
+            let escape = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: panel.windowNumber, context: nil,
+                characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
+            app.sendEvent(escape)
+            for _ in 0..<30 { try await Task.sleep(for: .milliseconds(10)) }
+            XCTAssertNil(model.notice); XCTAssertNil(parent.attachedSheet)
+        }
+    }
+
     private func verifyLongAlerts() async throws {
         let app = NSApplication.shared
         let previousPolicy = app.activationPolicy()

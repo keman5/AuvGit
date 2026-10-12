@@ -15,7 +15,7 @@
 "history.searchAccessibility" = "Search commit history";
 "history.clearSearch" = "Clear history search";
 "history.graph" = "Graph";
-"history.graphLegend" = "Orange: unpushed commits. Blue: current branch and its upstream; gray: other branches. Solid: published current history; rounded short dashes: local side branches or unpushed commits; dots: remote-only history. Filled nodes: local; hollow nodes: remote only; ring with inner dot: merge; outer ring: HEAD.";
+"history.graphLegend" = "Orange: unpushed commits. Blue: current branch and its upstream; gray: other branches. Solid: published current history; rounded short dashes: local side branches or unpushed commits; green rounded short dashes: incoming remote history. Filled nodes: local; hollow nodes: remote only; ring with inner dot: merge; outer ring: HEAD.";
 "history.message" = "Message";
 "history.author" = "Author";
 "history.date" = "Date";

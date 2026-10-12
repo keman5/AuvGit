@@ -232,14 +232,14 @@ final class CompactHistoryCell: NSView {
             path.lineCapStyle = .round
             path.setLineDash(style.dashPattern.map { CGFloat($0) }, count: style.dashPattern.count,
                 phase: CGFloat(style.dashPhase(rowIndex: index, fromY: segment.fromY, rowHeight: Double(bounds.height))))
-            let tint = selected && style.color != .orange ? NSColor.white.withAlphaComponent(style.color == .blue ? 1 : 0.65) : NSColor(style.color.color)
+            let tint = selected && style.color != .orange && style.color != .green ? NSColor.white.withAlphaComponent(style.color == .blue ? 1 : 0.65) : NSColor(style.color.color)
             tint.setStroke(); path.stroke()
         }
         let node = parent.styles.nodeStyle(for: row.hash)
         let diameter = HistoryColumnLayout.nodeDiameter(for: node.kind)
         let point = NSRect(x: 12 + spacing / 2 - diameter / 2 + CGFloat(row.nodeLane) * spacing, y: bounds.height / 2 - diameter / 2, width: diameter, height: diameter)
         halo.setFill(); NSBezierPath(ovalIn: point.insetBy(dx: -2, dy: -2)).fill()
-        let tint = selected && node.color != .orange ? NSColor.white.withAlphaComponent(node.color == .blue ? 1 : 0.65) : NSColor(node.color.color)
+        let tint = selected && node.color != .orange && node.color != .green ? NSColor.white.withAlphaComponent(node.color == .blue ? 1 : 0.65) : NSColor(node.color.color)
         tint.setFill(); tint.setStroke()
         switch node.kind {
         case .ordinary: NSBezierPath(ovalIn: point).fill()

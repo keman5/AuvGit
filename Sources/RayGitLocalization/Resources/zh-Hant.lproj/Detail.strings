@@ -15,7 +15,7 @@
 "history.searchAccessibility" = "搜尋提交歷史";
 "history.clearSearch" = "清除歷史搜尋";
 "history.graph" = "圖譜";
-"history.graphLegend" = "橙色：未推送提交。藍色：目前分支及其上游；灰色：其他分支。實線：目前分支已發布歷史；圓頭短虛線：本機支線或未推送提交；點線：僅遠端歷史。實心：本機提交；空心：僅遠端提交；環內點：合併提交；外環：HEAD。";
+"history.graphLegend" = "橙色：未推送提交。藍色：目前分支及其上游；灰色：其他分支。實線：目前分支已發布歷史；圓頭短虛線：本機支線或未推送提交；綠色圓頭短虛線：遠端尚未拉取歷史。實心：本機提交；空心：僅遠端提交；環內點：合併提交；外環：HEAD。";
 "history.message" = "提交說明";
 "history.author" = "作者";
 "history.date" = "日期";

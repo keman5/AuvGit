@@ -6,7 +6,7 @@ func sidebarRefinementText(_ key: String, _ arguments: CVarArg...) -> String {
     L10n.text(key, table: "SidebarRefinement", arguments: arguments)
 }
 
-enum SidebarAction { case openRepository, revealRepository, removeRecent, checkout, createLocalBranch, history, rename, delete, deleteRemote, copy, stashShow, stashApply, stashDrop, merge, stopTracking, setTracking }
+enum SidebarAction { case openRepository, revealRepository, removeRecent, checkout, createLocalBranch, createBranchFromLocal, history, rename, delete, deleteRemote, copy, stashShow, stashApply, stashDrop, merge, stopTracking, setTracking }
 
 private struct RepositoryRowButtonStyle: ButtonStyle {
     var selected: Bool
