@@ -28,10 +28,11 @@ struct WorkspaceFooterSplit<History: View, Commit: View>: NSViewRepresentable {
 }
 
 final class HistoryCommitSplitView: NSSplitView, NSSplitViewDelegate {
+    private lazy var layoutDelegate = SplitViewLayoutDelegate(owner: self)
     private var initialized = false
     override init(frame: NSRect) {
         super.init(frame: frame)
-        isVertical = true; dividerStyle = .thin; delegate = self
+        isVertical = true; dividerStyle = .thin; delegate = layoutDelegate
     }
     convenience init() { self.init(frame: .zero) }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

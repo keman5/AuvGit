@@ -48,3 +48,7 @@
 "pullSavedChanges" = "工作區更改已自動儲存至貯藏 %@（包含已暫存、未暫存和未追蹤檔案）。貯藏記錄已保留。";
 "pullChangesRestored" = "已儲存的更改已自動還原至更新後的工作區。";
 "pullChangesRetained" = "尚未完整還原已儲存的更改。請先解決本機衝突，再從貯藏記錄檢查並還原剩餘更改；不要覆蓋遠端同名檔案。";
+"firstPushTitle" = "選擇遠端分支並推送";
+"firstPushHint" = "此本機分支尚未關聯遠端。請選擇已有遠端分支或輸入新分支名；確認後立即推送，成功後建立追蹤關係。";
+"chooseExistingBranch" = "選擇已有分支";
+"firstPushDestination" = "推送目標：";

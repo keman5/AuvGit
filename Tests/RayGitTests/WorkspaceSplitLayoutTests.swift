@@ -4,6 +4,19 @@ import AppKit
 
 @MainActor
 final class WorkspaceSplitLayoutTests: XCTestCase {
+    func testSplitViewsUseSeparateDelegatesForSidebarActionDiscovery() throws {
+        let splits: [NSSplitView] = [RepositorySidebarSplitView(), HistoryCommitSplitView(), WorkspaceSplitView(compact: false)]
+        for split in splits {
+            let delegate = try XCTUnwrap(split.delegate)
+            XCTAssertFalse(delegate === split, "A self-delegate recursively forwards toggleSidebar: on macOS 27")
+            // Only query the selector after confirming this is safe, so a regression
+            // produces an assertion instead of overflowing the test process's stack.
+            if delegate !== split {
+                XCTAssertFalse(split.responds(to: NSSelectorFromString("toggleSidebar:")))
+                XCTAssertEqual(delegate.splitView?(split, canCollapseSubview: NSView()), false)
+            }
+        }
+    }
     func testHistoryStartsAt550AndFitsNarrowWindows() {
         let split = HistoryCommitSplitView()
         for _ in 0..<2 { split.addArrangedSubview(NSView()) }

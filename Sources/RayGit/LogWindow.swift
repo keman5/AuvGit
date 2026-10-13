@@ -369,7 +369,7 @@ private struct LogWindowContent: View {
         mutation = nil
         store.operation(historyActionText(request.action.rawValue)) { repository in
             switch request.action {
-            case .createBranch: try await repository.createBranch(name: name, startPoint: request.commit.hash)
+            case .createBranch: try await repository.createBranch(name: name, startPoint: request.commit.hash, switchAfterCreation: true)
             case .createTag: try await repository.createTag(name: name, commit: request.commit.hash)
             case .checkout: try await repository.checkoutCommit(hash: request.commit.hash)
             case .cherryPick: try await repository.cherryPick(hash: request.commit.hash, mainline: mainline)

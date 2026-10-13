@@ -117,7 +117,7 @@ public extension GitRepository {
         _ = try await GitProcess.run(at: directory, arguments: ["init"])
         return try await open(directory)
     }
-    static func clone(source: String, destination: URL, credential: HTTPSCloneCredential? = nil) async throws -> GitRepository {
+    static func clone(source: String, destination: URL, credential: HTTPSCloneCredential? = nil, sshCredential: NetworkCredential? = nil) async throws -> GitRepository {
         guard !source.isEmpty, !source.hasPrefix("-"), !source.contains("\0") else { throw GitError("Invalid clone source") }
         if credential != nil, URLComponents(string: source)?.scheme?.lowercased() != "https" {
             throw GitError("HTTPS credentials can only be used with an HTTPS clone URL.")
@@ -128,9 +128,18 @@ public extension GitRepository {
             return try HTTPSCredentialLease(source: sourceURL, credential: value)
         }
         defer { lease?.remove() }
-        let authentication = lease?.gitArguments ?? NetworkAuthentication.arguments
-        _ = try await GitCommandLog.$privateCredentials.withValue(credential.map { [$0.password] } ?? []) {
-            try await GitProcess.run(at: destination.deletingLastPathComponent(), arguments: authentication + ["clone", "--", source, destination.path])
+        let sshLease: NetworkCredentialLease?
+        if let sshCredential {
+            guard credential == nil, case .ssh = sshCredential,
+                  let endpoint = RemoteEndpoint.parse(source), endpoint.transport == .ssh else {
+                throw GitError("SSH credentials require an SSH clone URL.")
+            }
+            sshLease = try NetworkCredentialLease(endpoint: endpoint, credential: sshCredential)
+        } else { sshLease = nil }
+        defer { sshLease?.remove() }
+        let authentication = sshLease?.gitArguments ?? lease?.gitArguments ?? NetworkAuthentication.arguments
+        _ = try await GitCommandLog.$privateCredentials.withValue((credential.map { [$0.password] } ?? []) + (sshLease?.privateValues ?? [])) {
+            try await GitProcess.run(at: destination.deletingLastPathComponent(), arguments: authentication + ["clone", "--", source, destination.path], environmentOverrides: sshLease?.environment ?? [:])
         }
         return try await open(destination)
     }

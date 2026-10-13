@@ -49,6 +49,7 @@ struct MainWindow: View {
     @State private var selectedUpstream = ""
     @State private var pullPrompt: PullOperationPrompt?
     @State private var forcePushPrompt: ForcePushPrompt?
+    @State private var firstPushPrompt: FirstBranchPushPrompt?
     @State private var mergeAction: MergeActionPrompt?
     @State private var mainlineParent = 1
     private struct MergeActionPrompt: Identifiable {
@@ -441,6 +442,9 @@ struct MainWindow: View {
                 runToolbarForcePush(prompt)
             }
         }
+        .rayGitSheet(item: $firstPushPrompt, focusesOnPresentation: false) { prompt in
+            FirstBranchPushSheet(store: store, prompt: prompt) { firstPushPrompt = nil }
+        }
         .rayGitSheet(isPresented: Binding(get: { trackingBranch != nil }, set: { if !$0 { trackingBranch = nil; trackingRepository = nil } }), onDismiss: { trackingRepository = nil }) {
             VStack(alignment: .leading, spacing: 16) {
                 Text(sidebarRefinementText("Set Tracking Branch…")).font(.headline)
@@ -554,11 +558,18 @@ struct MainWindow: View {
     }
     private func prepareToolbarPush() {
         guard let repository = store.repository, !store.isBusy else { return }
-        store.checkNetworkPreflight(.push) { hint in
-            let execute = { executeToolbarPush(repository) }
-            if case let .pushBehind(preview) = hint { forcePushPrompt = ForcePushPrompt(repository: repository, preview: preview) }
-            else if let hint { confirm(mainText("pushTitle"), networkPreflightMessage(hint), action: execute) }
-            else { execute() }
+        Task { @MainActor in
+            do {
+                let request = try await repository.firstPushRequest()
+                guard store.repository === repository, !store.isBusy else { return }
+                if let request { firstPushPrompt = FirstBranchPushPrompt(repository: repository, request: request); return }
+                store.checkNetworkPreflight(.push) { hint in
+                    let execute = { executeToolbarPush(repository) }
+                    if case let .pushBehind(preview) = hint { forcePushPrompt = ForcePushPrompt(repository: repository, preview: preview) }
+                    else if let hint { confirm(mainText("pushTitle"), networkPreflightMessage(hint), action: execute) }
+                    else { execute() }
+                }
+            } catch { if store.repository === repository { store.report(error) } }
         }
     }
     private func executeToolbarPush(_ repository: GitRepository, credential suppliedCredential: NetworkCredential? = nil, saveCredential: Bool = false) {
@@ -1053,7 +1064,7 @@ extension MainWindow {
         case .viewLog: LogPresenter.show(repository: repository, selectedCommit: commit.hash, applyFilter: true)
         case .copyHash: copyText(commit.hash)
         case .copyMessage: copyText(commit.body.isEmpty ? commit.subject : commit.body)
-        case .createBranch: askName(interactionText("Create Branch at %@", commit.shortHash)) { name in store.operation(interactionText("Create Branch")) { try await $0.createBranch(name: name, startPoint: commit.hash) } }
+        case .createBranch: askName(interactionText("Create Branch at %@", commit.shortHash)) { name in store.operation(interactionText("Create Branch")) { try await $0.createBranch(name: name, startPoint: commit.hash, switchAfterCreation: true) } }
         case .createTag: askName(interactionText("Create Tag at %@", commit.shortHash)) { name in store.operation(interactionText("Create Tag")) { try await $0.createTag(name: name, commit: commit.hash) } }
         case .checkout: confirm(interactionText("Check Out Commit"), interactionText("Detached Message", commit.shortHash)) { store.operation(interactionText("Check Out Commit")) { try await $0.checkoutCommit(hash: commit.hash) } }
         case .cherryPick: confirm(interactionText("Cherry-Pick Commit"), interactionText("Cherry-Pick Message", commit.shortHash)) { store.operation(interactionText("Cherry-Pick Commit")) { try await $0.cherryPick(hash: commit.hash) } }
@@ -1069,7 +1080,7 @@ extension MainWindow {
         case .history: store.showHistory(path: nil, ref: value)
         case .createLocalBranch:
             askName(interactionText("Create Branch at %@", value), initial: String(value.split(separator: "/", maxSplits: 1).last ?? "")) { name in
-                store.operation(sidebarRefinementText("Create Local Branch…")) { try await $0.createBranch(name: name, startPoint: "refs/remotes/" + value) }
+                store.operation(sidebarRefinementText("Create Local Branch…")) { try await $0.createBranch(name: name, startPoint: "refs/remotes/" + value, switchAfterCreation: true) }
             }
         case .checkout:
             store.switchBranch(to: value) { stash in
@@ -1077,7 +1088,7 @@ extension MainWindow {
             }
         case .createBranchFromLocal:
             askName(interactionText("Create Branch at %@", value)) { name in
-                store.operation(sidebarRefinementText("Create Branch from This Branch…")) { try await $0.createBranch(name: name, startPoint: "refs/heads/" + value) }
+                store.operation(sidebarRefinementText("Create Branch from This Branch…")) { try await $0.createBranch(name: name, startPoint: "refs/heads/" + value, switchAfterCreation: true) }
             }
         case .merge: confirm(sidebarRefinementText("Merge into Current Branch"), sidebarRefinementText("Merge Branch Message", value, store.branch)) { store.operation(sidebarRefinementText("Merge into Current Branch")) { _ = try await $0.advancedOperation(.merge, first: value, second: "") } }
         case .stopTracking:
@@ -1219,6 +1230,7 @@ private struct WorkspacePaneSplit<Files: View, Diff: View, History: View, Commit
 }
 
 final class WorkspaceSplitView: NSSplitView, NSSplitViewDelegate {
+    private lazy var layoutDelegate = SplitViewLayoutDelegate(owner: self)
     var holdsPreviousPresentation = false {
         didSet {
             if holdsPreviousPresentation && !oldValue { window?.makeFirstResponder(self) }
@@ -1246,7 +1258,7 @@ final class WorkspaceSplitView: NSSplitView, NSSplitViewDelegate {
         super.init(frame: .zero)
         isVertical = false
         dividerStyle = .thin
-        delegate = self
+        delegate = layoutDelegate
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func layout() {

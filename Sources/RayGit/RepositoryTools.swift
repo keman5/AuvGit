@@ -177,17 +177,17 @@ struct CreateRepositorySheet: View {
     @State private var busy = false
     @State private var error = ""
     @State private var authenticationRequested = false
+    @State private var sshAuthenticationRequested = false
+    @State private var privateKey: URL?
+    @State private var keyPassphrase = ""
     @State private var username = ""
     @State private var password = ""
     @State private var saveCredential = true
-    @State private var authenticationFocusRequest: UUID?
-    private let initiallyFocusSource: Bool
     init(store: RepositoryStore, initialClone: Bool? = nil) {
         self.store = store
         var draft = RepositoryCreationDraft.load()
         if let initialClone { draft.clone = initialClone }
         draft.applyClipboard(NSPasteboard.general.string(forType: .string))
-        initiallyFocusSource = draft.clone && draft.source.isEmpty
         _clone = State(initialValue: draft.clone)
         _source = State(initialValue: draft.source)
         _destination = State(initialValue: draft.destination)
@@ -200,14 +200,15 @@ struct CreateRepositorySheet: View {
                 KeyViewProxy(label: workflowText("Clone existing repository"), checked: clone) { clone.toggle() }
                     .onChange(of: clone) { _, value in
                         if value { cloneDestination.sourceChanged(source); destination = cloneDestination.path }
-                        else { authenticationRequested = false; username = ""; password = "" }
+                        else { authenticationRequested = false; sshAuthenticationRequested = false; username = ""; password = ""; keyPassphrase = ""; privateKey = nil }
                     }
                 if clone {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(workflowText("Clone URL or local path")).font(.callout)
-                        StableTextField(workflowText("Clone URL or local path"), text: $source, initialFocus: initiallyFocusSource).textFieldStyle(.roundedBorder)
+                        StableTextField(workflowText("Clone URL or local path"), text: $source).textFieldStyle(.roundedBorder)
                             .onChange(of: source) { _, value in
                                 authenticationRequested = false; username = ""; password = ""; error = ""
+                                sshAuthenticationRequested = false; privateKey = nil; keyPassphrase = ""
                                 cloneDestination.sourceChanged(value); destination = cloneDestination.path
                             }
                     }
@@ -215,11 +216,29 @@ struct CreateRepositorySheet: View {
                         Divider()
                         VStack(alignment: .leading, spacing: 8) {
                             Text(workflowText("HTTPS authentication")).font(.headline)
-                            StableTextField(workflowText("Username"), text: $username, focusRequest: authenticationFocusRequest).textFieldStyle(.roundedBorder)
+                            StableTextField(workflowText("Username"), text: $username).textFieldStyle(.roundedBorder)
                             SecureField(workflowText("Password or personal access token"), text: $password).textFieldStyle(.roundedBorder)
                             KeyViewProxy(label: workflowText("Save authenticated credentials in macOS Keychain"), checked: saveCredential) { saveCredential.toggle() }
                             Text(workflowText("Git saves credentials after authentication succeeds, even if cloning fails later.")).font(.caption).foregroundStyle(.secondary)
                         }
+                    }
+                    if sshAuthenticationRequested {
+                        Divider()
+                        Text(networkText("sshPrivateKey")).font(.headline)
+                        StableTextField(networkText("username"), text: $username).textFieldStyle(.roundedBorder)
+                        HStack {
+                            Text(privateKey?.path ?? networkText("noPrivateKeySelected"))
+                                .lineLimit(1).truncationMode(.middle)
+                            KeyViewProxy(label: networkText("choosePrivateKey")) {
+                                let panel = NSOpenPanel()
+                                panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
+                                panel.showsHiddenFiles = true
+                                if panel.runModal() == .OK { privateKey = panel.url }
+                            }
+                        }
+                        SecureField(networkText("keyPassphraseOptional"), text: $keyPassphrase).textFieldStyle(.roundedBorder)
+                        KeyViewProxy(label: workflowText("Save authenticated credentials in macOS Keychain"), checked: saveCredential) { saveCredential.toggle() }
+                        Text(networkText("sshCredentialScope")).font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 VStack(alignment: .leading, spacing: 8) {
@@ -228,7 +247,7 @@ struct CreateRepositorySheet: View {
                         StableTextField(workflowText("Destination folder"), text: Binding(get: { destination }, set: {
                             destination = $0
                             if clone { cloneDestination.edit($0) }
-                        }), initialFocus: !initiallyFocusSource).textFieldStyle(.roundedBorder)
+                        })).textFieldStyle(.roundedBorder)
                         KeyViewProxy(label: workflowText(clone ? "Choose parent folder…" : "Choose…")) {
                             let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
                             if clone { panel.directoryURL = cloneDestination.parent }
@@ -245,8 +264,9 @@ struct CreateRepositorySheet: View {
             HStack(spacing: 8) {
                 if busy { ProgressView().controlSize(.small) }
                 KeyViewProxy(label: workflowText("Cancel"), keyEquivalent: "\u{1b}", minimumWidth: RayGitDialogButtonStyle.minimumWidth) { dismiss() }.disabled(busy)
-                KeyViewProxy(label: workflowText(authenticationRequested ? "Retry Clone" : "Create"), prominent: true, minimumWidth: RayGitDialogButtonStyle.minimumWidth) { create() }
+                KeyViewProxy(label: workflowText(authenticationRequested || sshAuthenticationRequested ? "Retry Clone" : "Create"), prominent: true, minimumWidth: RayGitDialogButtonStyle.minimumWidth) { create() }
                     .disabled(busy || CloneDestination.targetURL(destination) == nil || (clone && source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) || (authenticationRequested && (username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)))
+                    .disabled(sshAuthenticationRequested && (privateKey == nil || username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
             }.buttonStyle(RayGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.controlSize(.small).interactiveDismissDisabled(busy).padding(20).frame(width: 440)
             .nativeFocusRoot(reusingParent: true)
@@ -254,7 +274,7 @@ struct CreateRepositorySheet: View {
             .onChange(of: source) { _, _ in saveDraft() }
             .onChange(of: destination) { _, _ in saveDraft() }
             .onChange(of: cloneDestination) { _, _ in saveDraft() }
-            .onDisappear { password = ""; saveDraft() }
+            .onDisappear { password = ""; keyPassphrase = ""; saveDraft() }
     }
     private func saveDraft() {
         RepositoryCreationDraft(clone: clone, source: source, destination: destination, cloneDestination: cloneDestination).save()
@@ -271,9 +291,27 @@ struct CreateRepositorySheet: View {
         Task {
             await store.cancelBackgroundRepositorySync()
             do {
-                let repo = try await cloning ? GitRepository.clone(source: cloneSource, destination: target, credential: credential) : GitRepository.initialize(at: target)
+                let endpoint = RemoteEndpoint.parse(cloneSource)
+                var sshCredential: NetworkCredential?
+                if cloning, let endpoint, endpoint.transport == .ssh {
+                    if sshAuthenticationRequested, let privateKey {
+                        sshCredential = .ssh(username: username.trimmingCharacters(in: .whitespacesAndNewlines), privateKey: privateKey, passphrase: keyPassphrase.isEmpty ? nil : keyPassphrase)
+                    } else if let name = endpoint.username ?? RemoteCredentialStore.shared.preferredUsername(for: endpoint) {
+                        sshCredential = try? RemoteCredentialStore.shared.load(for: endpoint, username: name)
+                    }
+                }
+                let key: URL?
+                if case let .ssh(_, url, _)? = sshCredential { key = url } else { key = nil }
+                let accessed = key?.startAccessingSecurityScopedResource() ?? false
+                defer { if accessed { key?.stopAccessingSecurityScopedResource() } }
+                let repo = try await cloning ? GitRepository.clone(source: cloneSource, destination: target, credential: credential, sshCredential: sshCredential) : GitRepository.initialize(at: target)
+                if let sshCredential, let endpoint, saveCredential {
+                    do { try RemoteCredentialStore.shared.save(sshCredential, for: endpoint) }
+                    catch { store.error = OperationFailure.message(error) }
+                }
                 if cloning { cloneDestination.rememberSuccessfulClone(target) }
                 password = ""
+                keyPassphrase = ""
                 store.isBusy = false; await store.open(repo.url)
                 NotificationCenter.default.post(name: .rayGitRepositoryCreated, object: store, userInfo: ["path": repo.url.path])
                 dismiss()
@@ -282,11 +320,12 @@ struct CreateRepositorySheet: View {
                 _ = OperationFailure.message(error)
                 switch CloneAuthentication.classify(source: cloneSource, error: error) {
                 case .httpsCredentials:
-                    if !authenticationRequested { authenticationFocusRequest = UUID() }
                     authenticationRequested = true
                     self.error = workflowText("HTTPS authentication is required. Enter your username and password or personal access token, then retry.")
                 case .sshKey:
-                    self.error = workflowText("SSH authentication failed. Add a private key to your SSH agent and register its public key with the Git server, then retry.")
+                    sshAuthenticationRequested = true
+                    if username.isEmpty { username = RemoteEndpoint.parse(cloneSource)?.username ?? "git" }
+                    self.error = networkText("authenticationRequired")
                 case .other(let message):
                     self.error = message
                 }

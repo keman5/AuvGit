@@ -112,7 +112,7 @@ struct HistoryPane: View {
                 }
                 columnHeader(historyText("history.date"), column: .date, width: $dateWidth)
                 columnHeader(historyText("history.hash"), column: .hash, width: $hashWidth)
-            }.frame(maxWidth: .infinity, alignment: .leading).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).padding(.leading, HistoryColumnLayout.leadingInset).padding(.trailing, HistoryColumnLayout.trailingInset).frame(height: 28).fixedSize(horizontal: false, vertical: true).rayGitChrome()
+            }.frame(maxWidth: .infinity, alignment: .leading).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).padding(.leading, HistoryColumnLayout.headerLeadingInset).padding(.trailing, HistoryColumnLayout.trailingInset).frame(height: 28).fixedSize(horizontal: false, vertical: true).rayGitChrome()
             Divider()
             }
             if compact {

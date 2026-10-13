@@ -238,15 +238,19 @@ public actor GitRepository {
             throw error
         }
     }
-    public func createBranch(name: String, startPoint: String) async throws {
+    public func createBranch(name: String, startPoint: String, switchAfterCreation: Bool = false) async throws {
         try await validateBranch(name)
         if startPoint.hasPrefix("refs/remotes/") {
             _ = try await validatedCommit(startPoint)
             _ = try await run(["branch", "--track=direct", "--", name, startPoint])
-            return
+        } else {
+            let commit = try await validatedCommit(startPoint)
+            _ = try await run(["branch", "--", name, commit])
         }
-        let commit = try await validatedCommit(startPoint)
-        _ = try await run(["branch", "--", name, commit])
+        if switchAfterCreation {
+            do { try await checkout(branch: name) }
+            catch { throw GitError("Branch created: " + name + ". Could not switch; your changes are preserved.\n" + error.localizedDescription) }
+        }
     }
     public func createTag(name: String, commit: String) async throws {
         guard !name.isEmpty, !name.hasPrefix("-"), !name.contains("\0") else { throw GitError("Invalid tag name") }

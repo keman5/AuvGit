@@ -48,3 +48,7 @@
 "pullSavedChanges" = "Workspace changes were automatically saved in stash %@, including staged, unstaged and untracked files. The stash has been retained.";
 "pullChangesRestored" = "Saved changes were automatically restored into the updated workspace.";
 "pullChangesRetained" = "Saved changes have not been fully restored. Resolve local conflicts first, then inspect the retained stash and restore any remaining changes. Do not overwrite remote files with the same name.";
+"firstPushTitle" = "Choose Remote Branch and Push";
+"firstPushHint" = "This local branch has no upstream. Choose an existing remote branch or enter a new name. Confirming pushes immediately and saves tracking after success.";
+"chooseExistingBranch" = "Existing branches";
+"firstPushDestination" = "Destination:";

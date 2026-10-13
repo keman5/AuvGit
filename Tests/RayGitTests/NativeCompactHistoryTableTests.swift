@@ -54,7 +54,7 @@ final class NativeCompactHistoryTableTests: XCTestCase {
                 let x = Int((HistoryColumnLayout.leadingInset + HistoryColumnLayout.laneSpacing / 2 + CGFloat(row.nodeLane) * HistoryColumnLayout.laneSpacing) * 2)
                 let y = index * 44 + 22
                 let center = try XCTUnwrap(bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
-                let background = try XCTUnwrap(bitmap.colorAt(x: 5, y: y)?.usingColorSpace(.deviceRGB))
+                let background = try XCTUnwrap(bitmap.colorAt(x: 0, y: y)?.usingColorSpace(.deviceRGB))
                 if index < 2 {
                     XCTAssertEqual(center.redComponent, background.redComponent, accuracy: 0.02, "Remote-only nodes must remain hollow")
                 } else {

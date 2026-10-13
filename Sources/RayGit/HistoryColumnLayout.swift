@@ -25,7 +25,8 @@ enum HistoryColumn: String {
 
 /// The compact identity uses only its content width and never exceeds 100 points.
 enum HistoryColumnLayout {
-    static let leadingInset: CGFloat = 4
+    static let headerLeadingInset: CGFloat = 12
+    static let leadingInset: CGFloat = 1
     static let trailingInset: CGFloat = 12
     static let laneSpacing: CGFloat = 12
     static let nodeDiameter: CGFloat = 6

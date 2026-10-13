@@ -48,3 +48,7 @@
 "pullSavedChanges" = "工作区改动已自动保存到贮藏 %@（包含已暂存、未暂存和未跟踪文件）。该贮藏记录已保留。";
 "pullChangesRestored" = "保存的改动已自动恢复到更新后的工作区。";
 "pullChangesRetained" = "尚未完整恢复保存的改动。请先解决本地冲突，再从贮藏记录检查并恢复剩余改动；不要覆盖远程同名文件。";
+"firstPushTitle" = "选择远端分支并推送";
+"firstPushHint" = "此本地分支尚未关联远端。请选择已有远端分支或输入新分支名；确认后立即推送，成功后建立跟踪关系。";
+"chooseExistingBranch" = "选择已有分支";
+"firstPushDestination" = "推送目标：";

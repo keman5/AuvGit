@@ -2,6 +2,90 @@ import XCTest
 @testable import GitCore
 
 final class GitRepositoryTests: XCTestCase {
+    func testCreateBranchAtCommitSwitchesWhenRequestedAndPreservesDraft() async throws {
+        let (url, repo) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try "base".write(to: url.appendingPathComponent("file"), atomically: true, encoding: .utf8)
+        try await repo.stage(paths: ["file"]); try await repo.commit(message: "Base")
+        try "draft".write(to: url.appendingPathComponent("file"), atomically: true, encoding: .utf8)
+        try await repo.createBranch(name: "feature/new", startPoint: "HEAD", switchAfterCreation: true)
+        let branch = try await repo.currentBranch()
+        XCTAssertEqual(branch, "feature/new")
+        XCTAssertEqual(try String(contentsOf: url.appendingPathComponent("file"), encoding: .utf8), "draft")
+    }
+
+    func testFirstPushUsesChosenRemoteBranchAndSetsUpstreamOnlyOnSuccess() async throws {
+        let (url, repo) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let remote = url.appendingPathComponent("target.git")
+        try FileManager.default.createDirectory(at: remote, withIntermediateDirectories: true)
+        _ = try await GitProcess.run(at: remote, arguments: ["init", "--bare"])
+        _ = try await GitProcess.run(at: url, arguments: ["remote", "add", "chosen", remote.path])
+        try "base".write(to: url.appendingPathComponent("file"), atomically: true, encoding: .utf8)
+        try await repo.stage(paths: ["file"]); try await repo.commit(message: "Base")
+        let pending = try await repo.firstPushRequest()
+        let request = try XCTUnwrap(pending)
+        XCTAssertEqual(request.branch, "main")
+        XCTAssertEqual(request.remotes, ["chosen"])
+        try await repo.pushFirstBranch(request, remote: "chosen", remoteBranch: "review/new")
+        let branches = try await repo.branches()
+        XCTAssertEqual(branches.first { $0.isCurrent }?.upstream, "chosen/review/new")
+        let advertised = try await GitProcess.run(at: remote, arguments: ["rev-parse", "refs/heads/review/new"])
+        XCTAssertEqual(advertised.text.trimmingCharacters(in: .newlines), request.commit)
+        let next = try await repo.firstPushRequest()
+        XCTAssertNil(next)
+    }
+
+    func testFirstPushRejectsChangedHeadWithoutCreatingRemoteBranch() async throws {
+        let (url, repo) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        _ = try await GitProcess.run(at: url, arguments: ["remote", "add", "origin", "/unused-remote"])
+        try "base".write(to: url.appendingPathComponent("file"), atomically: true, encoding: .utf8)
+        try await repo.stage(paths: ["file"]); try await repo.commit(message: "Base")
+        let pending = try await repo.firstPushRequest()
+        let request = try XCTUnwrap(pending)
+        try await repo.createBranch(name: "different")
+        do { try await repo.pushFirstBranch(request, remote: "origin", remoteBranch: "main"); XCTFail("Stale selection must not push") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("changed")) }
+        let branches = try await repo.branches()
+        XCTAssertNil(branches.first { $0.isCurrent }?.upstream)
+    }
+
+    func testCreateBranchSwitchRefusalRetainsBranchAndUncommittedChanges() async throws {
+        let (url, repo) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let file = url.appendingPathComponent("file")
+        try "base".write(to: file, atomically: true, encoding: .utf8)
+        try await repo.stage(paths: ["file"]); try await repo.commit(message: "Base")
+        let base = try await repo.workflowRevision("HEAD")
+        try "new".write(to: file, atomically: true, encoding: .utf8)
+        try await repo.stage(paths: ["file"]); try await repo.commit(message: "New")
+        try "draft".write(to: file, atomically: true, encoding: .utf8)
+        do { try await repo.createBranch(name: "created", startPoint: base, switchAfterCreation: true); XCTFail("Switch must refuse overwrite") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("Branch created: created")) }
+        let current = try await repo.currentBranch()
+        let created = try await repo.workflowRevision("refs/heads/created")
+        XCTAssertEqual(current, "main")
+        XCTAssertEqual(created, base)
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "draft")
+    }
+
+    func testRejectedFirstPushLeavesUpstreamUnsetAndMissingUpstreamOffersSelection() async throws {
+        let (url, repo) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        _ = try await GitProcess.run(at: url, arguments: ["remote", "add", "origin", url.appendingPathComponent("missing.git").path])
+        try "base".write(to: url.appendingPathComponent("file"), atomically: true, encoding: .utf8)
+        try await repo.stage(paths: ["file"]); try await repo.commit(message: "Base")
+        let pending = try await repo.firstPushRequest()
+        let request = try XCTUnwrap(pending)
+        do { try await repo.pushFirstBranch(request, remote: "origin", remoteBranch: "new"); XCTFail("Unavailable remote must fail") } catch { }
+        let branches = try await repo.branches()
+        XCTAssertNil(branches.first { $0.isCurrent }?.upstream)
+        _ = try await GitProcess.run(at: url, arguments: ["config", "branch.main.remote", "origin"])
+        _ = try await GitProcess.run(at: url, arguments: ["config", "branch.main.merge", "refs/heads/deleted"])
+        let missing = try await repo.firstPushRequest()
+        XCTAssertNotNil(missing)
+    }
     func testBranchTrackingMetadataAndConfigOnlyRefresh() async throws {
         let (url, repo) = try await fixture()
         defer { try? FileManager.default.removeItem(at: url) }

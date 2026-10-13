@@ -4,6 +4,39 @@ import XCTest
 final class CloneCredentialSecurityTests: XCTestCase {
     private let credential = HTTPSCloneCredential(username: "fixture-user", password: "fixture-secret", saveToKeychain: false)
 
+    func testSSHCloneUsesSelectedKeyAndPortAndRedactsPassphraseOnFailure() async throws {
+        let defaults = UserDefaults.standard, setting = "raygit.git.executablePath"
+        let previous = defaults.object(forKey: setting)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer {
+            if let previous { defaults.set(previous, forKey: setting) } else { defaults.removeObject(forKey: setting) }
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let key = directory.appendingPathComponent("private key")
+        try Data("fixture".utf8).write(to: key)
+        let executable = directory.appendingPathComponent("git-fixture")
+        let captured = directory.appendingPathComponent("ssh-command")
+        try Data("#!/bin/sh\nprintf '%s' \"$GIT_SSH_COMMAND\" > '\(captured.path)'\n\"$SSH_ASKPASS\" >&2\nexit 1\n".utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        defaults.set(executable.path, forKey: setting)
+        func leases() throws -> Set<String> {
+            Set(try FileManager.default.contentsOfDirectory(atPath: FileManager.default.temporaryDirectory.path).filter { $0.hasPrefix("raygit-ssh-") })
+        }
+        let before = try leases()
+        do {
+            _ = try await GitRepository.clone(source: "ssh://git@example.invalid:2223/group/repo.git", destination: directory.appendingPathComponent("clone"),
+                sshCredential: .ssh(username: "git", privateKey: key, passphrase: "ssh-fixture-secret"))
+            XCTFail("Fixture must fail")
+        } catch { XCTAssertFalse(error.localizedDescription.contains("ssh-fixture-secret")) }
+        let command = try String(contentsOf: captured, encoding: .utf8)
+        XCTAssertTrue(command.contains(key.path))
+        XCTAssertTrue(command.contains("-p 2223"))
+        XCTAssertTrue(command.contains("IdentitiesOnly=yes"))
+        XCTAssertFalse(command.contains("ssh-fixture-secret"))
+        XCTAssertEqual(try leases(), before)
+    }
+
     func testRejectsCredentialBearingOrAmbiguousURLsWithoutEchoingThem() throws {
         for source in ["https://user@example.invalid/repo", "https://user:secret@example.invalid/repo", "https://%75ser@example.invalid/repo", "https://example.invalid/repo?", "https://example.invalid/repo?token=secret", "https://example.invalid/repo#", "https://example.invalid/repo#secret", "http://example.invalid/repo", "https:///repo"] {
             do {

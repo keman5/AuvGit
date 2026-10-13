@@ -20,6 +20,7 @@ struct NetworkOperationsView: View {
     @State private var pullPrompt: PullOperationPrompt?
     @State private var pullResultNotice: PullResultNotice?
     @State private var forcePushPrompt: ForcePushPrompt?
+    @State private var firstPushPrompt: FirstBranchPushPrompt?
     @State private var preflightPrompt: NetworkPreflightPrompt?
     @State private var remoteNames: [String] = []
     @State private var upstream = ""
@@ -201,6 +202,12 @@ struct NetworkOperationsView: View {
                 runForcePush(prompt)
             }
         }
+        .rayGitSheet(item: $firstPushPrompt, focusesOnPresentation: false) { prompt in
+            FirstBranchPushSheet(store: store, prompt: prompt) {
+                firstPushPrompt = nil
+                Task { await loadRepositoryContext() }
+            }
+        }
         .rayGitAlert(networkText("configureKeychain"), isPresented: $keychainConfirm) {
             RayGitAlertButton(networkText("cancel"), role: .cancel) {}
             RayGitAlertButton(networkText("run")) { configureKeychain() }
@@ -248,6 +255,18 @@ struct NetworkOperationsView: View {
     private func run(_ operation: NetworkOperation) {
         guard let repository = store.repository, !store.isBusy, task == nil else { return }
         if operation == .fetch { runVerified(operation); return }
+        if operation == .push || operation == .pushPreview {
+            Task { @MainActor in
+                do {
+                    let request = try await repository.firstPushRequest()
+                    guard store.repository === repository, !store.isBusy, task == nil else { return }
+                    if let request { firstPushPrompt = FirstBranchPushPrompt(repository: repository, request: request); return }
+                    runPreflight(operation, repository: repository)
+                } catch { output = OperationFailure.message(error, repository: repository.url) }
+            }
+        } else { runPreflight(operation, repository: repository) }
+    }
+    private func runPreflight(_ operation: NetworkOperation, repository: GitRepository) {
         store.checkNetworkPreflight(operation) { hint in
             if operation == .pull { pullPrompt = PullOperationPrompt(repository: repository, hint: hint) }
             else if case let .pushBehind(preview) = hint { forcePushPrompt = ForcePushPrompt(repository: repository, preview: preview) }
