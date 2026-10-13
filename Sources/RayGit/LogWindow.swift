@@ -144,7 +144,7 @@ private struct LogWindowContent: View {
                         HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch,
                             isLoading: store.loadingHistory, hasMore: store.hasMore,
                             onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy,
-                            onAction: historyAction, onShowChanges: { if let path = store.selectedCommitPath { compare(path) } }, showsDetails: false, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), currentBranch: store.branches.first { $0.isCurrent && !$0.isRemote }, localUnpushedCommitHashes: store.localUnpushedCommitHashes, navigationGeneration: store.historyNavigationGeneration, onJump: jump, authorFilter: $store.historyAuthor)
+                            onAction: historyAction, onShowChanges: { if let path = store.selectedCommitPath { compare(path) } }, showsDetails: false, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), visibleRemoteBranchNames: store.visibleHistoryRemoteBranchNames, currentBranch: store.branches.first { $0.isCurrent && !$0.isRemote }, localUnpushedCommitHashes: store.localUnpushedCommitHashes, navigationGeneration: store.historyNavigationGeneration, onJump: jump, authorFilter: $store.historyAuthor)
                             .frame(minWidth: 520, minHeight: 270, idealHeight: 470)
                         VSplitView {
                             commitMetadata.frame(minWidth: 270, minHeight: 145, idealHeight: 230)
@@ -216,7 +216,13 @@ private struct LogWindowContent: View {
                 }
                 if !store.stashes.isEmpty {
                     Section(interactionText("Stashes")) {
-                        ForEach(store.stashes) { stash in scopeRow(HistoryBranchScope.stashRef(stash), title: stash.subject, symbol: "archivebox") }
+                        ForEach(store.stashes) { stash in
+                            scopeRow(HistoryBranchScope.stashRef(stash), title: stash.datedTitle, symbol: "archivebox")
+                                .onTapGesture(count: 2) {
+                                    guard !store.isBusy else { return }
+                                    store.operation(interactionText("Apply Stash…")) { try await $0.applyStash(ref: stash.ref) }
+                                }
+                        }
                     }
                 }
             }.listStyle(.sidebar).scrollContentBackground(.hidden).font(.system(size: 12))

@@ -6,6 +6,29 @@ import GitCore
 
 @MainActor
 final class NativeBranchTableTests: XCTestCase {
+    func testCurrentBranchOmitsMergeButOtherBranchesKeepIt() throws {
+        let coordinator = pane().makeCoordinator()
+        coordinator.rows = coordinator.parent.rows
+        for (index, row) in coordinator.rows.enumerated() where row.id.hasPrefix("branch:") || row.id.hasPrefix("remote:") {
+            let menu = try XCTUnwrap(coordinator.menu(row: index))
+            let hasMerge = menu.items.contains { ($0.representedObject as? NativeBranchTable.Coordinator.MenuAction)?.action == .merge }
+            XCTAssertEqual(hasMerge, !row.current)
+        }
+    }
+
+    func testDoubleClickAppliesClickedStashImmediatelyAndDoesNothingWhileBusy() throws {
+        var received: [(SidebarAction, String)] = []
+        let view = pane(action: { received.append(($0, $1)) })
+        let coordinator = view.makeCoordinator(); coordinator.update(view)
+        let index = try XCTUnwrap(coordinator.rows.firstIndex { $0.id == "stash:stash@{0}" })
+        coordinator.activate(row: index)
+        XCTAssertEqual(received.count, 1)
+        XCTAssertEqual(received.first?.0, .stashApplyImmediately)
+        XCTAssertEqual(received.first?.1, "stash@{0}")
+        coordinator.update(pane(busy: true, action: { received.append(($0, $1)) }))
+        coordinator.activate(row: index)
+        XCTAssertEqual(received.count, 1)
+    }
     func testLocalBranchCreationTargetsClickedBranchAndIsDisabledWhileBusy() throws {
         var received: String?
         var view = pane()

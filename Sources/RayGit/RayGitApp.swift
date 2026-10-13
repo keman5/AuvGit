@@ -113,7 +113,10 @@ final class RepositoryStore: ObservableObject {
         var workspaceStatusFailure: String? = nil
     }
 
-    @Published var repository: GitRepository?
+    @Published var repository: GitRepository? {
+        didSet { if oldValue !== repository { repositoryOperation = nil } }
+    }
+    @Published var repositoryOperation: RepositoryOperationState?
     @Published var repositoryURL: URL?
     @Published var openRepositories: [String] = []
     @Published var repositoryGroups = UserDefaults.standard.dictionary(forKey: "repositoryGroups") as? [String: String] ?? [:]
@@ -360,6 +363,9 @@ final class RepositoryStore: ObservableObject {
     @Published var historyPath: String?
     @Published var historyRef: String?
     @Published var checkedHistoryRefs: Set<String>?
+    var visibleHistoryRemoteBranchNames: Set<String> {
+        HistoryBranchScope.remoteBranchNames(in: followsCurrentBranch ? [] : checkedHistoryRefs ?? [], branches: branches)
+    }
     @Published var historyPinnedCommit: String?
     @Published var commitMessage = ""
     @Published var recentCommitMessages: [String] = []
@@ -967,6 +973,7 @@ final class RepositoryStore: ObservableObject {
             setStatus("Refreshed · %@ changes · %@ staged", arguments: [String(files.count), String(stagedCount)])
             let observedState = try await stateRead
             guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
+            repositoryOperation = observedState.operation
             if followsCurrentBranch, !reuseMetadata {
                 let head = result.2 + "|" + ((try? await repository.workflowRevision("HEAD")) ?? "")
                 guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
@@ -1063,6 +1070,7 @@ final class RepositoryStore: ObservableObject {
             applyFileStatus(newFiles)
             let state = try await repository.changeState(files: newFiles)
             guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
+            repositoryOperation = state.operation
             if workspaceStatusFailure != nil { workspaceStatusFailure = nil; errorMessage = nil }
             if repositoryChangeCounts[repository.url.path] != newFiles.count { repositoryChangeCounts[repository.url.path] = newFiles.count }
             let previous = repositorySyncStates[repository.url.path]
@@ -1190,6 +1198,7 @@ final class RepositoryStore: ObservableObject {
         loadingDiff = false; loadingHistory = false; selectFirstHistoryCommit = false
         files = snapshot.files; filesGeneration = snapshot.filesGeneration
         branches = snapshot.branches; branch = snapshot.branch; stashes = snapshot.stashes
+        repositoryOperation = snapshot.observedState?.operation
         lastObservedState = snapshot.observedState; lastHistoryState = snapshot.historyState; lastMainHistoryHead = snapshot.mainHistoryHead
         if usesCheckedHistoryScope { configureCheckedHistoryRefs() }
         commits = snapshot.commits
@@ -1245,7 +1254,7 @@ final class RepositoryStore: ObservableObject {
             var hasMoreIncoming = false
             if historyPinnedCommit == nil, historyStashHash == nil, historyPath == nil, historyRef?.hasPrefix("refs/tags/") != true {
                 let incomingLimit = reset ? requestedCount : commits.count + requestedCount
-                let incomingRows = try await repository.log(limit: incomingLimit + 1, search: historySearch, author: historyAuthor, incomingOnly: true)
+                let incomingRows = try await repository.log(limit: incomingLimit + 1, search: historySearch, author: historyAuthor, refs: visibleHistoryRemoteBranchNames.map { "refs/remotes/" + $0 }.sorted(), incomingOnly: true)
                 incoming = Array(incomingRows.prefix(incomingLimit))
                 hasMoreIncoming = incomingRows.count > incomingLimit
             } else { incoming = [] }

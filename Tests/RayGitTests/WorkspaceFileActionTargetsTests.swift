@@ -13,16 +13,16 @@ final class WorkspaceFileActionTargetsTests: XCTestCase {
     func testEmptySelectionTargetsAllEligibleRows() {
         XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .stage, files: files, selection: []), ["modified", "mixed", "untracked"])
         XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .unstage, files: files, selection: []), ["staged", "mixed"])
-        XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .discard, files: files, selection: []), ["modified", "mixed", "untracked"])
+        XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .discard, files: files, selection: []), ["modified", "mixed", "untracked", "conflict"])
     }
     func testSelectionRestrictsTargetsWithoutFallingBackToAll() {
-        XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .discard, files: files, selection: ["modified", "untracked", "conflict"]), ["modified", "untracked"])
+        XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .discard, files: files, selection: ["modified", "untracked", "conflict"]), ["modified", "untracked", "conflict"])
         XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .stage, files: files, selection: ["missing", "ignored"]), [])
         XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .unstage, files: files, selection: ["modified"]), [])
     }
-    func testCleanRepositoryAndConflictsNeverProduceDiscardTargets() {
+    func testCleanRepositoryHasNoDiscardTargetsButUnmergedFilesDo() {
         XCTAssertTrue(WorkspaceFileActionTargets.paths(for: .discard, files: [], selection: []).isEmpty)
-        XCTAssertTrue(WorkspaceFileActionTargets.paths(for: .discard, files: files, selection: ["conflict"]).isEmpty)
+        XCTAssertEqual(WorkspaceFileActionTargets.paths(for: .discard, files: files, selection: ["conflict"]), ["conflict"])
     }
     func testAvailabilityMatchesResolvedTargetsForStatusesAndSelections() {
         let rows = files + [GitFile(path: "ignored", indexStatus: "!", worktreeStatus: "!"), GitFile(path: "clean", indexStatus: " ", worktreeStatus: " ")]

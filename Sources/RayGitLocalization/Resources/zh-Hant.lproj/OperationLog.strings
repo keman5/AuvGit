@@ -7,7 +7,7 @@
 "Authentication required" = "需要遠端認證，請檢查已登入帳戶或憑據";
 "SSH authentication failed" = "SSH 認證失敗，請檢查 SSH 金鑰";
 "No upstream branch configured" = "目前分支未設定上游分支";
-"Remote and local branches have diverged" = "本機與遠端分支已分岔，無法直接快進";
+"Remote and local branches have diverged" = "本機與遠端分支已分岔";
 "Cannot connect to remote" = "無法連線遠端儲存庫";
 "Local changes would be overwritten" = "操作會覆蓋本機修改";
 "Repository is locked by another Git operation" = "儲存庫被另一個 Git 操作鎖定";

@@ -47,7 +47,7 @@ extension GitRepository {
         var tracked: [String] = []
         var untracked: [String] = []
         for path in Set(paths).sorted() {
-            guard let file = entries[path], !file.isConflict, file.isUnstaged else { throw GitError("Cannot discard this worktree path: " + path) }
+            guard let file = entries[path], file.isUnstaged || file.isConflict else { throw GitError("Cannot discard this worktree path: " + path) }
             if file.isUntracked {
                 let file = try managedURL(path)
                 let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
@@ -56,7 +56,7 @@ extension GitRepository {
             } else { tracked.append(path) }
         }
         // Restore tracked worktrees from the index, leaving all staged contents untouched.
-        try await discardWorktree(paths: tracked)
+        try await discardWorktree(paths: tracked, includeConflicts: true)
         for path in untracked { try permanentlyDeleteWorkspaceFile(path: path) }
     }
     public func trashWorkspaceFile(path: String) throws -> TrashedRepositoryFile {

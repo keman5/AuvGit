@@ -27,6 +27,14 @@ struct HistoryBranchScope {
         defaults.set(values, forKey: preferenceKey)
     }
     static func branchRef(_ branch: GitBranch) -> String { (branch.isRemote ? "refs/remotes/" : "refs/heads/") + branch.name }
+    static func remoteBranchNames(in refs: Set<String>, branches: [GitBranch]) -> Set<String> {
+        let available = Set(branches.filter(\.isRemote).map(\.name))
+        var selected = Set(branches.filter { $0.isRemote && refs.contains(branchRef($0)) }.map(\.name))
+        for branch in branches where !branch.isRemote && (branch.isCurrent || refs.contains(branchRef(branch))) {
+            if let upstream = branch.upstream { selected.insert(upstream.replacingOccurrences(of: "refs/remotes/", with: "")) }
+        }
+        return selected.intersection(available)
+    }
     static func defaultRefs(branches: [GitBranch], branch: String) -> Set<String> {
         return ["HEAD", allStashes]
     }

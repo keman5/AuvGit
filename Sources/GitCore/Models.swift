@@ -90,7 +90,8 @@ public struct GitStash: Identifiable, Hashable, Sendable, Codable {
     public let ref: String
     public let subject: String
     public let hash: String
-    public init(ref: String, subject: String, hash: String = "") { self.ref = ref; self.subject = subject; self.hash = hash }
+    public let createdDate: Date?
+    public init(ref: String, subject: String, hash: String = "", createdDate: Date? = nil) { self.ref = ref; self.subject = subject; self.hash = hash; self.createdDate = createdDate }
 }
 public enum DiffTarget: Equatable, Sendable {
     case worktree(path: String, untracked: Bool)

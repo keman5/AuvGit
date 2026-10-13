@@ -134,6 +134,7 @@ final class GitRepositoryTests: XCTestCase {
         try await repo.stage(paths: ["sample.txt"]); try await repo.commit(message: "Remote tip")
         let remote = try await GitProcess.run(at: url, arguments: ["rev-parse", "HEAD"])
         let remoteHash = remote.text.trimmingCharacters(in: .newlines)
+        _ = try await GitProcess.run(at: url, arguments: ["remote", "add", "origin", "/unused-local-remote"])
         _ = try await GitProcess.run(at: url, arguments: ["update-ref", "refs/remotes/origin/feature/nested", remoteHash])
         try "local\n".write(to: file, atomically: true, encoding: .utf8)
         try await repo.stage(paths: ["sample.txt"]); try await repo.commit(message: "Different local tip")
@@ -151,9 +152,10 @@ final class GitRepositoryTests: XCTestCase {
 
     func testLocalRemoteFetchPullPushAndDivergence() async throws {
         let (url, repo) = try await fixture()
-        let remote = url.appendingPathComponent("remote.git")
-        let peer = url.appendingPathComponent("peer")
-        defer { try? FileManager.default.removeItem(at: url) }
+        let networkRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let remote = networkRoot.appendingPathComponent("remote.git")
+        let peer = networkRoot.appendingPathComponent("peer")
+        defer { try? FileManager.default.removeItem(at: url); try? FileManager.default.removeItem(at: networkRoot) }
         try FileManager.default.createDirectory(at: remote, withIntermediateDirectories: true)
         _ = try await GitProcess.run(at: remote, arguments: ["init", "--bare", "-b", "main"])
         try "base\n".write(to: url.appendingPathComponent("shared.txt"), atomically: true, encoding: .utf8)
@@ -164,6 +166,9 @@ final class GitRepositoryTests: XCTestCase {
         _ = try await GitProcess.run(at: peer, arguments: ["config", "user.name", "Peer"])
         _ = try await GitProcess.run(at: peer, arguments: ["config", "user.email", "peer@example.invalid"])
         let peerRepo = try await GitRepository.open(peer)
+        for arguments in [["config", "pull.ff", "only"], ["config", "pull.rebase", "true"], ["config", "merge.autostash", "true"], ["config", "core.editor", "/usr/bin/false"]] {
+            _ = try await GitProcess.run(at: url, arguments: arguments)
+        }
         try "peer\n".write(to: peer.appendingPathComponent("peer.txt"), atomically: true, encoding: .utf8)
         try await peerRepo.stage(paths: ["peer.txt"]); try await peerRepo.commit(message: "Peer remote commit")
         try await peerRepo.push()
@@ -173,6 +178,9 @@ final class GitRepositoryTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.appendingPathComponent("peer.txt").path))
         try await repo.pull()
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.appendingPathComponent("peer.txt").path))
+        let fastForward = try await repo.log(limit: 1, ref: "HEAD")
+        XCTAssertEqual(fastForward.first?.subject, "Peer remote commit")
+        XCTAssertEqual(fastForward.first?.parents.count, 1)
         try "local\n".write(to: url.appendingPathComponent("local.txt"), atomically: true, encoding: .utf8)
         try await repo.stage(paths: ["local.txt"]); try await repo.commit(message: "Local pushed commit")
         try await repo.push(); try await peerRepo.pull()
@@ -182,12 +190,54 @@ final class GitRepositoryTests: XCTestCase {
         try "peer fork\n".write(to: peer.appendingPathComponent("peer-fork.txt"), atomically: true, encoding: .utf8)
         try await peerRepo.stage(paths: ["peer-fork.txt"]); try await peerRepo.commit(message: "Remote divergence")
         try await peerRepo.push()
+        let localTip = try await GitProcess.run(at: url, arguments: ["rev-parse", "HEAD"]).text.trimmingCharacters(in: .newlines)
+        let remoteTip = try await GitProcess.run(at: peer, arguments: ["rev-parse", "HEAD"]).text.trimmingCharacters(in: .newlines)
         try await repo.pull()
-        let head = try await repo.log(limit: 1)
-        let current = try await GitProcess.run(at: url, arguments: ["log", "-1", "--format=%s", "HEAD"])
-        XCTAssertTrue(current.text.contains("Merge"))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: url.appendingPathComponent("peer-fork.txt").path))
-        XCTAssertFalse(head.isEmpty)
+        let head = try await repo.log(limit: 1, ref: "HEAD")
+        XCTAssertEqual(head.first?.parents, [localTip, remoteTip])
+        XCTAssertTrue(head.first?.subject.contains("Merge") == true)
+        XCTAssertEqual(try String(contentsOf: url.appendingPathComponent("fork.txt"), encoding: .utf8), "local fork\n")
+        XCTAssertEqual(try String(contentsOf: url.appendingPathComponent("peer-fork.txt"), encoding: .utf8), "peer fork\n")
+        let configuredFF = try await GitProcess.run(at: url, arguments: ["config", "pull.ff"]).text
+        let configuredRebase = try await GitProcess.run(at: url, arguments: ["config", "pull.rebase"]).text
+        XCTAssertEqual(configuredFF, "only\n"); XCTAssertEqual(configuredRebase, "true\n")
+
+        try "remote edit\n".write(to: peer.appendingPathComponent("shared.txt"), atomically: true, encoding: .utf8)
+        try await peerRepo.stage(paths: ["shared.txt"]); try await peerRepo.commit(message: "Conflicting remote edit")
+        try await peerRepo.push()
+        let shared = url.appendingPathComponent("shared.txt")
+        try "unsaved draft\n".write(to: shared, atomically: true, encoding: .utf8)
+        let incomingTip = try await peerRepo.workflowRevision("HEAD")
+        let recovered = try await repo.runNetwork(.pull, progress: { _ in })
+        XCTAssertEqual(recovered.pullOutcome?.conflicts, ["shared.txt"])
+        let savedDraft = try XCTUnwrap(recovered.pullOutcome?.stashHash)
+        let savedContents = try await repo.workflowRead(["show", savedDraft + ":shared.txt"])
+        XCTAssertEqual(savedContents, "unsaved draft\n")
+        let afterRecovery = try await repo.log(limit: 1, ref: "HEAD")
+        XCTAssertEqual(afterRecovery.first?.parents, [try XCTUnwrap(head.first?.hash), incomingTip])
+        let restoredConflict = try String(contentsOf: shared, encoding: .utf8)
+        XCTAssertTrue(restoredConflict.contains("<<<<<<<")); XCTAssertTrue(restoredConflict.contains("unsaved draft")); XCTAssertTrue(restoredConflict.contains("remote edit"))
+        let configuredAutoStash = try await repo.workflowRead(["config", "merge.autostash"])
+        XCTAssertEqual(configuredAutoStash, "true\n")
+
+        try "local edit\n".write(to: shared, atomically: true, encoding: .utf8)
+        try await repo.stage(paths: ["shared.txt"]); try await repo.commit(message: "Conflicting local edit")
+        try "another remote edit\n".write(to: peer.appendingPathComponent("shared.txt"), atomically: true, encoding: .utf8)
+        try await peerRepo.stage(paths: ["shared.txt"]); try await peerRepo.commit(message: "Another conflicting remote edit")
+        try await peerRepo.push()
+        let beforeConflict = try await repo.log(limit: 1, ref: "HEAD")
+        let conflicted = try await repo.runNetwork(.pull, progress: { _ in })
+        XCTAssertEqual(conflicted.pullOutcome?.conflicts, ["shared.txt"])
+        XCTAssertNil(conflicted.pullOutcome?.stashHash)
+        let afterConflict = try await repo.log(limit: 1, ref: "HEAD")
+        XCTAssertEqual(afterConflict.first?.hash, beforeConflict.first?.hash)
+        let files = try await repo.status()
+        XCTAssertTrue(files.contains { $0.path == "shared.txt" && $0.isConflict })
+        let mergedRemote = try await GitProcess.run(at: url, arguments: ["rev-parse", "MERGE_HEAD"]).text
+        let conflictingRemote = try await GitProcess.run(at: peer, arguments: ["rev-parse", "HEAD"]).text
+        XCTAssertEqual(mergedRemote, conflictingRemote)
+        let conflict = try String(contentsOf: shared, encoding: .utf8)
+        XCTAssertTrue(conflict.contains("<<<<<<<")); XCTAssertTrue(conflict.contains("local edit")); XCTAssertTrue(conflict.contains("remote edit"))
     }
 
 }

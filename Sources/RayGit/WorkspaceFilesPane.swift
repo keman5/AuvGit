@@ -125,7 +125,7 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
         case .history: return !file.isUntracked && file.indexStatus != "A"
         case .stage, .stageAll: return file.isUnstaged && !file.isConflict
         case .unstage, .unstageAll: return file.isStaged && !file.isConflict
-        case .discard: return !file.isConflict && file.isUnstaged
+        case .discard: return file.isUnstaged || file.isConflict
         default: return true
         }
     }

@@ -53,14 +53,16 @@ struct HistoryGraphStylePlan {
     private let currentCommitHashes: Set<String>
     private let remoteBranchNames: Set<String>
     private let remoteNames: Set<String>
+    private let visibleRemoteBranchNames: Set<String>?
     private let currentBranchName: String?
     private let currentRemoteBranchName: String?
     private let unpushedHashes: Set<String>
 
-    init(commits: [GitCommit], remoteBranchNames: Set<String>, localUnpushedHashes: Set<String>? = nil, currentBranch: GitBranch? = nil) {
+    init(commits: [GitCommit], remoteBranchNames: Set<String>, localUnpushedHashes: Set<String>? = nil, currentBranch: GitBranch? = nil, visibleRemoteBranchNames: Set<String>? = nil) {
         let unpushed = localUnpushedHashes ?? []
         unpushedHashes = unpushed
         self.remoteBranchNames = remoteBranchNames
+        self.visibleRemoteBranchNames = visibleRemoteBranchNames
         let remoteNames = Set(remoteBranchNames.compactMap { $0.split(separator: "/", maxSplits: 1).first.map(String.init) })
         self.remoteNames = remoteNames
         commitsByHash = Dictionary(uniqueKeysWithValues: commits.map { ($0.hash, $0) })
@@ -72,7 +74,9 @@ struct HistoryGraphStylePlan {
             for reference in commit.refs {
                 if Self.isCurrentReference(reference) { current.insert(commit.hash) }
                 guard let branch = Self.branch(reference, tip: commit.hash, remoteBranchNames: remoteBranchNames, remoteNames: remoteNames) else { continue }
-                if branch.remote { remote.append(branch) } else { local.append(branch) }
+                if branch.remote {
+                    if visibleRemoteBranchNames?.contains(branch.name) != false { remote.append(branch) }
+                } else { local.append(branch) }
             }
         }
         currentCommitHashes = current
@@ -175,6 +179,10 @@ struct HistoryGraphStylePlan {
     func isTagReference(_ reference: String) -> Bool { Self.isTagReference(reference) }
     func isRemoteReference(_ reference: String) -> Bool {
         Self.branch(reference, tip: "", remoteBranchNames: remoteBranchNames, remoteNames: remoteNames)?.remote == true
+    }
+    func isVisibleReference(_ reference: String) -> Bool {
+        guard let branch = Self.branch(reference, tip: "", remoteBranchNames: remoteBranchNames, remoteNames: remoteNames), branch.remote else { return true }
+        return visibleRemoteBranchNames?.contains(branch.name) != false
     }
 
     private static func uniqueBranches(_ branches: [Branch]) -> [Branch] {

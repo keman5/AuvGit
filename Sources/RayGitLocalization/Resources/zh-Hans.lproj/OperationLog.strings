@@ -7,7 +7,7 @@
 "Authentication required" = "需要远程认证，请检查已登录账户或凭据";
 "SSH authentication failed" = "SSH 认证失败，请检查 SSH 密钥";
 "No upstream branch configured" = "当前分支未配置上游分支";
-"Remote and local branches have diverged" = "本地与远程分支已分叉，无法直接快进";
+"Remote and local branches have diverged" = "本地与远程分支已分叉";
 "Cannot connect to remote" = "无法连接远程仓库";
 "Local changes would be overwritten" = "操作会覆盖本地修改";
 "Repository is locked by another Git operation" = "仓库被另一个 Git 操作锁定";

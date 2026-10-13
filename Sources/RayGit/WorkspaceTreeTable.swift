@@ -185,8 +185,13 @@ struct WorkspaceTreeTable: NSViewRepresentable {
         }
         @objc private func disclose(_ button: NSButton) { if let path = button.identifier?.rawValue { toggle(path) } }
         @objc func open(_ sender: Any?) {
-            guard enabled, let table, rows.indices.contains(table.clickedRow), table.selectedRowIndexes.count == 1 else { return }
-            let row = rows[table.selectedRow]
+            if let table { activate(row: table.clickedRow) }
+        }
+        func activate(row index: Int) {
+            guard enabled, let table, rows.indices.contains(index) else { return }
+            let row = rows[index]
+            table.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
+            parent.selection.wrappedValue = [row.path]
             if row.isDirectory { toggle(row.path) } else { parent.openFile(row.path) }
         }
         func arrow(_ key: UInt16) -> Bool {

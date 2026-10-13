@@ -42,3 +42,5 @@
 "Discard Workspace Message" = "已跟踪文件的未暂存修改将恢复为索引版本。未跟踪文件将被永久删除，无法在应用内撤销。已暂存内容保持不变。";
 
 "File Count Summary" = "%d 个文件";
+
+"Discard Conflict Workspace Message" = "非合并等操作状态下，冲突文件及其索引将恢复为 HEAD 版本；HEAD 中不存在的文件会被删除。其他未暂存修改恢复为索引版本，保留其已暂存内容。未跟踪文件将被永久删除。";

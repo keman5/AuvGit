@@ -26,4 +26,4 @@
 "Delete Remote Branch Message" = "Delete remote branch %@? This removes the branch on the server for everyone. Local branches are kept.";
 "Force Delete Branch…" = "Force Delete Branch…";
 "Force Delete Branch Message" = "Branch %@ has unmerged commits. Force delete it? Commits reachable only from this branch may be lost.";
-"Create Branch from This Branch…" = "Create Branch from This Branch…";
+"Create Branch from This Branch…" = "Create Branch…";

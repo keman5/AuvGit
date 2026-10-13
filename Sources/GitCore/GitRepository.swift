@@ -70,7 +70,9 @@ public actor GitRepository {
         var revisionInput: URL?
         defer { if let revisionInput { try? FileManager.default.removeItem(at: revisionInput) } }
         if incomingOnly {
-            args += ["--remotes", "--not", "--branches"]
+            if let refs { for value in Set(refs).sorted() { args.append(try await validatedCommit(value)) } }
+            else { args.append("--remotes") }
+            args += ["--not", "--branches"]
             if head.code == 0 { args.append("HEAD") }
         } else if includeRecyclable || !stashHashes.isEmpty {
             // Enumerate normal history independently so stash index/untracked parents
@@ -201,15 +203,26 @@ public actor GitRepository {
         let root = url.resolvingSymlinksInPath().path
         guard parent == root || parent.hasPrefix(root + "/") else { throw GitError("Path is outside repository") }
     }
-    public func discardWorktree(paths: [String]) async throws {
+    public func discardWorktree(paths: [String], includeConflicts: Bool = false) async throws {
         guard !paths.isEmpty else { return }
         let entries = Dictionary(try await status().map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
         let tracked = Set(fields(try await run(["ls-files", "-z"]).data))
         for path in paths {
             try validatePath(path)
-            guard tracked.contains(path), let entry = entries[path], !entry.isConflict, !entry.isUntracked, entry.isUnstaged else { throw GitError("Cannot discard this worktree path: " + path) }
+            guard tracked.contains(path), let entry = entries[path], (!entry.isConflict || includeConflicts), !entry.isUntracked,
+                  entry.isUnstaged || entry.isConflict else { throw GitError("Cannot discard this worktree path: " + path) }
         }
-        _ = try await run(["restore", "--worktree", "--"] + Set(paths).sorted())
+        let conflicts = Set(paths).filter { entries[$0]?.isConflict == true }.sorted()
+        if !conflicts.isEmpty {
+            let context = try await resetContext()
+            // Unmerged entries have no stage-zero version to restore from the index.
+            let headPaths = Set(fields(try await run(["ls-tree", "-r", "--name-only", "-z", context.head, "--"] + conflicts).data))
+            let present = conflicts.filter { headPaths.contains($0) }, deleted = conflicts.filter { !headPaths.contains($0) }
+            if !present.isEmpty { _ = try await run(["restore", "--source=" + context.head, "--staged", "--worktree", "--"] + present) }
+            if !deleted.isEmpty { _ = try await run(["rm", "--force", "--"] + deleted) }
+        }
+        let ordinary = Set(paths).filter { entries[$0]?.isConflict != true }.sorted()
+        if !ordinary.isEmpty { _ = try await run(["restore", "--worktree", "--"] + ordinary) }
     }
     public func renameBranch(oldName: String, newName: String) async throws {
         try await validateBranch(oldName); try await validateBranch(newName)
@@ -276,8 +289,11 @@ public actor GitRepository {
     public func pull(credential: NetworkCredential? = nil) async throws { _ = try await runNetwork(.pull, credential: credential, progress: { _ in }) }
     public func push(credential: NetworkCredential? = nil) async throws { _ = try await runNetwork(.push, credential: credential, progress: { _ in }) }
     public func stashes() async throws -> [GitStash] {
-        let tokens = fields(try await run(["stash", "list", "-z", "--format=%gd%x00%gs%x00%H"]).data)
-        return stride(from: 0, to: max(0,tokens.count - 2), by: 3).map { GitStash(ref: tokens[$0], subject: tokens[$0+1], hash: tokens[$0+2]) }
+        let tokens = fields(try await run(["stash", "list", "-z", "--format=%gd%x00%gs%x00%H%x00%ct"]).data)
+        return try stride(from: 0, to: max(0,tokens.count - 3), by: 4).map {
+            guard let timestamp = TimeInterval(tokens[$0+3]) else { throw GitError("Invalid stash timestamp") }
+            return GitStash(ref: tokens[$0], subject: tokens[$0+1], hash: tokens[$0+2], createdDate: Date(timeIntervalSince1970: timestamp))
+        }
     }
     public func stash(message: String) async throws {
         // Stash uses magic pathspecs internally to clean saved untracked files.

@@ -24,7 +24,7 @@
 "knownStateTitle" = "已知遠端狀態";
 "verifyRemote" = "核實遠端並繼續";
 "knownPushBehind" = "上次取得的 %@/%@ 中有 %d 個本機尚未包含的提交，一般推送可能遭拒。繼續連線核實最新狀態？強制推送仍需另行確認。";
-"knownPullDiverged" = "上次取得的狀態顯示分支已分岔：本機獨有 %d 個提交，遠端獨有 %d 個提交。拉取會嘗試自動合併，無法解決的衝突保留在本機並顯示提示。";
+"knownPullDiverged" = "上次取得的狀態顯示分支已分岔：本機獨有 %d 個提交，遠端獨有 %d 個提交。拉取會取得最新遠端提交並嘗試合併至目前分支，無法解決的衝突保留在本機並顯示提示。取得只更新遠端記錄。";
 "authenticationRequired" = "需要驗證";
 "authenticationMethod" = "驗證方式";
 "accessTokenOrAppPassword" = "存取權杖 / App Password";

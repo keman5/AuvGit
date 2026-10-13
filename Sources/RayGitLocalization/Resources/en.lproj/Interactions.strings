@@ -42,3 +42,5 @@
 "Discard Workspace Message" = "Unstaged tracked changes will be restored from the index. Untracked files will be permanently deleted. This cannot be undone in the app. Staged contents will be preserved.";
 
 "File Count Summary" = "%d files";
+
+"Discard Conflict Workspace Message" = "Outside an active Git operation, conflicted files and their index entries will be restored to HEAD. Files absent from HEAD will be deleted. Other staged contents remain unchanged; ordinary unstaged changes are restored from the index. Untracked files are permanently deleted.";

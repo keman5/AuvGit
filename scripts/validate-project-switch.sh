@@ -3,6 +3,12 @@ set -euo pipefail
 cd "${0:A:h:h}"
 TEST_FLAGS=()
 case "${1:-all}" in
+  pull-merge)
+    TEST_FILTER='GitRepositoryTests|GuardedForcePushTests|GitCommandLogTests|NetworkAuthenticationPolicyTests|LocalizationTests'
+    ;;
+  conflict-recovery)
+    TEST_FILTER='ConflictRecoveryTests|HistoryResetTests|FileManagementTests|WorkspaceFileActionTargetsTests|WorkspaceContextEligibilityTests|WorkspaceKeyboardShortcutsTests|HistoryKeyboardShortcutsTests'
+    ;;
   branch-save|branch-save-core)
     TEST_FILTER='NativeBranchTableTests|GitRepositoryTests.testCreateLocalBranchAtRemotePreservesCheckoutAndDraft|DialogAppearanceTests.testRemoteBranchNamePromptUsesClickableNativeSaveButton|DialogButtonWidthTests'
     if [[ "$1" == branch-save-core ]]; then
@@ -65,6 +71,6 @@ $PWD"
     TEST_FILTER='DialogAppearanceTests|DialogButtonWidthTests'
     TEST_FLAGS=(--skip-build)
     ;;
-  *) print -u2 "Usage: $0 [all|performance|cold-text|branches|branch-icons|branch-save|branch-save-core|sidebar-polish|dialog-focus|dialog-presentation|dimming|real|mutations|preview-ui|preview-core|layout-scroll|comparison-polish|preview-html|dialogs]"; exit 1 ;;
+  *) print -u2 "Usage: $0 [all|pull-merge|performance|cold-text|branches|branch-icons|branch-save|branch-save-core|sidebar-polish|dialog-focus|dialog-presentation|dimming|conflict-recovery|real|mutations|preview-ui|preview-core|layout-scroll|comparison-polish|preview-html|dialogs]"; exit 1 ;;
 esac
 swift test --build-system native -c release "${TEST_FLAGS[@]}" --filter "$TEST_FILTER"

@@ -1,5 +1,13 @@
 import Foundation
 import RayGitLocalization
+import GitCore
+
+extension GitStash {
+    var datedTitle: String {
+        guard let createdDate else { return subject }
+        return HistoryCalendarDate.text(createdDate) + " · " + subject
+    }
+}
 
 /// Calendar boundaries remain stable within a day; all visible times stop at minutes.
 enum HistoryCalendarDate {

@@ -157,3 +157,6 @@
 "There are no staged files. All tracked changes will be staged and committed. Include untracked files too?" = "ステージ済みファイルはありません。追跡済みファイルの変更をすべてステージしてコミットします。未追跡ファイルも含めますか？";
 "Include untracked files" = "未追跡ファイルを含める";
 "Resolve conflicts before committing." = "コミットする前に競合を解決してください。";
+
+"Merge in progress" = "マージ進行中";
+"Rebase in progress" = "リベース進行中";

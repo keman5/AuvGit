@@ -4,6 +4,18 @@ import GitCore
 
 @MainActor
 final class CommitMessageHistoryTests: XCTestCase {
+    func testMenuTitleTruncatesGraphemesAndKeepsStoredMessageComplete() throws {
+        let title = String(repeating: "👩🏽‍💻", count: 61)
+        let message = "\n  " + title + "  \nFull body"
+        XCTAssertEqual(CommitMessageHistory.menuTitle(message), String(title.prefix(59)) + "…")
+        XCTAssertEqual(CommitMessageHistory.menuTitle(" short title \nbody"), "short title")
+        XCTAssertEqual(CommitMessageHistory.menuTitle(String(repeating: "字", count: 60)).count, 60)
+        let history = CommitMessageHistory(defaults: try defaults())
+        let repository = URL(fileURLWithPath: "/tmp/menu-title")
+        history.record(message, for: repository)
+        XCTAssertEqual(history.messages(for: repository), [message])
+    }
+
     private func defaults() throws -> UserDefaults {
         let suite = "CommitMessageHistoryTests." + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

@@ -26,4 +26,4 @@
 "Delete Remote Branch Message" = "刪除遠端分支 %@？這會從伺服器刪除該分支，影響所有協作者。本地分支會保留。";
 "Force Delete Branch…" = "強制刪除分支…";
 "Force Delete Branch Message" = "分支 %@ 仍有未合併的提交。是否強制刪除？僅由該分支引用的提交可能遺失。";
-"Create Branch from This Branch…" = "基於此分支建立新分支…";
+"Create Branch from This Branch…" = "建立分支…";

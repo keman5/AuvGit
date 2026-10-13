@@ -7,6 +7,36 @@ import RayGitLocalization
 
 @MainActor
 final class WorkspaceNativeFilesTableTests: XCTestCase {
+    func testDoubleClickCollapsesMultiSelectionBeforeRunningDefaultAction() {
+        let state = State()
+        state.selection = ["a", "b"]
+        let rows = ["a", "b", "c"].map { WorkspaceFileRow(path: $0, file: nil) }
+        var actions: [Set<String>] = []
+        var parent = WorkspaceNativeFilesTable(rows: rows, files: [], repository: nil,
+            selection: Binding(get: { state.selection }, set: { state.selection = $0 }), isBusy: false,
+            sortOrder: .constant([]), onAction: { _, _ in }, onCompare: { paths in
+                XCTAssertEqual(state.selection, paths)
+                actions.append(paths)
+            })
+        let coordinator = parent.makeCoordinator()
+        let table = WorkspaceNativeFilesTable.FileTable()
+        table.addTableColumn(NSTableColumn(identifier: .init("filename")))
+        table.allowsMultipleSelection = true
+        table.dataSource = coordinator; table.delegate = coordinator; coordinator.table = table
+        coordinator.update(parent)
+        coordinator.activate(row: 1)
+        XCTAssertEqual(table.selectedRowIndexes, IndexSet(integer: 1))
+        XCTAssertEqual(actions, [["b"]])
+        coordinator.activate(row: 2)
+        XCTAssertEqual(state.selection, ["c"])
+        XCTAssertEqual(actions, [["b"], ["c"]])
+        coordinator.activate(row: -1)
+        parent.isReady = false; coordinator.update(parent)
+        coordinator.activate(row: 0)
+        XCTAssertEqual(actions.count, 2)
+        XCTAssertEqual(state.selection, ["c"])
+    }
+
     func testTextAndIconsShareRowCenterForDifferentFontSizes() {
         let cell = WorkspaceNativeFilesTable.Cell(frame: NSRect(x: 0, y: 0, width: 180, height: 23))
         for size: CGFloat in [10, 12] {

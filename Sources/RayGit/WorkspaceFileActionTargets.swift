@@ -15,7 +15,7 @@ enum WorkspaceFileActionTargets {
         switch action {
         case .stage, .stageAll: return file.isUnstaged && !file.isConflict
         case .unstage, .unstageAll: return file.isStaged && !file.isConflict
-        case .discard: return !file.isConflict && file.isUnstaged
+        case .discard: return file.isUnstaged || file.isConflict
         default: return false
         }
     }

@@ -340,7 +340,7 @@ struct MainWindow: View {
             .font(.system(size: 11, weight: .medium)).frame(height: 28).contentShape(Rectangle())
     }
     private func stashMenuTitle(_ stash: GitStash) -> String {
-        let value = stash.ref + " · " + stash.subject.replacingOccurrences(of: "\n", with: " ")
+        let value = stash.datedTitle.replacingOccurrences(of: "\n", with: " ") + " · " + stash.ref
         return value.count > 65 ? String(value.prefix(64)) + "…" : value
     }
     private var toolbarSelection: Set<String> { fileFocus.hasFileFocus ? store.selectedPaths : [] }
@@ -677,8 +677,31 @@ struct MainWindow: View {
             .frame(maxWidth: .infinity)
     }
     var filesPane: some View {
-        WorkspaceFilesPane(files: store.files, statusFailure: store.workspaceStatusFailure == nil ? nil : store.error, automaticallySelectedPath: store.automaticallySelectedPath, initialSelectionReady: store.initialWorkspaceSelectionReady, selection: $store.selectedPaths, filter: $store.fileFilter, treeMode: $fileTree, isBusy: store.isBusy || store.workspaceStatusFailure != nil, onAction: fileAction, treeContent: { paths in workspaceTreeContent(paths) }, repository: store.repository, fileFocus: fileFocus, shortcutRequest: fileShortcutRequest)
+        VStack(spacing: 0) {
+            if let operation = store.repositoryOperation {
+                let abort = operation == .merge ? RepositoryWorkflow.mergeAbort : .rebaseAbort
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.triangle.branch").accessibilityHidden(true)
+                    Text(workflowText(operation == .merge ? "Merge in progress" : "Rebase in progress"))
+                        .fontWeight(.medium)
+                    Spacer()
+                    Button(workflowText(abort.rawValue)) {
+                        guard let repository = store.repository else { return }
+                        confirm(workflowText(abort.rawValue), workflowText(abort.rawValue + ".help")) {
+                            guard store.repository === repository, store.repositoryOperation == operation else { return }
+                            store.operation(workflowText(abort.rawValue)) { repo in
+                                guard try await repo.operationState() == operation else { return }
+                                _ = try await repo.advancedOperation(abort, first: "", second: "")
+                            }
+                        }
+                    }.disabled(store.isBusy || store.pendingRepositoryPath != nil)
+                }.font(.system(size: 12)).padding(.horizontal, 12).padding(.vertical, 7)
+                    .background(Color.orange.opacity(0.12))
+                Divider()
+            }
+            WorkspaceFilesPane(files: store.files, statusFailure: store.workspaceStatusFailure == nil ? nil : store.error, automaticallySelectedPath: store.automaticallySelectedPath, initialSelectionReady: store.initialWorkspaceSelectionReady, selection: $store.selectedPaths, filter: $store.fileFilter, treeMode: $fileTree, isBusy: store.isBusy || store.workspaceStatusFailure != nil, onAction: fileAction, treeContent: { paths in workspaceTreeContent(paths) }, repository: store.repository, fileFocus: fileFocus, shortcutRequest: fileShortcutRequest)
             .onChange(of: fileTree) { _, visible in if handlesStoreEvents { store.showsWorkspaceTree = visible } }
+        }
     }
     private func workspaceTreeContent(_ paths: Set<String>?) -> some View {
         Group {
@@ -789,7 +812,7 @@ struct MainWindow: View {
                         } else {
                             ForEach(store.recentCommitMessages, id: \.self) { message in
                                 Button { store.commitMessage = message } label: {
-                                    Text(recentCommitMessageTitle(message)).lineLimit(1)
+                                    Text(CommitMessageHistory.menuTitle(message)).lineLimit(1)
                                 }
                             }
                         }
@@ -823,11 +846,6 @@ struct MainWindow: View {
             if store.repositoryURL == repo.url { store.commitMessage += "\n\nSigned-off-by: " + name + " <" + email + ">" }
         } catch { store.report(error) } }
     }
-    private func recentCommitMessageTitle(_ message: String) -> String {
-        message.split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .first(where: { !$0.isEmpty }) ?? message
-    }
     func statusName(_ status: String) -> String { [" ": "—", "?": mainText("untracked"), "M": mainText("modified"), "A": mainText("added"), "D": mainText("deleted"), "R": mainText("renamed"), "C": mainText("copied"), "U": mainText("conflict"), "T": mainText("type") ][status] ?? status }
     func statusColor(_ status: String) -> Color { switch status { case "?": return .blue; case "A": return .green; case "D": return .red; case "M", "R", "U": return .orange; default: return .secondary } }
 }
@@ -836,7 +854,7 @@ extension MainWindow {
     private func historyPane(compact: Bool) -> some View {
         VStack(spacing: 0) {
             if compact { HStack { Label(interactionText("Log"), systemImage: "clock.arrow.circlepath").font(.system(size: 12, weight: .semibold)); HistorySearchControl(search: $store.historySearch, focusRequest: historySearchFocusRequest).frame(maxWidth: .infinity); HistoryDisplayMenu(showMergedCommits: Binding(get: { store.showMergedCommits }, set: { store.setShowMergedCommits($0) })); Button { if let repo = store.repository { LogPresenter.show(repository: repo) } } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(.plain).help(interactionText("Expand History")) }.padding(.horizontal, 12).frame(height: 36).rayGitChrome() }
-            HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch, isLoading: store.loadingHistory, hasMore: store.hasMore, onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy, onAction: historyAction, onShowChanges: { if let path = store.selectedCommitPath { compareCommitFile(path) } }, compact: compact, showsSearch: !compact, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), currentBranch: store.branches.first { $0.isCurrent && !$0.isRemote }, localUnpushedCommitHashes: store.localUnpushedCommitHashes, navigationGeneration: store.historyNavigationGeneration, onJump: jumpToCommit, firstParentGraph: store.followsCurrentBranch && !store.showMergedCommits, onFind: { historySearchFocusRequest = UUID() }, authorFilter: $store.historyAuthor)
+            HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch, isLoading: store.loadingHistory, hasMore: store.hasMore, onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy, onAction: historyAction, onShowChanges: { if let path = store.selectedCommitPath { compareCommitFile(path) } }, compact: compact, showsSearch: !compact, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), visibleRemoteBranchNames: store.visibleHistoryRemoteBranchNames, currentBranch: store.branches.first { $0.isCurrent && !$0.isRemote }, localUnpushedCommitHashes: store.localUnpushedCommitHashes, navigationGeneration: store.historyNavigationGeneration, onJump: jumpToCommit, firstParentGraph: store.followsCurrentBranch && !store.showMergedCommits, onFind: { historySearchFocusRequest = UUID() }, authorFilter: $store.historyAuthor)
                 .background(WorkspaceFileFocusRegion(focus: historyFocus).allowsHitTesting(false).accessibilityHidden(true))
         }
     }
@@ -846,7 +864,22 @@ extension MainWindow {
         if fromMenu, command == .stage || command == .unstage {
             performToolbarCommand(command.rawValue); return true
         }
-        if historyFocus.hasFileFocus || command == .reset || command == .resetAdvanced,
+        if command == .reset || command == .resetAdvanced {
+            guard let repository = store.repository, !store.isBusy else { return store.repository != nil }
+            if historyFocus.hasFileFocus, let commit = store.commits.first(where: { $0.hash == store.selectedCommit }) {
+                historyAction(command == .reset ? .reset : .resetAdvanced, commit)
+            } else {
+                Task {
+                    do {
+                        guard let commit = try await repository.log(limit: 1, ref: "HEAD").first,
+                              store.repository === repository, !store.isBusy else { return }
+                        resetRequest = HistoryResetRequest(commit: commit, repositoryURL: repository.url, advanced: command == .resetAdvanced)
+                    } catch { if store.repository === repository { store.report(error) } }
+                }
+            }
+            return true
+        }
+        if historyFocus.hasFileFocus,
            let action = command.historyAction, let commit = store.commits.first(where: { $0.hash == store.selectedCommit }) {
             historyAction(action, commit); return true
         }
@@ -954,7 +987,8 @@ extension MainWindow {
         case .discard:
             let targets = WorkspaceFileActionTargets.paths(for: .discard, files: store.files, selection: paths).sorted()
             guard !targets.isEmpty else { return }
-            confirm(interactionText("Discard Working Tree Changes"), interactionText("Discard Workspace Message") + "\n\n" + DialogAppearance.fileListSummary(targets)) { store.operation(interactionText("Discard…"), refreshFilesOnly: true) { try await $0.discardWorkspace(paths: targets) } }
+            let message = store.files.contains { $0.isConflict && targets.contains($0.path) } ? "Discard Conflict Workspace Message" : "Discard Workspace Message"
+            confirm(interactionText("Discard Working Tree Changes"), interactionText(message) + "\n\n" + DialogAppearance.fileListSummary(targets)) { store.operation(interactionText("Discard…"), refreshFilesOnly: true) { try await $0.discardWorkspace(paths: targets) } }
         case .rename:
             guard !store.isBusy, ordered.count == 1, let path = ordered.first else { return }
             askName(fileContextText("rename"), initial: path) { destination in
@@ -1078,6 +1112,7 @@ extension MainWindow {
             }
         case .stashShow: store.showStashHistory(ref: value)
         case .stashApply: confirm(mainText("applyTitle", value), mainText("applyMessage")) { store.operation("应用贮藏") { try await $0.applyStash(ref: value) } }
+        case .stashApplyImmediately: store.operation("应用贮藏") { try await $0.applyStash(ref: value) }
         case .stashDrop: confirm(interactionText("Drop Stash…"), interactionText("Drop Stash Message", value)) { store.operation(interactionText("Drop Stash…")) { try await $0.dropStash(ref: value) } }
         }
     }

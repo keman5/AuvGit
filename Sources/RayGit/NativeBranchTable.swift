@@ -51,7 +51,7 @@ struct NativeBranchTable: NSViewRepresentable {
         }
         if !stashes.isEmpty {
             result.append(Row(id: "group:stash", title: interactionText("Stashes"), symbol: "", expanded: stashesExpanded))
-            result += stashes.map { Row(id: "stash:" + $0.ref, title: $0.subject, symbol: "archivebox", depth: 1) }
+            result += stashes.map { Row(id: "stash:" + $0.ref, title: $0.datedTitle, symbol: "archivebox", depth: 1) }
         }
         return result
     }
@@ -121,6 +121,7 @@ struct NativeBranchTable: NSViewRepresentable {
         let check = NSImageView()
         let tracking = NSImageView()
         var group = false
+        var compactIcon = false
         var depth = 0
         override init(frame: NSRect) {
             super.init(frame: frame)
@@ -141,7 +142,7 @@ struct NativeBranchTable: NSViewRepresentable {
             let indent = CGFloat(max(0, depth - 1)) * 14
             disclosure.frame = bounds
             let iconX = group ? 8 + CGFloat(depth) * 14 : 22 + indent
-            let iconSize: CGFloat = group ? 10 : 14
+            let iconSize: CGFloat = group ? 10 : compactIcon ? 12 : 14
             icon.frame = NSRect(x: iconX + (14 - iconSize) / 2, y: (bounds.height - iconSize) / 2, width: iconSize, height: iconSize)
             let textHeight = ceil(label.cell?.cellSize.height ?? label.intrinsicContentSize.height)
             let textX = icon.frame.maxX + 2
@@ -154,6 +155,7 @@ struct NativeBranchTable: NSViewRepresentable {
         }
         func configure(_ row: Row, coordinator: Coordinator) {
             depth = row.depth
+            compactIcon = row.symbol == "network"
             group = row.isGroup; disclosure.isHidden = !group; icon.isHidden = false; label.isHidden = false
             label.stringValue = row.title
             label.setAccessibilityElement(!group)
@@ -267,7 +269,7 @@ struct NativeBranchTable: NSViewRepresentable {
             let value = rows[row]
             if value.id.hasPrefix("branch:") { parent.onAction(.checkout, value.target) }
             else if value.id.hasPrefix("remote:") { parent.onAction(.history, "refs/remotes/" + value.target) }
-            else { parent.onAction(.stashShow, value.target) }
+            else if value.id.hasPrefix("stash:") { parent.onAction(.stashApplyImmediately, value.target) }
         }
         struct MenuAction {
             let repositoryPath: String?
@@ -313,7 +315,7 @@ struct NativeBranchTable: NSViewRepresentable {
                 if !remote { add(interactionText("Check Out…"), .checkout, enabled: !parent.isBusy) }
                 if !remote { add(sidebarRefinementText("Create Branch from This Branch…"), .createBranchFromLocal) }
                 if remote { add(sidebarRefinementText("Create Local Branch…"), .createLocalBranch, enabled: !parent.isBusy) }
-                add(sidebarRefinementText("Merge into Current Branch"), .merge, enabled: !parent.isBusy && (remote || target != parent.currentBranch))
+                if remote || !value.current { add(sidebarRefinementText("Merge into Current Branch"), .merge, enabled: !parent.isBusy) }
                 let tracked = remote ? parent.branches.contains { !$0.isRemote && ($0.upstream == target || $0.upstream == "refs/remotes/" + target) } : value.upstream != nil
                 if tracked { add(sidebarRefinementText("Stop Tracking Remote Branch"), .stopTracking, enabled: !parent.isBusy) }
                 if !remote {

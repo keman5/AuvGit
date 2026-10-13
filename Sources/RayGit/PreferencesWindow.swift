@@ -35,6 +35,7 @@ func preferencesDate(_ date: Date, style: String? = nil) -> String {
 
 struct PreferencesWindow: View {
     @ObservedObject var store: RepositoryStore
+    @Environment(\.dismiss) private var dismiss
     @State private var selected = "General"
     @State private var query = ""
     @State private var clearAction: String?
@@ -90,25 +91,28 @@ struct PreferencesWindow: View {
                 }.font(.system(size: 12)).padding(.horizontal, 9).padding(.vertical, 7)
                     .rayGitInputSurface().padding(.horizontal, 12).padding(.top, 14)
                 ScrollView {
-                    VStack(spacing: 5) {
+                    VStack(spacing: 2) {
                         ForEach(filtered, id: \.self) { category in
                             Button { selected = category } label: {
                                 Label { Text(prefsText(category)).lineLimit(1) } icon: {
-                                    Image(systemName: categoryIcon(category)).font(.system(size: 14)).frame(width: 21)
-                                }.font(.system(size: 13, weight: selected == category ? .semibold : .regular))
-                                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 11)
+                                    Image(systemName: categoryIcon(category)).font(.system(size: 12)).frame(width: 17)
+                                }.font(.system(size: 12, weight: selected == category ? .semibold : .regular))
+                                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10).padding(.vertical, 6)
                                     .contentShape(Rectangle())
-                                    .foregroundStyle(selected == category ? Color.white : Color.primary)
-                                    .background(selected == category ? Color.blue : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-                            }.buttonStyle(.plain)
+                            }.buttonStyle(PreferencesNavigationButtonStyle(selected: selected == category))
                         }
-                    }.padding(.horizontal, 12).padding(.vertical, 6)
+                    }.padding(.horizontal, 8).padding(.vertical, 4)
                 }
-            }.frame(width: 240).background(RayGitStyle.sidebar)
+            }.frame(width: 200).background(RayGitStyle.sidebar)
             Divider()
             VStack(alignment: .leading, spacing: 0) {
-                DesignPageHeading(title: prefsText(filtered.isEmpty ? "Search preferences" : selected), subtitle: selected == "Keyboard Shortcuts" ? shortcutText("Shortcuts apply to the current view; the same key can serve different views.") + "\n" + shortcutText("Letter shortcuts require Command or Control. Native text editing remains available in text fields.") : designText(selected == "Editor" ? "Configure code and difference display" : "Customize your RayGit workspace"))
-                    .padding(.horizontal, 24).padding(.vertical, 14).rayGitChrome()
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(prefsText(filtered.isEmpty ? "Search preferences" : selected))
+                        .font(.system(size: 18, weight: .semibold))
+                    Text(selected == "Keyboard Shortcuts" ? shortcutText("Shortcuts apply to the current view; the same key can serve different views.") + "\n" + shortcutText("Letter shortcuts require Command or Control. Native text editing remains available in text fields.") : designText(selected == "Editor" ? "Configure code and difference display" : "Customize your RayGit workspace"))
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 24).padding(.vertical, 12).rayGitChrome()
                 Divider()
                 if filtered.isEmpty {
                     VStack(spacing: 12) {
@@ -123,6 +127,7 @@ struct PreferencesWindow: View {
         }.background(RayGitStyle.canvas).buttonBorderShape(.roundedRectangle(radius: 6)).frame(minWidth: 760, idealWidth: 1040, minHeight: 620, idealHeight: 780)
             .onChange(of: query) { _, _ in if !filtered.contains(selected), let first = filtered.first { selected = first } }
             .onChange(of: theme) { _, _ in RayGitPreferences.applyAppearance() }
+            .onExitCommand { if clearAction != nil { clearAction = nil } else { dismiss() } }
             .rayGitAlert(prefsText("Clear local records?"), isPresented: Binding(get: { clearAction != nil }, set: { if !$0 { clearAction = nil } })) {
                 RayGitAlertButton(prefsText("Cancel"), role: .cancel) { clearAction = nil }
                 RayGitAlertButton(prefsText("Clear"), role: .destructive) { if clearAction == "recent" { store.clearRecentRepositories() } else { store.clearSessionDrafts() }; clearAction = nil }
@@ -179,5 +184,14 @@ struct PreferencesWindow: View {
     }
     private func choices(_ title: String, _ value: Binding<String>, _ options: [(String, String)]) -> some View {
         Picker(prefsText(title), selection: value) { ForEach(options, id: \.0) { Text(prefsText($0.1)).tag($0.0) } }
+    }
+}
+
+struct PreferencesNavigationButtonStyle: ButtonStyle {
+    let selected: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(selected || configuration.isPressed ? Color.white : Color.primary)
+            .background(selected || configuration.isPressed ? Color.blue : Color.clear, in: RoundedRectangle(cornerRadius: 6))
     }
 }

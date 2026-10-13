@@ -157,3 +157,6 @@
 "There are no staged files. All tracked changes will be staged and committed. Include untracked files too?" = "There are no staged files. All tracked changes will be staged and committed. Include untracked files too?";
 "Include untracked files" = "Include untracked files";
 "Resolve conflicts before committing." = "Resolve conflicts before committing.";
+
+"Merge in progress" = "Merge in progress";
+"Rebase in progress" = "Rebase in progress";

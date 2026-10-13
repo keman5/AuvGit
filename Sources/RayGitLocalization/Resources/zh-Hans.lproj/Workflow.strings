@@ -157,3 +157,6 @@
 "There are no staged files. All tracked changes will be staged and committed. Include untracked files too?" = "当前没有已暂存文件，将暂存并提交所有已跟踪文件的改动。是否同时包含未跟踪文件？";
 "Include untracked files" = "包含未跟踪文件";
 "Resolve conflicts before committing." = "请先解决冲突再提交。";
+
+"Merge in progress" = "正在合并（Merge）";
+"Rebase in progress" = "正在变基（Rebase）";

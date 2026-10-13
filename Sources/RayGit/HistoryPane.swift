@@ -48,6 +48,7 @@ struct HistoryPane: View {
     var showsSearch: Bool = true
     var showsDetails: Bool = true
     var remoteBranchNames: Set<String> = []
+    var visibleRemoteBranchNames: Set<String>? = nil
     var currentBranch: GitBranch? = nil
     var localUnpushedCommitHashes: Set<String>? = nil
     var navigationGeneration: UUID? = nil
@@ -76,7 +77,7 @@ struct HistoryPane: View {
         GeometryReader { geometry in
         let visible = commits
         let graph = graphCache.graph(commits: visible, firstParent: firstParentGraph)
-        let graphStyles = graphCache.styles(commits: visible, remoteBranchNames: remoteBranchNames, localUnpushedHashes: localUnpushedCommitHashes, currentBranch: currentBranch)
+        let graphStyles = graphCache.styles(commits: visible, remoteBranchNames: remoteBranchNames, localUnpushedHashes: localUnpushedCommitHashes, currentBranch: currentBranch, visibleRemoteBranchNames: visibleRemoteBranchNames)
         let showColumns = !compact && (showAvatars || showNames)
         let compactNameWidth = compact && showNames ? graphCache.compactNameWidth(commits: visible, showsAvatar: showAvatars) : 0
         let compactDateWidth = compact ? graphCache.compactDateWidth(commits: visible) : 0
@@ -111,7 +112,7 @@ struct HistoryPane: View {
                 }
                 columnHeader(historyText("history.date"), column: .date, width: $dateWidth)
                 columnHeader(historyText("history.hash"), column: .hash, width: $hashWidth)
-            }.frame(maxWidth: .infinity, alignment: .leading).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 12).frame(height: 28).fixedSize(horizontal: false, vertical: true).rayGitChrome()
+            }.frame(maxWidth: .infinity, alignment: .leading).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).padding(.leading, HistoryColumnLayout.leadingInset).padding(.trailing, HistoryColumnLayout.trailingInset).frame(height: 28).fixedSize(horizontal: false, vertical: true).rayGitChrome()
             Divider()
             }
             if compact {
@@ -162,7 +163,7 @@ struct HistoryPane: View {
                             }
                             if !compact {
                             Text(HistoryCalendarDate.text(commit.committedDate))
-                                .font(.system(size: 11)).foregroundStyle(selection == commit.hash ? Color.white : Color.secondary)
+                                .font(.system(size: 11)).foregroundStyle(.secondary)
                                 .lineLimit(1).frame(width: dateWidth, alignment: .leading).clipped().help(HistoryCalendarDate.text(commit.committedDate))
                             }
                             if compact, showAvatars || showNames {
@@ -171,13 +172,14 @@ struct HistoryPane: View {
                                     if showNames { Text(commit.author).font(.system(size: 10)).lineLimit(1).frame(width: compactNameWidth, alignment: .leading).help(commit.author) }
                                 }.frame(width: min(100, compactIdentityWidth), alignment: .leading).clipped()
                             }
-                            if compact { Text(HistoryCalendarDate.text(commit.committedDate)).font(.system(size: 10)).lineLimit(1).foregroundStyle(selection == commit.hash ? Color.white : Color.secondary).frame(width: compactDateWidth, alignment: .leading).clipped().help(HistoryCalendarDate.text(commit.committedDate)) }
+                            if compact { Text(HistoryCalendarDate.text(commit.committedDate)).font(.system(size: 10)).lineLimit(1).foregroundStyle(.secondary).frame(width: compactDateWidth, alignment: .leading).clipped().help(HistoryCalendarDate.text(commit.committedDate)) }
                             Text(commit.shortHash).font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(selection == commit.hash ? Color.white : Color.secondary).lineLimit(1).frame(width: compact ? 75 : hashWidth, alignment: .leading).clipped()
+                                .foregroundStyle(.secondary).lineLimit(1).frame(width: compact ? 75 : hashWidth, alignment: .leading).clipped()
                         }.font(.system(size: 12))
-                            .foregroundStyle(selection == commit.hash ? Color.white : Color.primary)
-                            .padding(.horizontal, 12)
-                            .listRowBackground(selection == commit.hash ? RayGitStyle.blue : Color.clear)
+                            .foregroundStyle(.primary)
+                            .padding(.leading, HistoryColumnLayout.leadingInset)
+                            .padding(.trailing, HistoryColumnLayout.trailingInset)
+                            .listRowBackground(Color.clear)
                             .tag(commit.hash).id(commit.hash)
                             .listRowInsets(EdgeInsets())
                             .accessibilityElement(children: .combine)
@@ -188,7 +190,7 @@ struct HistoryPane: View {
                                 }
                             }
                     }
-                }.listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, HistoryColumnLayout.rowHeight(compact: compact))
+                }.listStyle(.plain).contentMargins(.horizontal, 0).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, HistoryColumnLayout.rowHeight(compact: compact))
                     .contextMenu(forSelectionType: String.self) { hashes in
                         if let hash = hashes.first, let commit = commits.first(where: { $0.hash == hash }) {
                             Button(sidebarRefinementText("viewLog")) { onAction(.viewLog, commit) }.configuredShortcut(.viewLog, using: shortcuts)
@@ -219,8 +221,8 @@ struct HistoryPane: View {
                 }
             }
             }.frame(width: max(geometry.size.width, compact
-                ? graphWidth(graph) + 220 + compactIdentityWidth + compactDateWidth + 75 + 24 + CGFloat(3 + (showAvatars || showNames ? 1 : 0)) * 4
-                : graphWidth(graph) + messageWidth + (showColumns ? displayedAuthorWidth : 0) + dateWidth + hashWidth + 24 + CGFloat(showColumns ? 4 : 3) * 8), alignment: .leading)
+                ? graphWidth(graph) + 220 + compactIdentityWidth + compactDateWidth + 75 + HistoryColumnLayout.leadingInset + HistoryColumnLayout.trailingInset + CGFloat(3 + (showAvatars || showNames ? 1 : 0)) * 4
+                : graphWidth(graph) + messageWidth + (showColumns ? displayedAuthorWidth : 0) + dateWidth + hashWidth + HistoryColumnLayout.leadingInset + HistoryColumnLayout.trailingInset + CGFloat(showColumns ? 4 : 3) * 8), alignment: .leading)
             }
             if !compact, showsDetails, let commit = commits.first(where: { $0.hash == selection }) {
                 Divider()
@@ -261,7 +263,7 @@ struct HistoryPane: View {
         DispatchQueue.main.async { proxy.scrollTo(selection, anchor: .top) }
     }
     private func visibleRefs(_ commit: GitCommit, compact: Bool, styles: HistoryGraphStylePlan) -> [String] {
-        let values = commit.refs.filter { (showRemoteLabels || !styles.isRemoteReference($0)) && (showTagLabels || !styles.isTagReference($0)) }
+        let values = commit.refs.filter { styles.isVisibleReference($0) && (showRemoteLabels || !styles.isRemoteReference($0)) && (showTagLabels || !styles.isTagReference($0)) }
         return compact ? Array(values.prefix(1)) : values
     }
     private var searchControl: some View { HistorySearchControl(search: $search, focusRequest: searchFocusRequest) }
@@ -298,6 +300,7 @@ private final class HistoryGraphCache: ObservableObject {
     private var cachedGraph: CommitGraph?
     private var colorCommits: [GitCommit] = []
     private var colorRemoteBranchNames: Set<String> = []
+    private var colorVisibleRemoteBranchNames: Set<String>?
     private var colorLocalUnpushedHashes: Set<String>?
     private var colorCurrentBranch: GitBranch?
     private var cachedStyles: HistoryGraphStylePlan?
@@ -336,11 +339,12 @@ private final class HistoryGraphCache: ObservableObject {
         return graph
     }
 
-    func styles(commits: [GitCommit], remoteBranchNames: Set<String>, localUnpushedHashes: Set<String>?, currentBranch: GitBranch?) -> HistoryGraphStylePlan {
-        if let cachedStyles, colorCommits == commits, colorRemoteBranchNames == remoteBranchNames, colorLocalUnpushedHashes == localUnpushedHashes, colorCurrentBranch == currentBranch { return cachedStyles }
-        let styles = HistoryGraphStylePlan(commits: commits, remoteBranchNames: remoteBranchNames, localUnpushedHashes: localUnpushedHashes, currentBranch: currentBranch)
+    func styles(commits: [GitCommit], remoteBranchNames: Set<String>, localUnpushedHashes: Set<String>?, currentBranch: GitBranch?, visibleRemoteBranchNames: Set<String>?) -> HistoryGraphStylePlan {
+        if let cachedStyles, colorCommits == commits, colorRemoteBranchNames == remoteBranchNames, colorVisibleRemoteBranchNames == visibleRemoteBranchNames, colorLocalUnpushedHashes == localUnpushedHashes, colorCurrentBranch == currentBranch { return cachedStyles }
+        let styles = HistoryGraphStylePlan(commits: commits, remoteBranchNames: remoteBranchNames, localUnpushedHashes: localUnpushedHashes, currentBranch: currentBranch, visibleRemoteBranchNames: visibleRemoteBranchNames)
         colorCommits = commits
         colorRemoteBranchNames = remoteBranchNames
+        colorVisibleRemoteBranchNames = visibleRemoteBranchNames
         colorLocalUnpushedHashes = localUnpushedHashes
         colorCurrentBranch = currentBranch
         cachedStyles = styles

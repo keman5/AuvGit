@@ -2,6 +2,12 @@ import Foundation
 
 struct CommitMessageHistory {
     static let limit = 10
+    static func menuTitle(_ message: String) -> String {
+        let title = message.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first(where: { !$0.isEmpty }) ?? message
+        return title.count > 60 ? String(title.prefix(59)) + "…" : title
+    }
     private let defaults: UserDefaults
     private let storageKey = "commitMessageHistory.v1"
 

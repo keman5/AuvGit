@@ -51,7 +51,7 @@ final class NativeCompactHistoryTableTests: XCTestCase {
             NSGraphicsContext.restoreGraphicsState()
             for index in 0..<5 {
                 let row = graph.rows[index]
-                let x = Int((12 + HistoryColumnLayout.laneSpacing / 2 + CGFloat(row.nodeLane) * HistoryColumnLayout.laneSpacing) * 2)
+                let x = Int((HistoryColumnLayout.leadingInset + HistoryColumnLayout.laneSpacing / 2 + CGFloat(row.nodeLane) * HistoryColumnLayout.laneSpacing) * 2)
                 let y = index * 44 + 22
                 let center = try XCTUnwrap(bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
                 let background = try XCTUnwrap(bitmap.colorAt(x: 5, y: y)?.usingColorSpace(.deviceRGB))
@@ -99,7 +99,7 @@ final class NativeCompactHistoryTableTests: XCTestCase {
             NSGraphicsContext.restoreGraphicsState()
             // Stop before the node's background-colored outer halo.
             samples.append(try (0..<12).map { y in
-                let color = try XCTUnwrap(bitmap.colorAt(x: 36, y: y)?.usingColorSpace(.deviceRGB))
+                let color = try XCTUnwrap(bitmap.colorAt(x: Int((HistoryColumnLayout.leadingInset + HistoryColumnLayout.laneSpacing / 2) * 2), y: y)?.usingColorSpace(.deviceRGB))
                 return abs(color.blueComponent - color.redComponent) > 0.2
             })
         }
@@ -140,6 +140,88 @@ final class NativeCompactHistoryTableTests: XCTestCase {
             showAvatars: false, showNames: true, showRemoteLabels: true, showTagLabels: true,
             isBusy: false, hasMore: false, isLoading: false, onLoadMore: {}, onAction: action)
     }
+    func testExpandedHistoryUsesNativeSelectedTextColorDuringTracking() async throws {
+        _ = NSApplication.shared
+        let commit = GitCommit(hash: "123456789abcdef", parents: [], author: "Test", date: .distantPast,
+            subject: "WWWWWWWWWWWWWWWWWWWW", body: "", refs: [])
+        let second = GitCommit(hash: "second", parents: [], author: "Test", date: .distantPast,
+            subject: commit.subject, body: "", refs: [])
+        let host = NSHostingView(rootView: HistoryPane(commits: [commit, second], selection: .constant(commit.hash),
+            search: .constant(""), isLoading: false, hasMore: false, onLoadMore: {},
+            showsDetails: false, authorFilter: .constant("")).frame(width: 900, height: 200))
+        host.appearance = NSAppearance(named: .aqua)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 200),
+            styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close() }
+        for _ in 0..<5 { host.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(10)) }
+        func table(in view: NSView) -> NSTableView? {
+            if let table = view as? NSTableView { return table }
+            return view.subviews.lazy.compactMap { table(in: $0) }.first
+        }
+        let native = try XCTUnwrap(table(in: host))
+        let previous = try XCTUnwrap(native.rowView(atRow: 0, makeIfNecessary: true))
+        let row = try XCTUnwrap(native.rowView(atRow: 1, makeIfNecessary: true))
+        native.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
+        XCTAssertFalse(previous.isSelected)
+        XCTAssertTrue(row.isSelected)
+        row.isEmphasized = true
+        previous.needsDisplay = true
+        let oldBitmap = try XCTUnwrap(previous.bitmapImageRepForCachingDisplay(in: previous.bounds))
+        previous.cacheDisplay(in: previous.bounds, to: oldBitmap)
+        let oldScale = CGFloat(oldBitmap.pixelsWide) / previous.bounds.width
+        let oldBackground = try XCTUnwrap(oldBitmap.colorAt(x: Int(80 * oldScale), y: Int(2 * oldScale))?.usingColorSpace(.deviceRGB))
+        XCTAssertLessThan(abs(oldBackground.blueComponent - oldBackground.redComponent), 0.05,
+            "The old row must stop showing blue even when the SwiftUI binding still points to it")
+        row.needsDisplay = true
+        let bitmap = try XCTUnwrap(row.bitmapImageRepForCachingDisplay(in: row.bounds))
+        row.cacheDisplay(in: row.bounds, to: bitmap)
+        let scale = CGFloat(bitmap.pixelsWide) / row.bounds.width
+        let background = try XCTUnwrap(bitmap.colorAt(x: Int(80 * scale), y: Int(2 * scale))?.usingColorSpace(.deviceRGB))
+        XCTAssertGreaterThan(background.blueComponent - background.redComponent, 0.1, "Verify a selected background, not white canvas")
+        let whiteText = (Int(80 * scale)..<Int(230 * scale)).contains { x in
+            (0..<bitmap.pixelsHigh).contains { y in
+                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { return false }
+                return color.redComponent > 0.9 && color.greenComponent > 0.9 && color.blueComponent > 0.9
+            }
+        }
+        XCTAssertTrue(whiteText, "Native selection must color the message before SwiftUI's binding changes")
+    }
+
+    func testNativeSelectionPaintsWhiteTextBeforeSwiftUISelectionUpdates() throws {
+        let cell = CompactHistoryCell(frame: NSRect(x: 0, y: 0, width: 650, height: 24))
+        cell.configure(parent: pane("123456789abcdef"), index: 0)
+        cell.appearance = NSAppearance(named: .aqua)
+        let row = CompactHistoryRowView(frame: cell.frame)
+        row.addSubview(cell)
+        let window = NSWindow(contentRect: row.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = row
+        defer { window.close() }
+        cell.needsDisplay = false
+        row.isSelected = true
+        XCTAssertTrue(cell.needsDisplay)
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 650, pixelsHigh: 24,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: bitmap))
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current = context
+        context.cgContext.clear(cell.bounds)
+        cell.draw(cell.bounds)
+        let glyphs = (420..<485).flatMap { x in (0..<24).compactMap { y in bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) } }
+            .filter { $0.alphaComponent > 0.95 }
+        XCTAssertFalse(glyphs.isEmpty)
+        XCTAssertTrue(glyphs.allSatisfy { $0.redComponent > 0.9 && $0.greenComponent > 0.9 && $0.blueComponent > 0.9 })
+        cell.needsDisplay = false
+        row.needsDisplay = false
+        row.isSelected = false
+        XCTAssertTrue(row.needsDisplay)
+        XCTAssertTrue(cell.needsDisplay)
+    }
+
     func testCellFirstBitmapDrawIncludesSystemAndMonospacedText() throws {
         // Run this test alone to cover cold font resolution, without an AppKit warmup.
         let commit = GitCommit(hash: "123456789abcdef", parents: [], author: "Author", date: .distantPast,

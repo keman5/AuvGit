@@ -31,7 +31,9 @@ struct EditorPreferencesView: View {
     @AppStorage("editor.highlightCurrentLine") private var currentLine = true
     @AppStorage("editor.comparisonLayoutMode") private var layout = "automatic"
     @AppStorage("editor.defaultDiffSideBySide") private var sideBySide = true
-    private var fonts: [String] { NSFontManager.shared.availableFonts.filter { !fixedWidthOnly || NSFont(name: $0, size: 12)?.isFixedPitch == true }.sorted() }
+    @MainActor private static let availableFonts = NSFontManager.shared.availableFonts.sorted()
+    @MainActor private static let fixedWidthFonts = availableFonts.filter { NSFont(name: $0, size: 12)?.isFixedPitch == true }
+    private var fonts: [String] { fixedWidthOnly ? Self.fixedWidthFonts : Self.availableFonts }
     private func colorBinding(_ value: Binding<String>, fallback: NSColor) -> Binding<Color> {
         Binding(get: { Color(nsColor: EditorPreferences.color(value.wrappedValue, fallback: fallback)) }, set: { color in
             guard let rgb = NSColor(color).usingColorSpace(.sRGB) else { return }
@@ -48,15 +50,15 @@ struct EditorPreferencesView: View {
                                 Text(editorPrefsText("System monospace")).tag("")
                                 if !fontName.isEmpty && !fonts.contains(fontName) { Text(fontName).tag(fontName) }
                                 ForEach(fonts, id: \.self) { Text($0).tag($0) }
-                            }.labelsHidden().frame(width: 220)
+                            }.labelsHidden().frame(width: 220, alignment: .trailing)
                         }
                         Divider()
                         DesignSettingRow(editorPrefsText("Font size"), detail: designText("Size of the editor text")) {
-                            Stepper("\(Int(fontSize))", value: $fontSize, in: 9...32).frame(width: 94)
+                            Stepper("\(Int(fontSize))", value: $fontSize, in: 9...32).frame(width: 94, alignment: .trailing)
                         }
                         Divider()
                         DesignSettingRow(editorPrefsText("Tab width"), detail: designText("Spaces represented by one tab")) {
-                            Stepper("\(tabWidth)", value: $tabWidth, in: 1...16).frame(width: 94)
+                            Stepper("\(tabWidth)", value: $tabWidth, in: 1...16).frame(width: 94, alignment: .trailing)
                         }
                         Divider()
                         settingToggle("Fixed width fonts only", $fixedWidthOnly)
@@ -75,7 +77,7 @@ struct EditorPreferencesView: View {
                                 Text(editorPrefsText("Three columns")).tag("three")
                                 Text(editorPrefsText("Two columns")).tag("two")
                                 Text(editorPrefsText("Patch")).tag("patch")
-                            }.labelsHidden().frame(width: 220)
+                            }.labelsHidden().frame(width: 220, alignment: .trailing)
                         }
                         Divider()
                         settingToggle("Side by side diff", $sideBySide)
@@ -89,11 +91,17 @@ struct EditorPreferencesView: View {
                         settingToggle("Syntax colors", $syntax)
                     }
                     section(editorPrefsText("Difference colors")) {
-                        ColorPicker(editorPrefsText("Added"), selection: colorBinding($additionColor, fallback: .systemGreen), supportsOpacity: false)
+                        DesignSettingRow(editorPrefsText("Added")) {
+                            ColorPicker(editorPrefsText("Added"), selection: colorBinding($additionColor, fallback: .systemGreen), supportsOpacity: false).labelsHidden()
+                        }
                         Divider()
-                        ColorPicker(editorPrefsText("Deleted"), selection: colorBinding($deletionColor, fallback: .systemRed), supportsOpacity: false)
+                        DesignSettingRow(editorPrefsText("Deleted")) {
+                            ColorPicker(editorPrefsText("Deleted"), selection: colorBinding($deletionColor, fallback: .systemRed), supportsOpacity: false).labelsHidden()
+                        }
                         Divider()
-                        ColorPicker(editorPrefsText("Modified"), selection: colorBinding($modificationColor, fallback: .systemOrange), supportsOpacity: false)
+                        DesignSettingRow(editorPrefsText("Modified")) {
+                            ColorPicker(editorPrefsText("Modified"), selection: colorBinding($modificationColor, fallback: .systemOrange), supportsOpacity: false).labelsHidden()
+                        }
                         Button(editorPrefsText("Reset colors")) { additionColor = ""; deletionColor = ""; modificationColor = "" }.padding(.top, 8)
                     }
                     DesignCard(designText("Font preview")) {
@@ -122,7 +130,7 @@ struct EditorPreferencesView: View {
                 Text(editorPrefsText(key)).font(.system(size: 13, weight: .medium))
                 if !detail.isEmpty { Text(designText(detail)).font(.system(size: 11)).foregroundStyle(.secondary) }
             }.frame(maxWidth: .infinity, alignment: .leading)
-        }.toggleStyle(.switch).controlSize(.small).padding(.vertical, 7)
+        }.toggleStyle(.switch).controlSize(.mini).padding(.vertical, 7)
 
     }
 }

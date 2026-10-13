@@ -306,8 +306,14 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
         }
         private func paths(_ indices: IndexSet) -> Set<String> { Set(indices.compactMap { rows.indices.contains($0) ? rows[$0].path : nil }) }
         @objc func compare(_ sender: Any?) {
-            guard parent.isReady, !parent.isBusy, let table, rows.indices.contains(table.clickedRow) else { return }
-            parent.onCompare(paths(table.selectedRowIndexes))
+            if let table { activate(row: table.clickedRow) }
+        }
+        func activate(row: Int) {
+            guard parent.isReady, !parent.isBusy, let table, rows.indices.contains(row) else { return }
+            let path = rows[row].path
+            table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            parent.selection = [path]
+            parent.onCompare([path])
         }
         func columnMenu() -> NSMenu {
             let menu = NSMenu()

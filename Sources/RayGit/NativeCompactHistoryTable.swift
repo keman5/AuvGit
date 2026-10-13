@@ -209,17 +209,17 @@ final class CompactHistoryCell: NSView {
         guard let parent, parent.commits.indices.contains(index), parent.graph.rows.indices.contains(index) else { return }
         let commit = parent.commits[index]
         let row = parent.graph.rows[index]
-        let selected = parent.selection == commit.hash
+        let selected = (superview as? NSTableRowView)?.isSelected ?? (parent.selection == commit.hash)
         let primary: NSColor = selected ? .white : .labelColor
         let secondary: NSColor = selected ? .white : .secondaryLabelColor
         let halo = NSColor(selected ? RayGitStyle.blue : RayGitStyle.canvas)
         let widths = HistoryColumnLayout.graphMessageWidths(activeLaneCount: row.laneCount, maximumLaneCount: parent.graph.laneCount, maximumGraphWidth: parent.graphWidth, baseMessageWidth: 220)
         NSGraphicsContext.saveGraphicsState()
-        NSRect(x: 12, y: 0, width: widths.graph, height: bounds.height).clip()
+        NSRect(x: HistoryColumnLayout.leadingInset, y: 0, width: widths.graph, height: bounds.height).clip()
         let spacing = HistoryColumnLayout.laneSpacing
         for segment in row.segments {
-            let start = NSPoint(x: 12 + spacing / 2 + CGFloat(segment.fromLane) * spacing, y: bounds.height * segment.fromY)
-            let end = NSPoint(x: 12 + spacing / 2 + CGFloat(segment.toLane) * spacing, y: bounds.height * segment.toY)
+            let start = NSPoint(x: HistoryColumnLayout.leadingInset + spacing / 2 + CGFloat(segment.fromLane) * spacing, y: bounds.height * segment.fromY)
+            let end = NSPoint(x: HistoryColumnLayout.leadingInset + spacing / 2 + CGFloat(segment.toLane) * spacing, y: bounds.height * segment.toY)
             let path = NSBezierPath()
             path.move(to: start)
             path.curve(to: end, controlPoint1: .init(x: start.x, y: (start.y + end.y) / 2), controlPoint2: .init(x: end.x, y: (start.y + end.y) / 2))
@@ -237,7 +237,7 @@ final class CompactHistoryCell: NSView {
         }
         let node = parent.styles.nodeStyle(for: row.hash)
         let diameter = HistoryColumnLayout.nodeDiameter(for: node.kind)
-        let point = NSRect(x: 12 + spacing / 2 - diameter / 2 + CGFloat(row.nodeLane) * spacing, y: bounds.height / 2 - diameter / 2, width: diameter, height: diameter)
+        let point = NSRect(x: HistoryColumnLayout.leadingInset + spacing / 2 - diameter / 2 + CGFloat(row.nodeLane) * spacing, y: bounds.height / 2 - diameter / 2, width: diameter, height: diameter)
         halo.setFill(); NSBezierPath(ovalIn: point.insetBy(dx: -2, dy: -2)).fill()
         let tint = selected && node.color != .orange && node.color != .green ? NSColor.white.withAlphaComponent(node.color == .blue ? 1 : 0.65) : NSColor(node.color.color)
         tint.setFill(); tint.setStroke()
@@ -255,11 +255,11 @@ final class CompactHistoryCell: NSView {
             let ring = NSBezierPath(ovalIn: point.insetBy(dx: inset, dy: inset)); ring.lineWidth = 1.2; ring.stroke()
         }
         NSGraphicsContext.restoreGraphicsState()
-        var x = 12 + widths.graph + 4
+        var x = HistoryColumnLayout.leadingInset + widths.graph + 4
         let messageEnd = x + widths.message
         NSGraphicsContext.saveGraphicsState()
         NSRect(x: x, y: 0, width: widths.message, height: bounds.height).clip()
-        if let ref = commit.refs.first(where: { (parent.showRemoteLabels || !parent.styles.isRemoteReference($0)) && (parent.showTagLabels || !parent.styles.isTagReference($0)) }) {
+        if let ref = commit.refs.first(where: { parent.styles.isVisibleReference($0) && (parent.showRemoteLabels || !parent.styles.isRemoteReference($0)) && (parent.showTagLabels || !parent.styles.isTagReference($0)) }) {
             let label = parent.styles.referenceLabel(ref)
             let font = NSFont.systemFont(ofSize: 10, weight: .medium)
             let width = min(90, (label as NSString).size(withAttributes: [.font: font]).width + 10)
@@ -302,7 +302,13 @@ final class CompactHistoryCell: NSView {
     }
 }
 
-private final class CompactHistoryRowView: NSTableRowView {
+final class CompactHistoryRowView: NSTableRowView {
+    override var isSelected: Bool {
+        didSet {
+            needsDisplay = true
+            subviews.forEach { $0.needsDisplay = true }
+        }
+    }
     override func drawSelection(in dirtyRect: NSRect) {
         NSColor(RayGitStyle.blue).setFill()
         bounds.fill()

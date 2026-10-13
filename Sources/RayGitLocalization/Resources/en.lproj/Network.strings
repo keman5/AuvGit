@@ -24,7 +24,7 @@
 "knownStateTitle" = "Known remote state";
 "verifyRemote" = "Verify remote and continue";
 "knownPushBehind" = "The last fetched state of %@/%@ contains %d commits missing locally. A normal push may be rejected. Continue to verify the current remote state? No force push will be performed without a separate confirmation.";
-"knownPullDiverged" = "The last fetched state has diverged: %d local-only and %d remote-only commits. Pull attempts an automatic merge; unresolved conflicts remain local with a notice.";
+"knownPullDiverged" = "The last fetched state has diverged: %d local-only and %d remote-only commits. Pull fetches the latest remote commits and attempts to merge them into the current branch; unresolved conflicts remain local with a notice. Fetch only updates remote records.";
 "authenticationRequired" = "Authentication Required";
 "authenticationMethod" = "Authentication method";
 "accessTokenOrAppPassword" = "Access Token / App Password";
