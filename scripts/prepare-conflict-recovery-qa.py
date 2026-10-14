@@ -4,6 +4,7 @@ import json
 import plistlib
 import subprocess
 import tempfile
+import sys
 from pathlib import Path
 
 project = Path(__file__).resolve().parents[1]
@@ -18,7 +19,7 @@ def git(repo, *args, success=True):
     return result.stdout.strip()
 
 paths, heads = [], {}
-for name in ["Discard", "Reset"]:
+for name in ["Discard", "Reset"] + (["Merge", "Rebase"] if "--interactions" in sys.argv else []):
     repo = root / name
     repo.mkdir()
     git(repo, "init", "-b", "main")
@@ -28,6 +29,19 @@ for name in ["Discard", "Reset"]:
         (repo / filename).write_text("base\n")
     git(repo, "add", ".")
     git(repo, "commit", "-m", "Base fixture")
+    if name in ["Merge", "Rebase"]:
+        git(repo, "switch", "-c", "other")
+        (repo / "conflict.txt").write_text("prefix\nother first\nother second\nother third\ntail\n")
+        git(repo, "add", "--", "conflict.txt")
+        git(repo, "commit", "-m", "Other change")
+        git(repo, "switch", "main")
+        (repo / "conflict.txt").write_text("prefix\nour change\ntail\n")
+        git(repo, "add", "--", "conflict.txt")
+        git(repo, "commit", "-m", "Our change")
+        git(repo, "merge" if name == "Merge" else "rebase", "other", success=False)
+        assert "UU conflict.txt" in git(repo, "status", "--porcelain")
+        paths.append(str(repo)); heads[name] = git(repo, "rev-parse", "HEAD")
+        continue
     for filename in ["conflict.txt", "deleted.txt"]:
         (repo / filename).write_text("stashed\n")
     git(repo, "stash", "push", "-m", "Saved fixture changes")

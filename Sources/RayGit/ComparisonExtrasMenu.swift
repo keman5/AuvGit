@@ -15,7 +15,10 @@ struct ComparisonExtrasMenu: View {
     @State private var confirmExternal = false
     private var versions: [(String, FileRevisionContent)] {
         guard let snapshot = session.snapshot else { return [] }
-        return [("HEAD", snapshot.head), (compareExtra("index"), snapshot.index), (compareExtra("base"), snapshot.base), (compareExtra("ours"), snapshot.ours), (compareExtra("theirs"), snapshot.theirs)].compactMap { name, value in
+        let sources: [(String, FileRevisionContent?)] = session.isHistorical
+            ? [(session.historyRevisionTitle + "~1", snapshot.head), (session.historyRevisionTitle, snapshot.worktree)]
+            : [("HEAD", snapshot.head), (compareExtra("index"), snapshot.index), (compareExtra("base"), snapshot.base), (compareExtra("ours"), snapshot.ours), (compareExtra("theirs"), snapshot.theirs)]
+        return sources.compactMap { name, value in
             guard let value, value.exists, value.data != nil, value.gitMode?.hasPrefix("100") == true else { return nil }
             return (name, value)
         }
@@ -35,7 +38,7 @@ struct ComparisonExtrasMenu: View {
         .rayGitSheet(isPresented: $showRename) { RenameIdentitySheet(session: session) }
         .rayGitAlert(compareExtra("applyExternalResult"), isPresented: $confirmExternal) {
             RayGitAlertButton(compareExtra("cancel"), role: .cancel) {}
-            RayGitAlertButton(compareExtra("apply")) { if let result = session.pendingExternalResult { session.draft = result; session.pendingExternalResult = nil } }
+            RayGitAlertButton(compareExtra("apply")) { if let result = session.pendingExternalResult { session.edit("worktree", text: result); session.pendingExternalResult = nil } }
         } message: { Text(compareExtra("externalResultHelp")) }
         .rayGitAlert(compareExtra("restoreVersion"), isPresented: $confirmRestore) {
             RayGitAlertButton(compareExtra("cancel"), role: .cancel) {}

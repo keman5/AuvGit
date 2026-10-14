@@ -4,8 +4,8 @@
 "Next conflict" = "次の競合";
 "Use Ours" = "Ours を使用（Stage 2）";
 "Use Theirs" = "Theirs を使用（Stage 3）";
-"Ours → Theirs" = "Ours → Theirs";
-"Theirs → Ours" = "Theirs → Ours";
+"Ours → Theirs" = "両方を採用：自分 → 相手";
+"Theirs → Ours" = "両方を採用：相手 → 自分";
 "Use Base" = "ベースを使用";
 "Lines %d–%d" = "%d–%d 行";
 "Apply to the current conflict only" = "現在の競合ブロックだけに適用";
@@ -16,3 +16,5 @@
 "Resolve Conflict" = "競合を解決";
 "Incomplete conflict markers — repair the result manually" = "競合マーカーが不完全です。結果を手動で修正してください";
 "Ours = Stage 2; Theirs = Stage 3. During rebase, Ours is the upstream side." = "Ours = Stage 2、Theirs = Stage 3。リベース中の Ours は上流側です。";
+
+"Use Both" = "両方を採用";

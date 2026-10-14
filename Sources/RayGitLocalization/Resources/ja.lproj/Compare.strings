@@ -233,3 +233,9 @@
 
 "File exceeds preview limit." = "ファイルがプレビューのサイズ上限を超えています。";
 "Working Tree" = "作業ツリー";
+
+"Editable Copy" = "編集可能なコピー";
+"Save Copy To Worktree Message" = "「%@」のコピーを作業ツリーのファイルに保存します。";
+"Other Drafts Discarded On Close" = "閉じると、他の未保存のバージョンコピーは破棄されます。";
+
+"No saved conflict is available for this file." = "このファイルには復元できる元の競合がありません。";

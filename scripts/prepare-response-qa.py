@@ -5,8 +5,12 @@ import base64
 import plistlib
 import subprocess
 import tempfile
+import argparse
 from pathlib import Path
 
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--revision-edit", action="store_true")
+options = parser.parse_args()
 project = Path(__file__).resolve().parents[1]
 root = Path(tempfile.mkdtemp(prefix="raygit-response-qa-"))
 
@@ -68,6 +72,22 @@ html = '\n'.join(lines) + '\n'
 (preview / "index.html").write_text(html)
 (preview / "preview.png").write_bytes(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1cAAAAASUVORK5CYII="))
 paths.insert(2, str(preview))
+if options.revision_edit:
+    copies = root / "RevisionCopies"
+    copies.mkdir()
+    git(copies, "init", "-b", "main")
+    for key, value in [("user.name", "Copy Fixture"), ("user.email", "copy@example.invalid"), ("commit.gpgsign", "false")]:
+        git(copies, "config", key, value)
+    for text in ["parent", "historical", "current"]:
+        (copies / "file.txt").write_text(text + "\n")
+        git(copies, "add", ".")
+        git(copies, "commit", "-m", text)
+    (copies / "file.txt").write_text("stashed\n")
+    (copies / "extra.txt").write_text("untracked stash\n")
+    git(copies, "stash", "push", "-u", "-m", "Copy fixture")
+    assert (copies / "file.txt").read_text() == "current\n"
+    assert not (copies / "extra.txt").exists()
+    paths.insert(3, str(copies))
 app = root / "RayGit Response QA.app"
 subprocess.run(["ditto", str(project / ".artifacts/RayGit.app"), str(app)], check=True)
 info_path = app / "Contents/Info.plist"
@@ -77,7 +97,7 @@ info.update(CFBundleIdentifier=bundle_id, CFBundleName="RayGit Response QA", CFB
 info_path.write_bytes(plistlib.dumps(info))
 subprocess.run(["codesign", "--force", "--sign", "-", str(app)], check=True, capture_output=True)
 subprocess.run(["codesign", "--verify", "--strict", str(app)], check=True)
-session = dict(schemaVersion=1, openRepositories=paths, activeRepository=str(changed), repositories={})
+session = dict(schemaVersion=1, openRepositories=paths, activeRepository=str(copies if options.revision_edit else changed), repositories={})
 preferences = {
     "appLanguage": "zh-Hans", "window.frameMode": "borderless",
     "preferences.backgroundRefresh": True, "editor.wrapLines": True,

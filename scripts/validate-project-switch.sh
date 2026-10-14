@@ -3,6 +3,39 @@ set -euo pipefail
 cd "${0:A:h:h}"
 TEST_FLAGS=()
 case "${1:-all}" in
+  comparison-crash)
+    TEST_FILTER='ComparisonActionRailTests|ComparisonChromeGeometryTests.testMissingLineAtDocumentEdgesMatchesFirstAddedLine|ComparisonChromeGeometryTests.testRapidEdgeScrollAndRetileRemainSynchronized|ComparisonChromeGeometryTests.testTargetOnlyAdditionUsesMissingLineAndUndoableDeleteButton|ComparisonDocumentGeometryTests|ComparisonBandNavigationTests|ComparisonUndoTests|ConflictPreviewPerformanceTests'
+    ;;
+  log-selection-focus)
+    TEST_FILTER='LogWindowSelectionFocusTests|WorkspaceFileFocusTests|NativeFocusAppearanceTests'
+    ;;
+  conflict-interactions)
+    TEST_FILTER='LogWindowSelectionFocusTests|WorkspaceFileFocusTests|NativeFocusAppearanceTests|ConflictResolutionGateTests|ConflictResolutionMenuTests|ComparisonActionRailTests|FileCompareSessionTests|NativeBranchTableTests|NativeCompactHistoryTableTests|WorkspaceNativeFilesTableTests|WorkspaceTreeRenderingTests|RepositoryChangeStateTests|RepositoryOperationStateTests|RepositoryOperationPresentationTests|GitExtensionsTests|InteractiveRebaseTests|LocalizationTests'
+    ;;
+  conflict-ui-stability)
+    TEST_FILTER='ConflictResolutionGateTests|ConflictResolutionMenuTests|WorkspaceContextMenuTests|WorkspaceContextEligibilityTests|WorkspaceNativeFilesTableTests|WorkspaceTreeRenderingTests'
+    ;;
+  repository-workflow)
+    TEST_FILTER='RepositoryWorkflowTests'
+    ;;
+  switch-responsive)
+    TEST_FILTER='ConflictPreviewPerformanceTests|RepositorySwitchLatencyTests|RepositoryPresentationOpeningTests|WorkspaceOpeningPreviewTests|DiffPreviewPerformanceTests|ComparisonDocumentGeometryTests|ComparisonInitialNavigationTests|ComparisonBandNavigationTests|ComparisonUndoTests|RevisionCopyEditingTests|ConflictResolutionMenuTests|WorkspaceTableMouseTests|RepositoryQuietRefreshTests'
+    ;;
+  switch-real)
+    export RAYGIT_RESPONSE_REPOSITORIES="$PWD/../stashx
+$PWD/../raydock"
+    TEST_FILTER='RealProjectResponseTests'
+    ;;
+  conflict-resolution)
+    TEST_FILTER='ConflictResolutionGateTests|ConflictResolutionMenuTests|ConflictDraftTests|FileComparisonTests|WorkspaceContextEligibilityTests|WorkspaceFileActionTargetsTests|WorkspaceCommitTests|FileCompareSessionTests|ComparisonSearchTests|GitCommandLogTests|GitInteractionTests|LocalizationTests'
+    ;;
+  conflict-resolution-workflows)
+    TEST_FILTER='GitRepositoryTests|RepositoryWorkflowTests|GitExtensionsTests|InteractiveRebaseTests|GitWorktreeTests|MergeCommitTests|ConflictRecoveryTests|PartialStagingTests|FileManagementTests|HistoryResetTests|GuardedForcePushTests|GitProcessTests'
+    TEST_FLAGS=(--skip-build)
+    ;;
+  revision-edit)
+    TEST_FILTER='RevisionCopyEditingTests|FileCompareSessionTests|ComparisonUndoTests|ComparisonSearchTests|ComparisonInitialNavigationTests|ComparisonDocumentGeometryTests|ComparisonBandNavigationTests|FileComparisonTests|LocalizationTests'
+    ;;
   pull-merge)
     TEST_FILTER='GitRepositoryTests|GuardedForcePushTests|GitCommandLogTests|NetworkAuthenticationPolicyTests|LocalizationTests'
     ;;
@@ -27,7 +60,6 @@ case "${1:-all}" in
     ;;
   performance)
     TEST_FILTER='MainWindowSwitchPerformanceTests|WorkspaceTableMouseTests'
-    TEST_FLAGS=(--skip-build)
     ;;
   cold-text)
     TEST_FILTER='NativeCompactHistoryTableTests.testCellFirstBitmapDrawIncludesSystemAndMonospacedText'
@@ -71,6 +103,6 @@ $PWD"
     TEST_FILTER='DialogAppearanceTests|DialogButtonWidthTests'
     TEST_FLAGS=(--skip-build)
     ;;
-  *) print -u2 "Usage: $0 [all|pull-merge|performance|cold-text|branches|branch-icons|branch-save|branch-save-core|sidebar-polish|dialog-focus|dialog-presentation|dimming|conflict-recovery|real|mutations|preview-ui|preview-core|layout-scroll|comparison-polish|preview-html|dialogs]"; exit 1 ;;
+  *) print -u2 "Usage: $0 [all|comparison-crash|log-selection-focus|conflict-interactions|conflict-ui-stability|repository-workflow|switch-responsive|switch-real|conflict-resolution|conflict-resolution-workflows|revision-edit|pull-merge|performance|cold-text|branches|branch-icons|branch-save|branch-save-core|sidebar-polish|dialog-focus|dialog-presentation|dimming|conflict-recovery|real|mutations|preview-ui|preview-core|layout-scroll|comparison-polish|preview-html|dialogs]"; exit 1 ;;
 esac
 swift test --build-system native -c release "${TEST_FLAGS[@]}" --filter "$TEST_FILTER"

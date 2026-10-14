@@ -6,13 +6,26 @@ import RayGitLocalization
 enum ComparisonEditorMetrics {
     static let textInset = NSSize(width: 3, height: 4)
     static let lineFragmentPadding: CGFloat = 2
+    static var minimumTextViewportWidth: CGFloat { 2 * (textInset.width + lineFragmentPadding) }
     static let headerHeight: CGFloat = 28
-    static let actionRailWidth: CGFloat = 24
+    static let actionRailWidth: CGFloat = 56
     static let actionButtonWidth: CGFloat = 20
     static let actionButtonHeight: CGFloat = 24
     static func signWidth(codeFont: NSFont) -> CGFloat {
-        let font = NSFont.monospacedSystemFont(ofSize: codeFont.pointSize, weight: .semibold)
-        return max(12, ceil(("−" as NSString).size(withAttributes: [.font: font]).width) + 4)
+        max(12, ceil(codeFont.pointSize * 0.65) + 4)
+    }
+    static func signPath(addition: Bool, center: NSPoint, codeSize: CGFloat) -> NSBezierPath {
+        // Avoid CoreText's system-font fallback for U+2212 while drawing the gutter.
+        let half = max(3, codeSize * 0.25)
+        let path = NSBezierPath()
+        path.lineWidth = max(1, codeSize / 10)
+        path.move(to: NSPoint(x: center.x - half, y: center.y))
+        path.line(to: NSPoint(x: center.x + half, y: center.y))
+        if addition {
+            path.move(to: NSPoint(x: center.x, y: center.y - half))
+            path.line(to: NSPoint(x: center.x, y: center.y + half))
+        }
+        return path
     }
     static func gutterWidth(firstLine: Int, lineCount: Int, codeFont: NSFont, showsNumbers: Bool) -> CGFloat {
         let sign = signWidth(codeFont: codeFont)
@@ -42,7 +55,7 @@ enum DiffVisualStyle {
     }
 }
 
-struct ComparisonEditorColumn: Identifiable {
+struct ComparisonEditorColumn: Identifiable, Equatable {
     let id: String
     let title: String
     let text: String
@@ -82,6 +95,7 @@ struct ComparisonEditor: NSViewRepresentable {
     var languagePath: String = ""
     var resolver: ComparisonResolverState? = nil
     var onCursorChange: ((ComparisonCursorStatus) -> Void)? = nil
+    var onActivePaneChange: ((String) -> Void)? = nil
     var editingCommands: ComparisonEditingCommands? = nil
     var revealRequest: ComparisonRevealRequest? = nil
     var overviewMarkers: [ComparisonOverviewMarker]? = nil
@@ -89,10 +103,19 @@ struct ComparisonEditor: NSViewRepresentable {
     var onOverviewNavigate: ((Double) -> Void)? = nil
     var scrollsToFirstChangeOnOpen = false
     var searchOptions: ComparisonSearchOptions? = nil
+    var readOnlyDocumentIdentity: String? = nil
     var effectiveSearch: ComparisonSearchOptions { searchOptions ?? ComparisonSearchOptions(query: search) }
 
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeCoordinator() -> Coordinator {
+        if let cached = Coordinator.takeReadOnlyDocument(for: self) { return cached }
+        return Coordinator(self)
+    }
     func makeNSView(context: Context) -> NSSplitView {
+        if let retained = context.coordinator.retainedSplit {
+            context.coordinator.retainedSplit = nil
+            context.coordinator.update(self)
+            return retained
+        }
         let split = ComparisonSplitView()
         split.isVertical = true
         split.dividerStyle = .thin
@@ -102,10 +125,43 @@ struct ComparisonEditor: NSViewRepresentable {
         return split
     }
     func updateNSView(_ nsView: NSSplitView, context: Context) { context.coordinator.update(self) }
+    static func dismantleNSView(_ nsView: NSSplitView, coordinator: Coordinator) {
+        coordinator.cacheReadOnlyDocument(nsView)
+    }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var model: ComparisonEditor
         weak var split: NSSplitView?
+        var retainedSplit: NSSplitView?
+        private var cachedScrollPositions: [NSPoint]?
+        private var cachedConflictSelection: Int?
+        private static var readOnlyDocuments: [Coordinator] = []
+        static func clearReadOnlyDocumentCache() { readOnlyDocuments.removeAll() }
+        static func takeReadOnlyDocument(for value: ComparisonEditor) -> Coordinator? {
+            guard value.readOnlyDocumentIdentity != nil, value.columns.allSatisfy({ !$0.isEditable }),
+                  let index = readOnlyDocuments.firstIndex(where: {
+                      $0.retainedSplit?.window == nil && $0.retainedSplit?.superview == nil &&
+                      $0.model.readOnlyDocumentIdentity == value.readOnlyDocumentIdentity &&
+                      $0.model.languagePath == value.languagePath && $0.model.columns == value.columns
+                  }) else { return nil }
+            let coordinator = readOnlyDocuments.remove(at: index)
+            coordinator.lastNavigation = value.navigation
+            coordinator.lastChangeNavigation = value.changeNavigation
+            return coordinator
+        }
+        func cacheReadOnlyDocument(_ split: NSSplitView) {
+            guard model.readOnlyDocumentIdentity != nil, model.columns.allSatisfy({ !$0.isEditable }) else { return }
+            let cost = model.columns.reduce(0) { $0 + $1.text.utf16.count }
+            guard cost <= 2_000_000 else { return }
+            retainedSplit = split
+            cachedScrollPositions = panes.map { $0.scroll.contentView.bounds.origin }
+            cachedConflictSelection = model.resolver?.selectedBlock
+            Self.readOnlyDocuments.removeAll { $0 === self }
+            Self.readOnlyDocuments.append(self)
+            while Self.readOnlyDocuments.count > 4 || Self.readOnlyDocuments.reduce(0, { total, value in
+                total + value.model.columns.reduce(0) { $0 + $1.text.utf16.count }
+            }) > 2_000_000 { Self.readOnlyDocuments.removeFirst() }
+        }
         fileprivate var panes: [Pane] = []
         fileprivate var paneCache: [String: Pane] = [:]
         var alignedTexts: [String] = []
@@ -113,6 +169,8 @@ struct ComparisonEditor: NSViewRepresentable {
         private var cachedAlignmentBaseline = -1
         private var cachedConflictMode = false
         private var cachedAlignment: ComparisonAlignment?
+        private var cachedConflictText: String?
+        private var cachedConflictBlocks: [ConflictDraft.Block] = []
         private var diffTexts: [String] = []
         private var cachedDiffs: [String: TextLineDiff] = [:]
         private var syntaxCache: [String: (String, String, [SyntaxToken])] = [:]
@@ -146,6 +204,7 @@ struct ComparisonEditor: NSViewRepresentable {
             let rebuild = panes.map(\.id) != value.columns.map(\.id)
             let previousSearch = model.effectiveSearch
             let previousLanguage = model.languagePath
+            let paneConfigurationChanged = model.columns != value.columns || model.wrapLines != value.wrapLines || model.showLineNumbers != value.showLineNumbers
             let settings = "\(value.fontName)|\(value.fontSize)|\(value.tabWidth)|\(value.syntaxHighlight)|\(value.characterDiff)|\(value.showWhitespace)|\(value.highlightCurrentLine)|\(value.additionColor)|\(value.deletionColor)|\(value.modificationColor)|\(value.colorScheme)"
             let preferencesChanged = preferenceSignature != settings
             if preferencesChanged || rebuild { alignmentGeometry = "" }
@@ -171,15 +230,15 @@ struct ComparisonEditor: NSViewRepresentable {
                 guard let self, let pane = self.panes.first(where: { $0.id == id }) else { return }
                 let line = max(0, number - pane.gutter.firstLine)
                 if !pane.text.isEditable, let editable = self.historyTarget(), let sourceIndex = self.panes.firstIndex(where: { $0 === pane }), let targetIndex = self.panes.firstIndex(where: { $0 === editable }) {
-                    let texts = self.panes.map { $0.text.string }
+                    let texts = self.paneTexts()
                     let baseline = self.model.resolver != nil ? targetIndex : 0
-                    let alignment = ComparisonAlignment(texts: texts, baseline: baseline, conflictBlocks: self.model.resolver != nil ? ConflictDraft.blocks(in: texts[baseline]) : [])
+                    let alignment = ComparisonAlignment(texts: texts, baseline: baseline, conflictBlocks: self.model.resolver != nil ? conflictBlocks(in: texts[baseline]) : [])
                     if let band = alignment.bands.first(where: { $0[sourceIndex].contains(line) }) { self.revealLine(editable, line: band[targetIndex].lowerBound); return }
                 }
                 self.revealLine(pane, line: line)
             }
             value.editingCommands?.replaceSearchAction = { [weak self] options, replacement, all in
-                guard let self, let pane = self.panes.first(where: { $0.id == "worktree" && $0.text.isEditable }) else { return comparisonSearchText("This preview is read-only.") }
+                guard let self, let pane = self.historyTarget() else { return comparisonSearchText("This preview is read-only.") }
                 switch ComparisonSearch.replacing(in: pane.text.string, options: options, replacement: replacement, all: all, selected: pane.text.selectedRange()) {
                 case .failure(let error): return error.localizedDescription
                 case .success(let value):
@@ -205,6 +264,7 @@ struct ComparisonEditor: NSViewRepresentable {
                             self.active = pane.text
                             self.reportCursor(in: pane)
                             self.scheduleCommandState()
+                            self.scheduleSearchStatus()
                         }
                     }
                     pane.text.historyChanged = { [weak self] in self?.scheduleCommandState() }
@@ -225,7 +285,7 @@ struct ComparisonEditor: NSViewRepresentable {
                 (split as? ComparisonSplitView)?.resetDistribution()
             }
             var changed = preferencesChanged || rebuild || previousSearch != value.effectiveSearch || previousLanguage != value.languagePath
-            for (pane, column) in zip(panes, value.columns) {
+            for (pane, column) in zip(panes, value.columns) where rebuild || preferencesChanged || paneConfigurationChanged {
                 pane.title.stringValue = column.title
                 pane.title.toolTip = column.title
                 pane.detail.stringValue = column.detail
@@ -237,26 +297,31 @@ struct ComparisonEditor: NSViewRepresentable {
                 pane.message.stringValue = column.message ?? ""
                 pane.message.isHidden = column.message == nil
                 pane.scroll.isHidden = column.message != nil
+                pane.wrap(value.wrapLines)
+                let font = EditorPreferences.font(name: value.fontName, size: value.fontSize)
+                if pane.text.font != font { pane.text.font = font }
                 if pane.text.string != column.text {
+                    pane.invalidateDocumentSize()
                     let selected = pane.text.selectedRange()
-                    if pane.preservesUndo {
+                    if pane.preservesUndo && pane.hasLoadedContent {
                         pane.text.replaceAsUndoableEdit(column.text)
                         active = pane.text
                     } else { pane.text.string = column.text }
                     let length = (column.text as NSString).length
-                    pane.text.setSelectedRange(NSRange(location: min(selected.location, length), length: 0))
+                    if pane.hasLoadedContent { pane.text.setSelectedRange(NSRange(location: min(selected.location, length), length: 0)) }
                     changed = true
                 }
+                pane.hasLoadedContent = true
                 pane.gutter.isHidden = false
-                pane.wrap(value.wrapLines)
-                let font = EditorPreferences.font(name: value.fontName, size: value.fontSize)
-                if pane.text.font != font { pane.text.font = font }
                 let paragraph = NSMutableParagraphStyle()
                 paragraph.tabStops = []
                 paragraph.defaultTabInterval = (" " as NSString).size(withAttributes: [.font: font]).width * CGFloat(min(16, max(1, value.tabWidth)))
                 pane.text.defaultParagraphStyle = paragraph
                 pane.text.typingAttributes[.paragraphStyle] = paragraph
-                if preferencesChanged || rebuild { pane.text.textStorage?.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: pane.text.string.utf16.count)) }
+                if preferencesChanged || rebuild {
+                    pane.invalidateDocumentSize()
+                    pane.text.textStorage?.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: pane.text.string.utf16.count))
+                }
                 pane.text.layoutManager?.showsInvisibleCharacters = value.showWhitespace
                 pane.text.highlightCurrentLine = value.highlightCurrentLine
                 pane.text.needsDisplay = true
@@ -300,7 +365,7 @@ struct ComparisonEditor: NSViewRepresentable {
         }
         private func scheduleSearchStatus() {
             DispatchQueue.main.async { [weak self] in
-                guard let self, let pane = self.panes.first(where: { $0.id == "worktree" }) ?? self.panes.first else { return }
+                guard let self, let pane = self.historyTarget() ?? self.panes.first(where: { $0.id == "worktree" }) ?? self.panes.first else { return }
                 let total = (try? ComparisonSearch.matches(in: pane.text.string, options: self.model.effectiveSearch).get().count) ?? 0
                 let current = self.searchIndices[pane.id].map { min($0 + 1, total) } ?? 0
                 self.model.editingCommands?.updateSearch(current: current, total: total)
@@ -337,7 +402,7 @@ struct ComparisonEditor: NSViewRepresentable {
         func selectConflict(_ index: Int) {
             guard let pane = panes.first(where: { $0.id == "worktree" }) else { return }
             alignDisplay()
-            let blocks = ConflictDraft.blocks(in: pane.text.string)
+            let blocks = conflictBlocks(in: pane.text.string)
             guard blocks.indices.contains(index) else { return }
             model.resolver?.selectedBlock = index
             pane.text.setSelectedRange(NSRange(location: blocks[index].range.location, length: 0))
@@ -352,7 +417,7 @@ struct ComparisonEditor: NSViewRepresentable {
             pane.text.window?.makeFirstResponder(pane.text)
             active = pane.text
             pane.text.replaceAsUndoableEdit(replacement.text, range: replacement.range, actionName: resolverText("Resolve Conflict"))
-            let blocks = ConflictDraft.blocks(in: pane.text.string)
+            let blocks = conflictBlocks(in: pane.text.string)
             if !blocks.isEmpty { selectConflict(min(index, blocks.count - 1)) }
             else { model.resolver?.selectedBlock = 0; updateConflictGutters() }
         }
@@ -384,11 +449,15 @@ struct ComparisonEditor: NSViewRepresentable {
             // Toolbar navigation can run inside updateNSView, where delegate
             // callbacks are deliberately suppressed. Publish its final focused
             // selection after that update completes.
-            DispatchQueue.main.async { [weak self] in self?.model.onCursorChange?(status) }
+            DispatchQueue.main.async { [weak self, weak pane] in
+                guard let self, let pane else { return }
+                self.model.onCursorChange?(status)
+                if self.active === pane.text { self.model.onActivePaneChange?(pane.id) }
+            }
         }
         func updateConflictGutters() {
             for pane in panes {
-                pane.gutter.conflictBlocks = model.resolver != nil && pane.id == "worktree" ? ConflictDraft.blocks(in: pane.text.string) : []
+                pane.gutter.conflictBlocks = model.resolver != nil && pane.id == "worktree" ? conflictBlocks(in: pane.text.string) : []
                 pane.gutter.selectedConflict = model.resolver?.selectedBlock ?? 0
                 pane.text.conflictBlocks = pane.gutter.conflictBlocks
                 pane.text.selectedConflict = pane.gutter.selectedConflict
@@ -398,18 +467,28 @@ struct ComparisonEditor: NSViewRepresentable {
             updateActionRails()
         }
         func updateActionRails() {
+            func characterRange(_ lines: Range<Int>, in pane: Pane) -> NSRange {
+                let start = pane.gutter.starts[min(lines.lowerBound, pane.gutter.starts.count - 1)]
+                let end = lines.upperBound < pane.gutter.starts.count ? pane.gutter.starts[lines.upperBound] : pane.text.string.utf16.count
+                return NSRange(location: start, length: max(0, end - start))
+            }
             for (position, pane) in panes.enumerated() {
                 for (rail, neighbor, pointsRight) in [(pane.leftRail, position - 1, true), (pane.rightRail, position + 1, false)] {
                     rail.pointsRight = pointsRight
-                    rail.color = pointsRight ? .systemBlue : .systemGreen
+                    rail.color = model.resolver != nil ? .systemOrange : EditorPreferences.color(model.modificationColor, fallback: .systemOrange)
                     var entries: [ComparisonActionRail.Entry] = []
                     if pane.text.isEditable, panes.indices.contains(neighbor), !panes[neighbor].scroll.isHidden {
                         let source = panes[neighbor]
                         if model.resolver != nil, pane.id == "worktree" {
                             let side: ConflictDraft.Side? = source.id == "ours" ? .ours : source.id == "theirs" ? .theirs : nil
                             if let side {
-                                entries = ConflictDraft.blocks(in: pane.text.string).enumerated().map { index, block in
-                                    ComparisonActionRail.Entry(text: pane.text, range: block.range,
+                                let bands = currentAlignment(paneTexts(), baseline: position).bands
+                                entries = conflictBlocks(in: pane.text.string).enumerated().map { index, block in
+                                    let band = bands.first {
+                                        $0[position].overlaps((block.startLine - 1)..<block.endLine)
+                                    }
+                                    return ComparisonActionRail.Entry(text: pane.text, range: block.range,
+                                        sourceText: source.text, sourceRange: band.map { characterRange($0[neighbor], in: source) },
                                         title: resolverText(side == .ours ? "Use Ours" : "Use Theirs") + " — " + resolverText("Apply to the current conflict only"),
                                         action: { [weak self] in self?.acceptConflict(side, index: index) })
                                 }
@@ -417,11 +496,10 @@ struct ComparisonEditor: NSViewRepresentable {
                         } else if model.resolver == nil {
                             let diff = TextLineDiff(source: source.text.string, target: pane.text.string)
                             entries = diff.blocks().map { block in
-                                let geometry = block.targetLines.isEmpty ? source : pane
-                                let lines = block.targetLines.isEmpty ? block.sourceLines : block.targetLines
-                                let start = geometry.gutter.starts[min(lines.lowerBound, geometry.gutter.starts.count - 1)]
-                                let end = lines.upperBound < geometry.gutter.starts.count ? geometry.gutter.starts[lines.upperBound] : geometry.text.string.utf16.count
-                                return ComparisonActionRail.Entry(text: geometry.text, range: NSRange(location: start, length: max(0, end - start)),
+                                return ComparisonActionRail.Entry(text: pane.text, range: characterRange(block.targetLines, in: pane),
+                                    sourceText: source.text, sourceRange: characterRange(block.sourceLines, in: source),
+                                    tint: block.sourceLines.isEmpty ? EditorPreferences.color(model.deletionColor, fallback: .systemRed)
+                                        : block.targetLines.isEmpty ? EditorPreferences.color(model.additionColor, fallback: .systemGreen) : nil,
                                     title: block.sourceLines.isEmpty ? L10n.text("Delete change", table: "AdvancedDiff") : L10n.text("acceptBlock", table: "AdvancedDiff", arguments: [source.title.stringValue]),
                                     deletesContent: block.sourceLines.isEmpty,
                                     action: { [weak self, weak pane, weak source] in
@@ -454,6 +532,7 @@ struct ComparisonEditor: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard !updating, let text = notification.object as? NSTextView, let pane = panes.first(where: { $0.text === text }) else { return }
             active = text
+            pane.invalidateDocumentSize()
             pane.gutter.setContent(text.string)
             pane.updateGutterWidth()
             pane.gutter.needsDisplay = true
@@ -469,19 +548,51 @@ struct ComparisonEditor: NSViewRepresentable {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.alignmentScheduled = false
+                guard self.split?.window != nil else { return }
                 self.alignDisplay()
+            }
+        }
+        private func conflictBlocks(in text: String) -> [ConflictDraft.Block] {
+            var text = text
+            text.makeContiguousUTF8()
+            if cachedConflictText != text {
+                cachedConflictText = text
+                cachedConflictBlocks = ConflictDraft.blocks(in: text)
+            }
+            return cachedConflictBlocks
+        }
+        private func restoreCachedViewport() {
+            guard retainedSplit == nil, split?.window != nil, let positions = cachedScrollPositions else { return }
+            cachedScrollPositions = nil
+            if let index = cachedConflictSelection, model.resolver?.selectedBlock != index {
+                model.resolver?.selectedBlock = index
+                updateConflictGutters()
+            }
+            cachedConflictSelection = nil
+            for (pane, origin) in zip(panes, positions) {
+                pane.fitDocument()
+                pane.scroll.contentView.scroll(to: origin)
+                pane.scroll.reflectScrolledClipView(pane.scroll.contentView)
             }
         }
         private func currentAlignment(_ texts: [String], baseline: Int) -> ComparisonAlignment {
             if cachedAlignment == nil || texts != cachedAlignmentTexts || baseline != cachedAlignmentBaseline || cachedConflictMode != (model.resolver != nil) {
                 cachedAlignmentTexts = texts; cachedAlignmentBaseline = baseline; cachedConflictMode = model.resolver != nil
-                cachedAlignment = ComparisonAlignment(texts: texts, baseline: baseline, conflictBlocks: model.resolver != nil ? ConflictDraft.blocks(in: texts[baseline]) : [])
+                cachedAlignment = ComparisonAlignment(texts: texts, baseline: baseline, conflictBlocks: model.resolver != nil ? conflictBlocks(in: texts[baseline]) : [])
                 alignmentBuildCount += 1
             }
             return cachedAlignment!
         }
+        private func paneTexts() -> [String] {
+            panes.map {
+                var text = $0.text.string
+                // Avoid canonical Unicode comparison through NSTextStorage's mutable NSString bridge.
+                text.makeContiguousUTF8()
+                return text
+            }
+        }
         private func difference(_ source: Pane, _ target: Pane) -> TextLineDiff {
-            let texts = panes.map { $0.text.string }
+            let texts = paneTexts()
             if diffTexts != texts { diffTexts = texts; cachedDiffs = [:] }
             let key = source.id + "→" + target.id
             if let cached = cachedDiffs[key] { return cached }
@@ -490,16 +601,17 @@ struct ComparisonEditor: NSViewRepresentable {
         }
         func geometrySignature() -> String {
             panes.map { pane in
-                "\(pane.id)|\(pane.scroll.contentView.bounds.width)|\(pane.scroll.contentView.bounds.height)|\(pane.text.textContainer?.containerSize.width ?? 0)|\(pane.leftRailWidth.constant)|\(pane.rightRailWidth.constant)"
+                "\(pane.id)|\(pane.scroll.contentView.bounds.width)|\(pane.text.textContainer?.containerSize.width ?? 0)|\(pane.leftRailWidth.constant)|\(pane.rightRailWidth.constant)"
             }.joined(separator: ";") + "|\(model.fontName)|\(model.fontSize)|\(model.tabWidth)|\(model.wrapLines)|\(model.resolver != nil)"
         }
         func alignDisplay() {
-            guard !aligning, !panes.isEmpty, panes.allSatisfy({ !$0.scroll.isUpdatingGeometry }) else { return }
+            guard !aligning, !panes.isEmpty, panes.allSatisfy({ !$0.scroll.isUpdatingGeometry && ($0.scroll.isHidden || $0.scroll.contentView.bounds.width > ComparisonEditorMetrics.minimumTextViewportWidth) }) else { return }
             let origins = panes.map { $0.scroll.contentView.bounds.origin }
             let sourceIndex = panes.firstIndex(where: { $0.id == scrollSourceID }) ?? panes.firstIndex(where: { $0.text === active }) ?? 0
             let sharedY = origins[sourceIndex].y
             aligning = true
             defer {
+                restoreCachedViewport()
                 aligning = false
                 if geometrySignature() != alignmentGeometry { scheduleAlignment() }
                 else { scrollToInitialChangeIfReady() }
@@ -507,7 +619,7 @@ struct ComparisonEditor: NSViewRepresentable {
             // Apply rail/gutter constraints before measuring wrapped line fragments.
             split?.layoutSubtreeIfNeeded()
             panes.forEach { $0.prepareTextGeometry() }
-            let texts = panes.map { $0.text.string }
+            let texts = paneTexts()
             let geometry = geometrySignature()
             guard texts != alignedTexts || geometry != alignmentGeometry else { return }
             alignedTexts = texts
@@ -516,6 +628,7 @@ struct ComparisonEditor: NSViewRepresentable {
             let alignment = currentAlignment(texts, baseline: baseline)
             for pane in panes {
                 guard let storage = pane.text.textStorage else { continue }
+                pane.invalidateDocumentSize()
                 let paragraph = (pane.text.defaultParagraphStyle?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
                 paragraph.paragraphSpacing = 0
                 paragraph.paragraphSpacingBefore = 0
@@ -625,7 +738,7 @@ struct ComparisonEditor: NSViewRepresentable {
             guard let source else { return false }
             if model.resolver != nil {
                 guard let index = model.resolver?.selectedBlock,
-                      ConflictDraft.blocks(in: target.text.string).indices.contains(index), ["ours", "theirs"].contains(source.id) else { return false }
+                      conflictBlocks(in: target.text.string).indices.contains(index), ["ours", "theirs"].contains(source.id) else { return false }
                 acceptConflict(source.id == "ours" ? .ours : .theirs, index: index)
                 return true
             }
@@ -637,7 +750,7 @@ struct ComparisonEditor: NSViewRepresentable {
         fileprivate func acceptActions(for target: Pane, line: Int) -> [(String, () -> Void)] {
             guard target.text.isEditable else { return [] }
             if model.resolver != nil, target.id == "worktree" {
-                let blocks = ConflictDraft.blocks(in: target.text.string)
+                let blocks = conflictBlocks(in: target.text.string)
                 if let index = blocks.firstIndex(where: { ($0.startLine - 1)..<$0.endLine ~= line }) {
                     var choices: [(String, ConflictDraft.Side)] = [("Use Ours", .ours), ("Use Theirs", .theirs), ("Ours → Theirs", .oursThenTheirs), ("Theirs → Ours", .theirsThenOurs)]
                     if blocks[index].base != nil { choices.append(("Use Base", .base)) }
@@ -690,8 +803,8 @@ struct ComparisonEditor: NSViewRepresentable {
             }
             if model.resolver != nil, let resultIndex = panes.firstIndex(where: { $0.id == "worktree" }) {
                 let result = panes[resultIndex]
-                let blocks = ConflictDraft.blocks(in: result.text.string)
-                let alignment = currentAlignment(panes.map { $0.text.string }, baseline: resultIndex)
+                let blocks = conflictBlocks(in: result.text.string)
+                let alignment = currentAlignment(paneTexts(), baseline: resultIndex)
                 for band in alignment.bands where blocks.contains(where: { (($0.startLine - 1)..<$0.endLine).overlaps(band[resultIndex]) }) {
                     for (index, pane) in panes.enumerated() {
                         if pane.id == "ours" || pane.id == "theirs" {
@@ -727,7 +840,7 @@ struct ComparisonEditor: NSViewRepresentable {
                     switch token.kind { case .keyword: color = .systemPurple; case .string: color = .systemRed; case .comment: color = .secondaryLabelColor; case .number: color = .systemBlue }
                     layout.addTemporaryAttribute(.foregroundColor, value: color, forCharacterRange: token.range)
                 }
-                let conflictBlocks = pane.id == "worktree" ? ConflictDraft.blocks(in: pane.text.string) : []
+                let conflictBlocks = pane.id == "worktree" ? conflictBlocks(in: pane.text.string) : []
                 let conflictLines = Set(conflictBlocks.flatMap { ($0.startLine - 1)..<$0.endLine })
                 let conflictColor = EditorPreferences.color(model.deletionColor, fallback: .systemRed)
                 let changedLines = (lineChanges[pane.id] ?? []).union(conflictLines).union(pane.gutter.lineSigns.keys)
@@ -834,11 +947,11 @@ struct ComparisonEditor: NSViewRepresentable {
         }
         private func refreshOverviews() {
             guard !panes.isEmpty else { return }
-            let texts = panes.map { $0.text.string }
+            let texts = paneTexts()
             let baseline = model.resolver != nil ? panes.firstIndex(where: { $0.id == "worktree" }) ?? 0 : 0
             if texts != navigationTexts || baseline != navigationBaseline {
                 navigationTexts = texts; navigationBaseline = baseline
-                navigationBands = ComparisonChangeNavigation(texts: texts, baseline: baseline, conflicts: model.resolver != nil ? ConflictDraft.blocks(in: texts[baseline]) : [], cachedAlignment: currentAlignment(texts, baseline: baseline)).bands
+                navigationBands = ComparisonChangeNavigation(texts: texts, baseline: baseline, conflicts: model.resolver != nil ? conflictBlocks(in: texts[baseline]) : [], cachedAlignment: currentAlignment(texts, baseline: baseline)).bands
                 changeBandIndex = nil
             }
             let height = Double(max(1, panes.map { $0.text.bounds.height }.max() ?? 1))
@@ -871,12 +984,12 @@ struct ComparisonEditor: NSViewRepresentable {
         }
         func navigateChange(forward: Bool) {
             guard !panes.isEmpty else { return }
-            let texts = panes.map { $0.text.string }
+            let texts = paneTexts()
             let baseline = model.resolver != nil ? panes.firstIndex(where: { $0.id == "worktree" }) ?? 0 : 0
             if texts != navigationTexts || baseline != navigationBaseline {
                 navigationBaseline = baseline
                 navigationTexts = texts
-                navigationBands = ComparisonChangeNavigation(texts: texts, baseline: baseline, conflicts: model.resolver != nil ? ConflictDraft.blocks(in: texts[baseline]) : [], cachedAlignment: currentAlignment(texts, baseline: baseline)).bands
+                navigationBands = ComparisonChangeNavigation(texts: texts, baseline: baseline, conflicts: model.resolver != nil ? conflictBlocks(in: texts[baseline]) : [], cachedAlignment: currentAlignment(texts, baseline: baseline)).bands
                 changeBandIndex = nil
             }
             let groups = navigationBands
@@ -909,7 +1022,7 @@ struct ComparisonEditor: NSViewRepresentable {
             reportCursor(in: panes[focus])
         }
         func navigate(forward: Bool) {
-            guard let text = panes.first(where: { $0.id == "worktree" && !$0.scroll.isHidden })?.text ?? focusedText ?? active ?? panes.first?.text,
+            guard let text = historyTarget()?.text ?? focusedText ?? active ?? panes.first?.text,
                   let pane = panes.first(where: { $0.text === text }),
                   case .success(let matches) = ComparisonSearch.matches(in: text.string, options: model.effectiveSearch), !matches.isEmpty else { return }
             let current = searchIndices[pane.id]
@@ -987,8 +1100,8 @@ private enum ConflictVisualStyle {
         guard range.length > 0, range.location < text.string.utf16.count, layout.numberOfGlyphs > 0 else { return nil }
         let first = layout.glyphIndexForCharacter(at: range.location)
         let last = layout.glyphIndexForCharacter(at: min(NSMaxRange(range) - 1, text.string.utf16.count - 1))
-        let top = layout.lineFragmentRect(forGlyphAt: first, effectiveRange: nil).minY
-        let bottom = layout.lineFragmentRect(forGlyphAt: last, effectiveRange: nil).maxY
+        let top = layout.lineFragmentUsedRect(forGlyphAt: first, effectiveRange: nil).minY
+        let bottom = layout.lineFragmentUsedRect(forGlyphAt: last, effectiveRange: nil).maxY
         return NSRect(x: 0, y: top + text.textContainerInset.height, width: text.bounds.width, height: bottom - top)
     }
     static func sections(_ block: ConflictDraft.Block, in string: String) -> [(NSRange, NSColor)] {
@@ -1086,8 +1199,8 @@ final class ComparisonTextView: UndoableComparisonTextView {
             let paragraph = source.lineRange(for: NSRange(location: min(character, max(0, source.length - 1)), length: min(selectedRange().length, max(0, source.length - character))))
             let first = layoutManager.glyphIndexForCharacter(at: paragraph.location)
             let last = layoutManager.glyphIndexForCharacter(at: max(paragraph.location, NSMaxRange(paragraph) - 1))
-            let top = layoutManager.lineFragmentRect(forGlyphAt: first, effectiveRange: nil)
-            let bottom = layoutManager.lineFragmentRect(forGlyphAt: last, effectiveRange: nil)
+            let top = layoutManager.lineFragmentUsedRect(forGlyphAt: first, effectiveRange: nil)
+            let bottom = layoutManager.lineFragmentUsedRect(forGlyphAt: last, effectiveRange: nil)
             line = NSRect(x: 0, y: top.minY, width: bounds.width, height: bottom.maxY - top.minY)
         }
         line.origin.y += textContainerInset.height
@@ -1136,9 +1249,12 @@ private final class Pane: NSView {
     var gutterWidth: NSLayoutConstraint!
     var alignedHeight: CGFloat = 0
     var preservesUndo = false
+    var hasLoadedContent = false
     var geometryChanged: (() -> Void)?
     private var lastViewport = NSSize.zero
     private var wrapped: Bool?
+    private var measuredDocumentSize: NSSize?
+    func invalidateDocumentSize() { measuredDocumentSize = nil }
     init(column: ComparisonEditorColumn) {
         id = column.id
         super.init(frame: .zero)
@@ -1146,7 +1262,6 @@ private final class Pane: NSView {
         gutter.clipsToBounds = true
         scroll.clipsToBounds = true
         scroll.contentView.clipsToBounds = true
-        text.string = column.text
         text.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         text.isRichText = false
         text.allowsUndo = true
@@ -1163,6 +1278,9 @@ private final class Pane: NSView {
         text.minSize = NSSize(width: 0, height: 0)
         text.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         text.isVerticallyResizable = true
+        text.isHorizontallyResizable = true
+        text.textContainer?.widthTracksTextView = false
+        text.textContainer?.containerSize.width = CGFloat.greatestFiniteMagnitude
         text.autoresizingMask = [.width]
         scroll.hasVerticalScroller = true
         scroll.hasHorizontalScroller = true
@@ -1192,6 +1310,11 @@ private final class Pane: NSView {
         gutterWidth = gutter.widthAnchor.constraint(equalToConstant: gutter.preferredWidth)
         leftRailWidth = leftRail.widthAnchor.constraint(equalToConstant: 0)
         rightRailWidth = rightRail.widthAnchor.constraint(equalToConstant: 0)
+        leftRailWidth.priority = .defaultLow
+        rightRailWidth.priority = .defaultLow
+        let readableWidth = scroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 152)
+        readableWidth.priority = .defaultHigh
+        readableWidth.isActive = true
         NSLayoutConstraint.activate([
             title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6), title.trailingAnchor.constraint(lessThanOrEqualTo: detail.leadingAnchor, constant: -4), title.topAnchor.constraint(equalTo: topAnchor, constant: 4), title.heightAnchor.constraint(equalToConstant: 20),
             detail.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6), detail.centerYAnchor.constraint(equalTo: title.centerYAnchor), detail.widthAnchor.constraint(lessThanOrEqualToConstant: 120),
@@ -1238,30 +1361,50 @@ private final class Pane: NSView {
     /// otherwise compete: one uses the viewport, the other adds the horizontal inset.
     func prepareTextGeometry() {
         let viewport = scroll.contentView.bounds.size
-        guard viewport.width > 0 else { return }
+        guard viewport.width > ComparisonEditorMetrics.minimumTextViewportWidth else { return }
         text.textContainer?.widthTracksTextView = false
         if wrapped == true {
             text.setFrameSize(NSSize(width: viewport.width, height: max(text.frame.height, viewport.height)))
             let width = max(1, viewport.width - 2 * text.textContainerInset.width)
-            if text.textContainer?.containerSize.width != width { text.textContainer?.containerSize.width = width }
+            if text.textContainer?.containerSize.width != width {
+                invalidateDocumentSize()
+                text.textContainer?.containerSize.width = width
+            }
         } else {
-            text.textContainer?.containerSize.width = CGFloat.greatestFiniteMagnitude
+            if text.textContainer?.containerSize.width != CGFloat.greatestFiniteMagnitude {
+                invalidateDocumentSize()
+                text.textContainer?.containerSize.width = CGFloat.greatestFiniteMagnitude
+            }
             text.setFrameSize(NSSize(width: max(text.frame.width, viewport.width), height: max(text.frame.height, viewport.height)))
         }
     }
     func fitDocument() {
         let viewport = scroll.contentView.bounds.size
-        text.sizeToFit()
+        guard viewport.width > ComparisonEditorMetrics.minimumTextViewportWidth else { return }
+        let clip = scroll.contentView
+        let origin = clip.bounds.origin
+        let postsChanges = clip.postsBoundsChangedNotifications
+        clip.postsBoundsChangedNotifications = false
+        defer { clip.postsBoundsChangedNotifications = postsChanges }
+        if measuredDocumentSize == nil {
+            text.sizeToFit()
+            measuredDocumentSize = text.frame.size
+        }
         // Keep wrapped document width fixed after sizeToFit, including after adding
         // paragraph padding or changing an arrow rail width.
-        let width = wrapped == true ? viewport.width : max(text.frame.width, viewport.width)
-        text.setFrameSize(NSSize(width: width, height: max(text.frame.height, viewport.height, alignedHeight)))
+        let natural = measuredDocumentSize!
+        let width = wrapped == true ? viewport.width : max(natural.width, viewport.width)
+        text.setFrameSize(NSSize(width: width, height: max(natural.height, viewport.height, alignedHeight)))
         text.setFrameOrigin(.zero)
+        // sizeToFit briefly shrinks aligned documents; that must not clamp the viewport or synchronize other panes.
+        clip.scroll(to: NSPoint(x: origin.x, y: min(max(0, origin.y), max(0, text.frame.height - viewport.height))))
+        scroll.reflectScrolledClipView(clip)
     }
     override func layout() {
         super.layout()
+        guard window != nil else { return }
         let viewport = scroll.contentView.bounds.size
-        guard viewport.width > 0 else { return }
+        guard viewport.width > ComparisonEditorMetrics.minimumTextViewportWidth else { return }
         if viewport != lastViewport { lastViewport = viewport; geometryChanged?() }
         prepareTextGeometry()
         fitDocument()
@@ -1340,6 +1483,7 @@ private final class LineGutter: NSView {
         let numberFont = DiffVisualStyle.lineNumberFont(codeSize: codeFont.pointSize)
         let baselineOffset = codeFont.ascender - numberFont.ascender
         let attrs: [NSAttributedString.Key: Any] = [.font: numberFont, .foregroundColor: DiffVisualStyle.lineNumberColor]
+        let signWidth = ComparisonEditorMetrics.signWidth(codeFont: codeFont)
         guard layout.numberOfGlyphs > 0 else {
             let y = inset.height - visible.minY
             var numberAttributes = attrs
@@ -1356,7 +1500,7 @@ private final class LineGutter: NSView {
             }
             return
         }
-        layout.enumerateLineFragments(forGlyphRange: glyphs) { rect, _, _, glyphRange, _ in
+        layout.enumerateLineFragments(forGlyphRange: glyphs) { rect, used, _, glyphRange, _ in
             let character = layout.characterIndexForGlyph(at: glyphRange.location)
             var lower = 0
             var upper = self.starts.count
@@ -1368,7 +1512,7 @@ private final class LineGutter: NSView {
             let y = rect.minY + inset.height - visible.minY
             if let color = self.lineBackgrounds[line] {
                 color.setFill()
-                NSRect(x: 0, y: y, width: self.bounds.width, height: rect.height).intersection(self.bounds).fill()
+                NSRect(x: 0, y: y, width: self.bounds.width, height: used.height).intersection(self.bounds).fill()
             }
             let selectedLine = self.starts.lastIndex(where: { $0 <= text.selectedRange().location }) ?? 0
             let selectionEnd = text.selectedRange().length > 0 ? NSMaxRange(text.selectedRange()) - 1 : text.selectedRange().location
@@ -1377,7 +1521,7 @@ private final class LineGutter: NSView {
             let focused = (text as? ComparisonTextView)?.currentLineFocused == true
             if current {
                 NSColor.selectedTextBackgroundColor.withAlphaComponent(focused ? 0.24 : 0.12).setFill()
-                NSRect(x: 0, y: y, width: self.bounds.width, height: rect.height).intersection(self.bounds).fill()
+                NSRect(x: 0, y: y, width: self.bounds.width, height: used.height).intersection(self.bounds).fill()
             }
             if character == 0 || (character <= content.length && content.character(at: character - 1) == 10) {
                 if self.showsLineNumbers {
@@ -1387,14 +1531,13 @@ private final class LineGutter: NSView {
                         numberAttributes[.font] = NSFont.monospacedDigitSystemFont(ofSize: numberFont.pointSize, weight: focused ? .semibold : .medium)
                         numberAttributes[.foregroundColor] = focused ? NSColor.labelColor : DiffVisualStyle.lineNumberColor
                     }
-                    label.draw(at: NSPoint(x: self.bounds.width - label.size(withAttributes: numberAttributes).width - self.signWidth - 3, y: y + baselineOffset), withAttributes: numberAttributes)
+                    label.draw(at: NSPoint(x: self.bounds.width - label.size(withAttributes: numberAttributes).width - signWidth - 3, y: y + baselineOffset), withAttributes: numberAttributes)
                 }
                 if let addition = self.lineSigns[line] {
-                    let label = (addition ? "+" : "−") as NSString
-                    let signFont = NSFont.monospacedSystemFont(ofSize: codeFont.pointSize, weight: .semibold)
-                    let attributes: [NSAttributedString.Key: Any] = [.font: signFont, .foregroundColor: addition ? self.additionColor : self.deletionColor]
-                    let x = self.bounds.width - self.signWidth + (self.signWidth - label.size(withAttributes: attributes).width) / 2
-                    label.draw(at: NSPoint(x: x, y: y), withAttributes: attributes)
+                    (addition ? self.additionColor : self.deletionColor).setStroke()
+                    ComparisonEditorMetrics.signPath(addition: addition,
+                        center: NSPoint(x: self.bounds.width - signWidth / 2, y: y + codeFont.ascender * 0.55),
+                        codeSize: codeFont.pointSize).stroke()
                 }
             }
         }

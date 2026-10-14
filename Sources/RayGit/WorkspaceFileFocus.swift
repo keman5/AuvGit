@@ -17,7 +17,7 @@ final class WorkspaceFileFocus: ObservableObject {
     }
     deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
     func register(_ view: NSView, toolbar: Bool) { regions[ObjectIdentifier(view)] = WeakRegion(view: view, toolbar: toolbar) }
-    @discardableResult func focus(in window: NSWindow, text: Bool = false) -> Bool {
+    @MainActor @discardableResult func focus(in window: NSWindow, text: Bool = false) -> Bool {
         let live = regions.values.compactMap { region -> NSView? in
             guard !region.toolbar, let view = region.view, view.window === window, !view.isHiddenOrHasHiddenAncestor else { return nil }
             return view
@@ -33,7 +33,11 @@ final class WorkspaceFileFocus: ObservableObject {
             return current + view.subviews.flatMap(candidates)
         }
         let targets = candidates(content)
-        for target in targets where window.makeFirstResponder(target) { updateScope(true); return true }
+        let appearance = NativeFocusAppearance.forWindow(window)
+        for target in targets where window.makeFirstResponder(target) {
+            appearance.preserveExplicitFocus()
+            updateScope(true); return true
+        }
         return false
     }
     func handle(_ event: NSEvent) {

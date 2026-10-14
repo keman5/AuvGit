@@ -8,13 +8,15 @@ public enum RepositoryOperationState: String, Codable, Sendable {
 public struct RepositoryChangeState: Equatable, Sendable, Codable {
     public let history: String
     public let operation: RepositoryOperationState?
+    public let recreatableConflicts: Set<String>?
     private let index: String
     private let files: [GitFile]
     private let worktree: [String]
 
-    public init(history: String, index: String, files: [GitFile], root: URL, operation: RepositoryOperationState? = nil) {
+    public init(history: String, index: String, files: [GitFile], root: URL, operation: RepositoryOperationState? = nil, recreatableConflicts: Set<String> = []) {
         self.history = history
         self.operation = operation
+        self.recreatableConflicts = recreatableConflicts.isEmpty ? nil : recreatableConflicts
         self.index = index
         self.files = files.sorted { $0.path < $1.path }
         worktree = self.files.filter { $0.isUnstaged }.map { file in
@@ -44,7 +46,15 @@ public extension GitRepository {
         async let index = workflowRead(["--no-optional-locks", "ls-files", "--stage", "-z"])
         async let tracking = GitProcess.run(at: url, arguments: ["--no-optional-locks", "config", "--local", "--null", "--get-regexp", "^branch\\..*\\.(remote|merge)$"], allowedCodes: [0, 1]).text
         async let operation = operationState()
+        async let undo = recreatableConflictPaths()
         let trackingText = try await tracking
-        return try await RepositoryChangeState(history: head + refs + (trackingText.isEmpty ? "" : "\0" + trackingText), index: index, files: files, root: url, operation: operation)
+        return try await RepositoryChangeState(history: head + refs + (trackingText.isEmpty ? "" : "\0" + trackingText), index: index, files: files, root: url, operation: operation, recreatableConflicts: undo)
+    }
+
+    func recreatableConflictPaths() async throws -> Set<String> {
+        let output = try await workflowRead(["--no-optional-locks", "ls-files", "--resolve-undo", "-z"])
+        return Set(output.split(separator: "\0").compactMap { record in
+            record.firstIndex(of: "\t").map { String(record[record.index(after: $0)...]) }
+        })
     }
 }

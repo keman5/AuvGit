@@ -4,7 +4,7 @@ import GitCore
 import RayGitLocalization
 
 enum FileAction {
-    case compare, open, reveal, history, stage, unstage, discard
+    case compare, resolveOurs, resolveTheirs, resolveBoth, recreateConflict, open, reveal, history, stage, unstage, discard
     case copyName, copyFiles, copyPath, copyRelativePath, stageAll, unstageAll, rename, ignore, trash
 }
 struct FilePaneShortcutRequest {
@@ -14,6 +14,7 @@ struct FilePaneShortcutRequest {
 
 struct WorkspaceFilesPane<TreeContent: View>: View {
     let files: [GitFile]
+    var recreatableConflicts: Set<String> = []
     var statusFailure: String? = nil
     var automaticallySelectedPath: String? = nil
     var initialSelectionReady = false
@@ -276,7 +277,7 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
         }, onAction: { action, paths in
             guard !preparing, displayedRepository == repository?.url.path else { return }
             onAction(action, paths)
-        }, onCompare: performCompare, fileFocus: fileFocus, isReady: ready)
+        }, onCompare: performCompare, fileFocus: fileFocus, isReady: ready, recreatableConflicts: recreatableConflicts)
     }
 
     private func openIgnored(_ paths: Set<String>) {

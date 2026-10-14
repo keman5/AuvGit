@@ -6,6 +6,26 @@ import GitCore
 
 @MainActor
 final class NativeBranchTableTests: XCTestCase {
+    func testSelectionImmediatelyTintsAllBranchIconsAndSurvivesReuse() throws {
+        let parent = pane()
+        let coordinator = parent.makeCoordinator()
+        let value = try XCTUnwrap(parent.rows.first { $0.current })
+        let cell = NativeBranchTable.Cell(frame: .zero)
+        cell.configure(value, coordinator: coordinator)
+        let row = NativeBranchTable.RowView()
+        row.addSubview(cell)
+        row.isSelected = true
+        for icon in [cell.icon, cell.tracking, cell.check] {
+            XCTAssertEqual(icon.contentTintColor, .alternateSelectedControlTextColor)
+        }
+        cell.configure(value, coordinator: coordinator)
+        XCTAssertEqual(cell.check.contentTintColor, .alternateSelectedControlTextColor)
+        row.isSelected = false
+        XCTAssertEqual(cell.label.textColor, .labelColor)
+        XCTAssertEqual(cell.check.contentTintColor, .controlAccentColor)
+        XCTAssertEqual(cell.tracking.contentTintColor, .secondaryLabelColor)
+    }
+
     func testCurrentBranchOmitsMergeButOtherBranchesKeepIt() throws {
         let coordinator = pane().makeCoordinator()
         coordinator.rows = coordinator.parent.rows

@@ -17,3 +17,16 @@
 "deleteCount" = "選択した %ld 個の項目を削除しますか？";
 "permanentlyDelete" = "削除";
 "moveToTrash" = "ゴミ箱に移動";
+
+"resolveConflict" = "競合を解決";
+
+"resolveOurs" = "自分の変更を採用";
+
+"resolveTheirs" = "相手の変更を採用";
+
+"resolveBoth" = "両方を採用";
+
+
+"recreateConflict" = "競合を再現…";
+
+"recreateConflictMessage" = "保存済みの競合バージョンを復元しますか？現在の内容が置き換わり、選択したファイルは再び未解決になります。";

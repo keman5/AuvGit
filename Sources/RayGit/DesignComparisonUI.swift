@@ -25,6 +25,11 @@ struct CompareBasePanel: View {
     let wraps: Bool
     let numbers: Bool
     @Binding var expanded: Bool
+    var onEdit: (String, String) -> Void = { _, _ in }
+    var onActivePaneChange: ((String) -> Void)? = nil
+    var editingCommands: ComparisonEditingCommands? = nil
+    var searchOptions = ComparisonSearchOptions()
+    var navigation = 0
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
@@ -38,7 +43,7 @@ struct CompareBasePanel: View {
             }.font(.system(size: 12)).padding(.horizontal, 14).frame(height: 28).rayGitChrome()
             if expanded {
                 Divider()
-                ComparisonEditor(columns: [column], wrapLines: wraps, showLineNumbers: numbers, synchronizeScroll: false, search: "", navigation: 0, changeNavigation: 0, onEdit: { _, _ in })
+                ComparisonEditor(columns: [column], wrapLines: wraps, showLineNumbers: numbers, synchronizeScroll: false, search: searchOptions.query, navigation: navigation, changeNavigation: 0, onEdit: onEdit, onActivePaneChange: onActivePaneChange, editingCommands: editingCommands, searchOptions: searchOptions)
                     .frame(minHeight: 100, idealHeight: 170, maxHeight: 230)
             }
         }

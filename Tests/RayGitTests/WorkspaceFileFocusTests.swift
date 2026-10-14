@@ -14,9 +14,12 @@ final class WorkspaceFileFocusTests: XCTestCase {
         let outside = NSTextView(frame: NSRect(x: 300, y: 0, width: 250, height: 300))
         window.contentView!.addSubview(outside)
         window.orderFront(nil)
+        let appearance = NativeFocusAppearance.forWindow(window)
         XCTAssertTrue(window.makeFirstResponder(outside))
         XCTAssertTrue(focus.focus(in: window))
+        appearance.apply()
         XCTAssertTrue(window.firstResponder === table)
+        XCTAssertFalse(appearance.isVisible, "Explicit content selection does not reveal keyboard rings")
         XCTAssertFalse(focus.focus(in: window, text: true))
         table.isHidden = true
         XCTAssertFalse(focus.focus(in: window))

@@ -17,3 +17,16 @@
 "deleteCount" = "Delete %ld selected items?";
 "permanentlyDelete" = "Delete";
 "moveToTrash" = "Move to Trash";
+
+"resolveConflict" = "Resolve Conflict";
+
+"resolveOurs" = "Use Ours";
+
+"resolveTheirs" = "Use Theirs";
+
+"resolveBoth" = "Use Both";
+
+
+"recreateConflict" = "Recreate Conflict…";
+
+"recreateConflictMessage" = "Restore the saved conflict versions? Current contents will be replaced and these files will become unmerged again.";

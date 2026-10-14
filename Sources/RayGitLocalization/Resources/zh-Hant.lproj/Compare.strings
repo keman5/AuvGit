@@ -233,3 +233,9 @@
 
 "File exceeds preview limit." = "檔案超過預覽大小上限。";
 "Working Tree" = "工作區";
+
+"Editable Copy" = "可編輯副本";
+"Save Copy To Worktree Message" = "將「%@」副本儲存至工作區檔案。";
+"Other Drafts Discarded On Close" = "關閉視窗時，其餘未儲存的版本副本將被放棄。";
+
+"No saved conflict is available for this file." = "此檔案沒有可恢復的原始衝突。";

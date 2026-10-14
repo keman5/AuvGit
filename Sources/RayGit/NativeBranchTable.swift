@@ -187,12 +187,21 @@ struct NativeBranchTable: NSViewRepresentable {
             }
             setAccessibilityElement(!group); setAccessibilityRole(.staticText); setAccessibilityLabel(row.title)
             toolTip = row.isGroup ? row.title : row.target; needsLayout = true
+            applyForeground()
         }
         override var backgroundStyle: NSView.BackgroundStyle {
-            didSet { label.textColor = backgroundStyle == .emphasized ? .alternateSelectedControlTextColor : .labelColor; icon.contentTintColor = label.textColor; tracking.contentTintColor = backgroundStyle == .emphasized ? label.textColor : .secondaryLabelColor }
+            didSet { applyForeground() }
+        }
+        private func applyForeground() {
+            let selected = backgroundStyle == .emphasized
+            label.textColor = selected ? .alternateSelectedControlTextColor : group ? .secondaryLabelColor : .labelColor
+            icon.contentTintColor = label.textColor
+            tracking.contentTintColor = selected ? label.textColor : .secondaryLabelColor
+            check.contentTintColor = selected ? label.textColor : .controlAccentColor
+            disclosure.contentTintColor = selected ? label.textColor : .secondaryLabelColor
         }
     }
-    final class RowView: NSTableRowView {
+    final class RowView: NativeSelectionRowView {
         var current = false
         override func drawBackground(in dirtyRect: NSRect) {
             if current { NSColor(RayGitStyle.blue).withAlphaComponent(0.12).setFill(); NSBezierPath(rect: bounds).fill() }

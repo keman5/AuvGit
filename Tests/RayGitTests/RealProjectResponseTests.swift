@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import GitCore
 import XCTest
 @testable import RayGit
 
@@ -49,6 +50,30 @@ final class RealProjectResponseTests: XCTestCase {
         }
     }
     func testNamedRealProjectsCachedTargetPixelsWithin100ms() async throws {
+        try await measureRealProjectSwitch(includesConflictPreview: false)
+    }
+    func testNamedRealProjectsLargestConflictPreviewSwitchWithin100ms() async throws {
+        try await measureRealProjectSwitch(includesConflictPreview: true)
+    }
+    func testNamedRealProjectsWrappedConflictPreviewSwitchWithin100ms() async throws {
+        let key = "editor.wrapLines", previous = UserDefaults.standard.object(forKey: key)
+        UserDefaults.standard.set(true, forKey: key)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: key) }
+            else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        try await measureRealProjectSwitch(includesConflictPreview: true)
+    }
+    private func previewTexts(_ view: NSView) -> [String] {
+        if let text = view as? NSTextView {
+            guard !text.isEditable else { return [] }
+            var source = text.string
+            source.makeContiguousUTF8()
+            return [source]
+        }
+        return view.subviews.flatMap(previewTexts)
+    }
+    private func measureRealProjectSwitch(includesConflictPreview: Bool) async throws {
         guard let paths = ProcessInfo.processInfo.environment["RAYGIT_RESPONSE_REPOSITORIES"] else {
             throw XCTSkip("Opt in through validate-project-switch.sh real; repositories are only read")
         }
@@ -89,12 +114,27 @@ final class RealProjectResponseTests: XCTestCase {
         window.orderFront(nil)
         defer { window.close() }
         var expected: [String: [TableImage]] = [:]
+        var expectedPreview: [String: [String]] = [:]
         for repo in repositories {
             await store.open(repo)
             XCTAssertEqual(store.repositoryURL?.path, repo.path)
+            if includesConflictPreview, let file = store.files.filter(\.isConflict).max(by: {
+                let lhs = (try? FileManager.default.attributesOfItem(atPath: repo.appendingPathComponent($0.path).path)[.size] as? NSNumber)?.intValue ?? 0
+                let rhs = (try? FileManager.default.attributesOfItem(atPath: repo.appendingPathComponent($1.path).path)[.size] as? NSNumber)?.intValue ?? 0
+                return lhs < rhs
+            }) {
+                store.selectedPaths = [file.path]
+                await store.loadDiff()
+                XCTAssertNotNil(store.conflictPreview)
+            }
+            // Capture a settled avatar, not a placeholder that an in-flight image request will replace.
+            if let commit = store.commits.first, let url = CommitAvatarIdentity.url(email: commit.authorEmail) {
+                _ = await CommitAvatarCache.shared.image(for: url)
+            }
             store.isBusy = true
             for _ in 0..<4 { host.layoutSubtreeIfNeeded(); window.displayIfNeeded(); try await Task.sleep(for: .milliseconds(1)) }
             expected[repo.path] = try XCTUnwrap(images(host))
+            expectedPreview[repo.path] = previewTexts(host)
             print("REAL_PROJECT_REFERENCE repository=\(repo.lastPathComponent) files=\(store.files.count) commits=\(store.commits.count) branches=\(store.branches.count)")
             store.isBusy = false
         }
@@ -108,7 +148,8 @@ final class RealProjectResponseTests: XCTestCase {
             while Date() < deadline {
                 host.layoutSubtreeIfNeeded(); window.displayIfNeeded()
                 lastImages = images(host)
-                if store.repositoryURL?.path == repo.path, lastImages?.map(\.pixels) == expected[repo.path]?.map(\.pixels) {
+                if store.repositoryURL?.path == repo.path, lastImages?.map(\.pixels) == expected[repo.path]?.map(\.pixels),
+                   !includesConflictPreview || previewTexts(host) == expectedPreview[repo.path] {
                     let parts = start.duration(to: .now).components
                     elapsed = Double(parts.seconds) + Double(parts.attoseconds) / 1e18
                     break
@@ -121,7 +162,7 @@ final class RealProjectResponseTests: XCTestCase {
             try FileManager.default.removeItem(at: blocker)
             await opening.value
             let latency = try XCTUnwrap(elapsed, "Target file/history/branch pixels must all match")
-            print("REAL_PROJECT_SWITCH repository=\(repo.lastPathComponent) targetPixelsMs=\(latency * 1000)")
+            print("REAL_PROJECT_SWITCH repository=\(repo.lastPathComponent) targetPixelsMs=\(latency * 1000) includesPreview=\(includesConflictPreview)")
             XCTAssertLessThan(latency, 0.1)
         }
     }

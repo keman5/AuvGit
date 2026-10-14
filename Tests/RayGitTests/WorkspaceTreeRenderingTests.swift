@@ -37,6 +37,29 @@ final class WorkspaceTreeRenderingTests: XCTestCase {
         XCTAssertEqual(model.selection, ["src"])
     }
 
+    func testSelectedTreeCellStartsWithReversedTextAndIcon() throws {
+        let file = GitFile(path: "src/file.swift", indexStatus: " ", worktreeStatus: "M")
+        let model = Model()
+        model.nodes = [WorkspaceFileNode(path: "src", isDirectory: true, children: [WorkspaceFileNode(path: file.path, isDirectory: false, children: [])])]
+        model.expanded = ["src"]
+        model.selection = [file.path]
+        let parent = WorkspaceTreeTable(rows: WorkspaceTreeRows.flatten(model.nodes, expanded: model.expanded),
+            expanded: Binding(get: { model.expanded }, set: { model.expanded = $0 }),
+            selection: Binding(get: { model.selection }, set: { model.selection = $0 }),
+            repository: GitRepository(url: URL(fileURLWithPath: "/tmp/selected-tree-cell")), files: [file], isBusy: false,
+            openFile: { _ in }, onAction: { _, _ in })
+        let coordinator = parent.makeCoordinator()
+        let table = WorkspaceTreeTable.TreeTable()
+        table.addTableColumn(NSTableColumn(identifier: .init("treeName")))
+        table.dataSource = coordinator; table.delegate = coordinator; coordinator.table = table
+        coordinator.update(parent)
+
+        let index = try XCTUnwrap(parent.rows.firstIndex { $0.path == file.path })
+        let cell = try XCTUnwrap(coordinator.tableView(table, viewFor: nil, row: index) as? WorkspaceTreeTable.Cell)
+        XCTAssertEqual(cell.label.textColor, .white)
+        XCTAssertTrue(cell.icon.image === cell.selectedIcon)
+    }
+
     private func tree(_ prefix: String) -> [WorkspaceFileNode] {
         [WorkspaceFileNode(path: prefix, isDirectory: true, children: (0..<6_000).map {
             WorkspaceFileNode(path: "\(prefix)/file\($0)", isDirectory: false, children: [])

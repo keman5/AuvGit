@@ -444,55 +444,44 @@ final class HistoryResizeHandleView: NSView {
     }
 }
 
-private struct CommitGraphCell: View {
+private struct CommitGraphCell: NSViewRepresentable {
     let row: CommitGraph.Row
     let rowIndex: Int
     let styles: HistoryGraphStylePlan
     var selected = false
-    var body: some View {
-        Canvas { context, size in
-            let spacing = HistoryColumnLayout.laneSpacing
-            let halo = selected ? RayGitStyle.blue : RayGitStyle.canvas
-            for segment in row.segments {
-                var path = Path()
-                let start = CGPoint(x: spacing / 2 + CGFloat(segment.fromLane) * spacing, y: size.height * segment.fromY)
-                let end = CGPoint(x: spacing / 2 + CGFloat(segment.toLane) * spacing, y: size.height * segment.toY)
-                path.move(to: start)
-                path.addCurve(to: end, control1: CGPoint(x: start.x, y: (start.y + end.y) / 2), control2: CGPoint(x: end.x, y: (start.y + end.y) / 2))
-                let style = styles.lineStyle(for: segment)
-                context.stroke(path, with: .color(halo), style: StrokeStyle(lineWidth: style.lineWidth + 2, lineCap: .round, lineJoin: .round))
-                let tint = selected && style.color != .orange && style.color != .green ? Color.white.opacity(style.color == .blue ? 1 : 0.65) : style.color.color
-                context.stroke(path, with: .color(tint), style: StrokeStyle(
-                    lineWidth: style.lineWidth,
-                    lineCap: .round,
-                    lineJoin: .round,
-                    dash: style.dashPattern.map { CGFloat($0) },
-                    dashPhase: CGFloat(style.dashPhase(rowIndex: rowIndex, fromY: segment.fromY, rowHeight: Double(size.height)))
-                ))
-            }
-            let node = styles.nodeStyle(for: row.hash)
-            let color = selected && node.color != .orange && node.color != .green ? Color.white.opacity(node.color == .blue ? 1 : 0.65) : node.color.color
-            let diameter = HistoryColumnLayout.nodeDiameter(for: node.kind)
-            let point = CGRect(x: spacing / 2 - diameter / 2 + CGFloat(row.nodeLane) * spacing,
-                               y: size.height / 2 - diameter / 2, width: diameter, height: diameter)
-            context.fill(Path(ellipseIn: point.insetBy(dx: -2, dy: -2)), with: .color(halo))
-            switch node.kind {
-            case .ordinary:
-                context.fill(Path(ellipseIn: point), with: .color(color))
-            case .merge:
-                context.fill(Path(ellipseIn: point), with: .color(color))
-                context.fill(Path(ellipseIn: point.insetBy(dx: 1.5, dy: 1.5)), with: .color(halo))
-                context.fill(Path(ellipseIn: point.insetBy(dx: 2.8, dy: 2.8)), with: .color(color))
-            case .remoteOnly:
-                context.stroke(Path(ellipseIn: point), with: .color(color), lineWidth: 1.2)
-            }
-            if node.isHead {
-                let inset: CGFloat = node.kind == .merge ? -1 : -2
-                context.stroke(Path(ellipseIn: point.insetBy(dx: inset, dy: inset)), with: .color(color), lineWidth: 1.2)
-            }
-        }.accessibilityHidden(true)
+    func makeNSView(context: Context) -> CommitGraphView { CommitGraphView() }
+    func updateNSView(_ view: CommitGraphView, context: Context) {
+        view.row = row; view.rowIndex = rowIndex; view.styles = styles; view.selected = selected
+        view.needsDisplay = true
     }
 }
+
+final class CommitGraphView: NSView {
+    var row: CommitGraph.Row?
+    var rowIndex = 0
+    var styles: HistoryGraphStylePlan?
+    var selected = false
+    override var isFlipped: Bool { true }
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        setAccessibilityElement(false)
+        NotificationCenter.default.addObserver(self, selector: #selector(selectionChanged), name: NSTableView.selectionDidChangeNotification, object: nil)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    deinit { NotificationCenter.default.removeObserver(self) }
+    @objc private func selectionChanged() { needsDisplay = true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    var nativeSelected: Bool {
+        var ancestor = superview
+        while let view = ancestor, !(view is NSTableRowView) { ancestor = view.superview }
+        return (ancestor as? NSTableRowView)?.isSelected ?? selected
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        guard let row, let styles else { return }
+        HistoryGraphPainter.draw(row: row, styles: styles, rowIndex: rowIndex, height: bounds.height, selected: nativeSelected)
+    }
+}
+
 
 struct HistorySearchControl: View {
     @Binding var search: String

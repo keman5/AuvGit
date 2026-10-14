@@ -17,3 +17,16 @@
 "deleteCount" = "删除所选的 %ld 个项目？";
 "permanentlyDelete" = "删除";
 "moveToTrash" = "移入废纸篓";
+
+"resolveConflict" = "解决冲突";
+
+"resolveOurs" = "采用我方";
+
+"resolveTheirs" = "采用对方";
+
+"resolveBoth" = "采用双方";
+
+
+"recreateConflict" = "重现冲突…";
+
+"recreateConflictMessage" = "恢复已保存的冲突版本？当前内容将被替换，这些文件将重新变为未解决冲突。";

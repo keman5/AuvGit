@@ -31,6 +31,7 @@ struct ConflictResolverToolbar: View {
             Divider().frame(height: 16)
             choice("Use Ours", .ours)
             choice("Use Theirs", .theirs)
+            choice("Use Both", .oursThenTheirs)
             Menu {
                 Button(resolverText("Ours → Theirs")) { state.accept?(.oursThenTheirs, current) }
                 Button(resolverText("Theirs → Ours")) { state.accept?(.theirsThenOurs, current) }

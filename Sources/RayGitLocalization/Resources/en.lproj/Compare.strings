@@ -233,3 +233,9 @@
 
 "File exceeds preview limit." = "File exceeds preview limit.";
 "Working Tree" = "Working Tree";
+
+"Editable Copy" = "Editable copy";
+"Save Copy To Worktree Message" = "Save the “%@” copy to the working-tree file.";
+"Other Drafts Discarded On Close" = "Other unsaved version copies will be discarded if you close.";
+
+"No saved conflict is available for this file." = "No saved conflict is available for this file.";

@@ -4,8 +4,8 @@
 "Next conflict" = "Next conflict";
 "Use Ours" = "Use Ours";
 "Use Theirs" = "Use Theirs";
-"Ours → Theirs" = "Ours → Theirs";
-"Theirs → Ours" = "Theirs → Ours";
+"Ours → Theirs" = "Use Both: Ours → Theirs";
+"Theirs → Ours" = "Use Both: Theirs → Ours";
 "Use Base" = "Use Base";
 "Lines %d–%d" = "Lines %d–%d";
 "Apply to the current conflict only" = "Apply to the current conflict only";
@@ -16,3 +16,5 @@
 "Resolve Conflict" = "Resolve Conflict";
 "Incomplete conflict markers — repair the result manually" = "Incomplete conflict markers — repair the result manually";
 "Ours = Stage 2; Theirs = Stage 3. During rebase, Ours is the upstream side." = "Ours = Stage 2; Theirs = Stage 3. During rebase, Ours is the upstream side.";
+
+"Use Both" = "Use Both";

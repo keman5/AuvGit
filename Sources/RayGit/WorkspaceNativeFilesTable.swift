@@ -17,6 +17,7 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
     let onCompare: (Set<String>) -> Void
     var fileFocus: WorkspaceFileFocus?
     var isReady = true
+    var recreatableConflicts: Set<String> = []
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSScrollView {
@@ -108,16 +109,21 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
         }
     }
 
-    final class Cell: NSTableCellView {
+    final class Cell: NSTableCellView, NativeSelectionCellStyling {
         let label = NSTextField(labelWithString: "")
         let icon = NSImageView()
+        var nativeSelection: Bool? { didSet { applyForeground() } }
+        var normalIcon: NSImage? { didSet { applyForeground() } }
+        var selectedIcon: NSImage? { didSet { applyForeground() } }
         var badgeColor: NSColor? { didSet { needsDisplay = true; needsLayout = true } }
         var foregroundColor: NSColor = .labelColor { didSet { applyForeground() } }
         override var backgroundStyle: NSView.BackgroundStyle {
             didSet { applyForeground(); needsDisplay = true }
         }
         private func applyForeground() {
-            label.textColor = backgroundStyle == .emphasized ? .selectedControlTextColor : foregroundColor
+            let selected = nativeSelection ?? (backgroundStyle == .emphasized)
+            label.textColor = selected ? .white : foregroundColor
+            icon.image = selected ? selectedIcon ?? normalIcon : normalIcon
         }
         override init(frame: NSRect) {
             super.init(frame: frame)
@@ -141,8 +147,8 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
         override func draw(_ dirtyRect: NSRect) {
             super.draw(dirtyRect)
             guard let badgeColor else { return }
-            let selected = backgroundStyle == .emphasized
-            (selected ? NSColor.selectedControlTextColor : badgeColor).withAlphaComponent(selected ? 0.18 : 0.1).setFill()
+            let selected = nativeSelection ?? (backgroundStyle == .emphasized)
+            (selected ? NSColor.white : badgeColor).withAlphaComponent(selected ? 0.18 : 0.1).setFill()
             NSBezierPath(roundedRect: label.frame.insetBy(dx: -6, dy: -1), xRadius: 4, yRadius: 4).fill()
         }
     }
@@ -238,11 +244,13 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
             if generation == expected, parent.isReady, parent.selection != selected { parent.selection = selected }
             update(parent)
         }
+        func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { NativeSelectionRowView() }
         func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
             guard rows.indices.contains(row), let id = tableColumn?.identifier else { return nil }
             let cell = tableView.makeView(withIdentifier: id, owner: nil) as? Cell ?? Cell(frame: .zero)
             cell.identifier = id
+            cell.nativeSelection = tableView.isRowSelected(row)
             let value = rows[row]
             cell.icon.isHidden = id.rawValue != "filename"
             cell.label.font = .systemFont(ofSize: id.rawValue == "status" ? 10 : 12)
@@ -260,7 +268,15 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
                     renderer.scale = scale
                     icons[key] = renderer.nsImage
                 }
-                cell.icon.image = icons[key]
+                cell.normalIcon = icons[key]
+                let selectedKey = key + "|selected"
+                if icons[selectedKey] == nil {
+                    var selectedIcon = WorkspaceStatusIcon(file: value.file)
+                    selectedIcon.selected = true
+                    let renderer = ImageRenderer(content: selectedIcon.frame(width: 24, height: 23).environment(\.colorScheme, dark ? .dark : .light))
+                    renderer.scale = scale; icons[selectedKey] = renderer.nsImage
+                }
+                cell.selectedIcon = icons[selectedKey]
             case "directory": cell.label.stringValue = value.directory.isEmpty ? "—" : value.directory; cell.foregroundColor = .secondaryLabelColor
             case "status":
                 if let file = value.file {
@@ -341,7 +357,7 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
             guard rows.indices.contains(row) else { return nil }
             let paths = table.selectedRowIndexes.contains(row) ? self.paths(table.selectedRowIndexes) : [rows[row].path]
             let existing = Set(paths.filter { path in parent.repository.map { FileManager.default.fileExists(atPath: $0.url.appendingPathComponent(path).path) } ?? false })
-            let eligibility = WorkspaceContextEligibility(paths: paths, files: parent.files, existing: existing)
+            let eligibility = WorkspaceContextEligibility(paths: paths, files: parent.files, existing: existing, recreatableConflicts: parent.recreatableConflicts)
             let ignored = Set(rows.lazy.filter(\.isIgnored).map(\.path))
             let writable = ignored.isDisjoint(with: paths)
             let menu = NSMenu()
@@ -349,12 +365,22 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
             menuActions.removeAll()
             func item(_ key: String, _ action: FileAction, _ enabled: Bool = true) {
                 let entry = NSMenuItem(title: fileContextText(key), action: #selector(performMenu(_:)), keyEquivalent: "")
-                entry.target = self; entry.tag = menu.items.count
+                entry.target = self; entry.tag = menuActions.count
                 entry.isEnabled = enabled && !parent.isBusy && parent.repository != nil
                 menuActions[entry.tag] = (action, paths, generation)
                 menu.addItem(entry)
             }
             item("compare", .compare, paths.count == 1 && writable)
+            if eligibility.canResolveConflicts && writable {
+                let submenu = NSMenu(); submenu.autoenablesItems = false
+                for (key, action) in [("resolveOurs", FileAction.resolveOurs), ("resolveTheirs", .resolveTheirs), ("resolveBoth", .resolveBoth)] {
+                    item(key, action)
+                    let option = menu.items.last!; menu.removeItem(option); submenu.addItem(option)
+                }
+                let entry = NSMenuItem(title: fileContextText("resolveConflict"), action: nil, keyEquivalent: "")
+                entry.submenu = submenu; menu.addItem(entry)
+            }
+            if eligibility.canRecreateConflict && writable { item("recreateConflict", .recreateConflict) }
             item("history", .history, writable && eligibility.canHistory(allowCleanFile: false))
             menu.addItem(.separator())
             item("stage", .stage, eligibility.canGit(.stage))

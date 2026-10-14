@@ -23,6 +23,7 @@ enum LogPresenter {
         } else if let fallback { show(repository: fallback) }
     }
     static func show(repository: GitRepository, path: String? = nil, ref: String? = nil, search: String? = nil, selectedCommit: String? = nil, stashCommit: String? = nil, stashRef: String? = nil, applyFilter: Bool = false) {
+        NSApp.activate()
         let key = repository.url.resolvingSymlinksInPath().standardizedFileURL
         if let existing = controllers[key] {
             existing.apply(path: path, ref: ref, search: search, selectedCommit: selectedCommit, stashCommit: stashCommit, stashRef: stashRef)
@@ -39,6 +40,7 @@ enum LogPresenter {
 @MainActor
 private final class LogWindowController: NSWindowController, NSWindowDelegate {
     let store = RepositoryStore(persistsSession: false, usesCheckedHistoryScope: true)
+    private let historyFocus = WorkspaceFileFocus()
     private let closed: () -> Void
     private var ready = false
     private var requested: (path: String?, ref: String?, search: String?, selection: String?, stashCommit: String?, stashRef: String?) = (nil, nil, nil, nil, nil, nil)
@@ -50,7 +52,7 @@ private final class LogWindowController: NSWindowController, NSWindowDelegate {
         window.title = repository.url.lastPathComponent + " — " + logText("Log")
         window.minSize = NSSize(width: 1040, height: 640)
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: LogWindowContent(store: store).nativeFocusRoot().background(WindowFrameStyle()))
+        window.contentView = NSHostingView(rootView: LogWindowContent(store: store, historyFocus: historyFocus).nativeFocusRoot().background(WindowFrameStyle()))
         WindowFrameAppearance.clip(window)
         super.init(window: window)
         window.delegate = self; window.center()
@@ -111,6 +113,12 @@ private final class LogWindowController: NSWindowController, NSWindowDelegate {
         if !store.commits.contains(where: { $0.hash == store.selectedCommit }) { store.selectedCommit = store.commits.first?.hash }
         store.historyNavigationGeneration = UUID()
         await store.loadCommitFiles()
+        DispatchQueue.main.async { [weak self] in
+            guard let self, version == requestVersion, let window, window.isKeyWindow,
+                  (window.firstResponder as? NSTextView)?.isFieldEditor != true else { return }
+            window.contentView?.layoutSubtreeIfNeeded()
+            historyFocus.focus(in: window)
+        }
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool { !store.isBusy }
     func windowWillClose(_ notification: Notification) { opening?.cancel(); store.closeTransientSession(); closed() }
@@ -118,6 +126,7 @@ private final class LogWindowController: NSWindowController, NSWindowDelegate {
 
 private struct LogWindowContent: View {
     @ObservedObject var store: RepositoryStore
+    var historyFocus: WorkspaceFileFocus? = nil
     @ObservedObject private var shortcuts = KeyboardShortcuts.shared
     @State private var resetRequest: HistoryResetRequest?
     @AppStorage(L10n.preferenceKey) private var language = "system"
@@ -146,6 +155,7 @@ private struct LogWindowContent: View {
                             onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy,
                             onAction: historyAction, onShowChanges: { if let path = store.selectedCommitPath { compare(path) } }, showsDetails: false, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), visibleRemoteBranchNames: store.visibleHistoryRemoteBranchNames, currentBranch: store.branches.first { $0.isCurrent && !$0.isRemote }, localUnpushedCommitHashes: store.localUnpushedCommitHashes, navigationGeneration: store.historyNavigationGeneration, onJump: jump, authorFilter: $store.historyAuthor)
                             .frame(minWidth: 520, minHeight: 270, idealHeight: 470)
+                            .background { if let historyFocus { WorkspaceFileFocusRegion(focus: historyFocus) } }
                         VSplitView {
                             commitMetadata.frame(minWidth: 270, minHeight: 145, idealHeight: 230)
                             changedFiles.frame(minWidth: 270, minHeight: 130, idealHeight: 220)

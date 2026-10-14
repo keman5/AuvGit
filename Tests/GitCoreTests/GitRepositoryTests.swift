@@ -305,7 +305,9 @@ final class GitRepositoryTests: XCTestCase {
         XCTAssertEqual(configuredAutoStash, "true\n")
 
         try "local edit\n".write(to: shared, atomically: true, encoding: .utf8)
-        try await repo.stage(paths: ["shared.txt"]); try await repo.commit(message: "Conflicting local edit")
+        let resolved = try await repo.fileComparison(path: "shared.txt")
+        try await repo.markResolved(path: "shared.txt", expected: resolved.worktree)
+        try await repo.commit(message: "Conflicting local edit")
         try "another remote edit\n".write(to: peer.appendingPathComponent("shared.txt"), atomically: true, encoding: .utf8)
         try await peerRepo.stage(paths: ["shared.txt"]); try await peerRepo.commit(message: "Another conflicting remote edit")
         try await peerRepo.push()

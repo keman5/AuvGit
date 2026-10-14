@@ -212,48 +212,10 @@ final class CompactHistoryCell: NSView {
         let selected = (superview as? NSTableRowView)?.isSelected ?? (parent.selection == commit.hash)
         let primary: NSColor = selected ? .white : .labelColor
         let secondary: NSColor = selected ? .white : .secondaryLabelColor
-        let halo = NSColor(selected ? RayGitStyle.blue : RayGitStyle.canvas)
         let widths = HistoryColumnLayout.graphMessageWidths(activeLaneCount: row.laneCount, maximumLaneCount: parent.graph.laneCount, maximumGraphWidth: parent.graphWidth, baseMessageWidth: 220)
         NSGraphicsContext.saveGraphicsState()
         NSRect(x: HistoryColumnLayout.leadingInset, y: 0, width: widths.graph, height: bounds.height).clip()
-        let spacing = HistoryColumnLayout.laneSpacing
-        for segment in row.segments {
-            let start = NSPoint(x: HistoryColumnLayout.leadingInset + spacing / 2 + CGFloat(segment.fromLane) * spacing, y: bounds.height * segment.fromY)
-            let end = NSPoint(x: HistoryColumnLayout.leadingInset + spacing / 2 + CGFloat(segment.toLane) * spacing, y: bounds.height * segment.toY)
-            let path = NSBezierPath()
-            path.move(to: start)
-            path.curve(to: end, controlPoint1: .init(x: start.x, y: (start.y + end.y) / 2), controlPoint2: .init(x: end.x, y: (start.y + end.y) / 2))
-            let style = parent.styles.lineStyle(for: segment)
-            path.lineCapStyle = .round
-            path.lineJoinStyle = .round
-            path.lineWidth = style.lineWidth + 2
-            halo.setStroke(); path.stroke()
-            path.lineWidth = style.lineWidth
-            path.lineCapStyle = .round
-            path.setLineDash(style.dashPattern.map { CGFloat($0) }, count: style.dashPattern.count,
-                phase: CGFloat(style.dashPhase(rowIndex: index, fromY: segment.fromY, rowHeight: Double(bounds.height))))
-            let tint = selected && style.color != .orange && style.color != .green ? NSColor.white.withAlphaComponent(style.color == .blue ? 1 : 0.65) : NSColor(style.color.color)
-            tint.setStroke(); path.stroke()
-        }
-        let node = parent.styles.nodeStyle(for: row.hash)
-        let diameter = HistoryColumnLayout.nodeDiameter(for: node.kind)
-        let point = NSRect(x: HistoryColumnLayout.leadingInset + spacing / 2 - diameter / 2 + CGFloat(row.nodeLane) * spacing, y: bounds.height / 2 - diameter / 2, width: diameter, height: diameter)
-        halo.setFill(); NSBezierPath(ovalIn: point.insetBy(dx: -2, dy: -2)).fill()
-        let tint = selected && node.color != .orange && node.color != .green ? NSColor.white.withAlphaComponent(node.color == .blue ? 1 : 0.65) : NSColor(node.color.color)
-        tint.setFill(); tint.setStroke()
-        switch node.kind {
-        case .ordinary: NSBezierPath(ovalIn: point).fill()
-        case .merge:
-            NSBezierPath(ovalIn: point).fill()
-            halo.setFill(); NSBezierPath(ovalIn: point.insetBy(dx: 1.5, dy: 1.5)).fill()
-            tint.setFill(); NSBezierPath(ovalIn: point.insetBy(dx: 2.8, dy: 2.8)).fill()
-        case .remoteOnly:
-            let circle = NSBezierPath(ovalIn: point); circle.lineWidth = 1.2; circle.stroke()
-        }
-        if node.isHead {
-            let inset: CGFloat = node.kind == .merge ? -1 : -2
-            let ring = NSBezierPath(ovalIn: point.insetBy(dx: inset, dy: inset)); ring.lineWidth = 1.2; ring.stroke()
-        }
+        HistoryGraphPainter.draw(row: row, styles: parent.styles, rowIndex: index, height: bounds.height, selected: selected, inset: HistoryColumnLayout.leadingInset)
         NSGraphicsContext.restoreGraphicsState()
         var x = HistoryColumnLayout.leadingInset + widths.graph + 4
         let messageEnd = x + widths.message
@@ -302,15 +264,54 @@ final class CompactHistoryCell: NSView {
     }
 }
 
-final class CompactHistoryRowView: NSTableRowView {
-    override var isSelected: Bool {
-        didSet {
-            needsDisplay = true
-            subviews.forEach { $0.needsDisplay = true }
-        }
-    }
+final class CompactHistoryRowView: NativeSelectionRowView {
     override func drawSelection(in dirtyRect: NSRect) {
         NSColor(RayGitStyle.blue).setFill()
         bounds.fill()
+    }
+}
+
+
+enum HistoryGraphPainter {
+    static func draw(row: CommitGraph.Row, styles: HistoryGraphStylePlan, rowIndex: Int, height: CGFloat, selected: Bool, inset: CGFloat = 0) {
+        let halo = NSColor(selected ? RayGitStyle.blue : RayGitStyle.canvas)
+        let spacing = HistoryColumnLayout.laneSpacing
+        for segment in row.segments {
+            let start = NSPoint(x: inset + spacing / 2 + CGFloat(segment.fromLane) * spacing, y: height * segment.fromY)
+            let end = NSPoint(x: inset + spacing / 2 + CGFloat(segment.toLane) * spacing, y: height * segment.toY)
+            let path = NSBezierPath()
+            path.move(to: start)
+            path.curve(to: end, controlPoint1: .init(x: start.x, y: (start.y + end.y) / 2), controlPoint2: .init(x: end.x, y: (start.y + end.y) / 2))
+            let style = styles.lineStyle(for: segment)
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            path.lineWidth = style.lineWidth + 2
+            halo.setStroke(); path.stroke()
+            path.lineWidth = style.lineWidth
+            path.lineCapStyle = .round
+            path.setLineDash(style.dashPattern.map { CGFloat($0) }, count: style.dashPattern.count,
+                phase: CGFloat(style.dashPhase(rowIndex: rowIndex, fromY: segment.fromY, rowHeight: Double(height))))
+            let tint = selected && style.color != .orange && style.color != .green ? NSColor.white.withAlphaComponent(style.color == .blue ? 1 : 0.65) : NSColor(style.color.color)
+            tint.setStroke(); path.stroke()
+        }
+        let node = styles.nodeStyle(for: row.hash)
+        let diameter = HistoryColumnLayout.nodeDiameter(for: node.kind)
+        let point = NSRect(x: inset + spacing / 2 - diameter / 2 + CGFloat(row.nodeLane) * spacing, y: height / 2 - diameter / 2, width: diameter, height: diameter)
+        halo.setFill(); NSBezierPath(ovalIn: point.insetBy(dx: -2, dy: -2)).fill()
+        let tint = selected && node.color != .orange && node.color != .green ? NSColor.white.withAlphaComponent(node.color == .blue ? 1 : 0.65) : NSColor(node.color.color)
+        tint.setFill(); tint.setStroke()
+        switch node.kind {
+        case .ordinary: NSBezierPath(ovalIn: point).fill()
+        case .merge:
+            NSBezierPath(ovalIn: point).fill()
+            halo.setFill(); NSBezierPath(ovalIn: point.insetBy(dx: 1.5, dy: 1.5)).fill()
+            tint.setFill(); NSBezierPath(ovalIn: point.insetBy(dx: 2.8, dy: 2.8)).fill()
+        case .remoteOnly:
+            let circle = NSBezierPath(ovalIn: point); circle.lineWidth = 1.2; circle.stroke()
+        }
+        if node.isHead {
+            let inset: CGFloat = node.kind == .merge ? -1 : -2
+            let ring = NSBezierPath(ovalIn: point.insetBy(dx: inset, dy: inset)); ring.lineWidth = 1.2; ring.stroke()
+        }
     }
 }

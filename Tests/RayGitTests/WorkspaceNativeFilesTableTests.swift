@@ -37,6 +37,32 @@ final class WorkspaceNativeFilesTableTests: XCTestCase {
         XCTAssertEqual(state.selection, ["c"])
     }
 
+    func testNativeSelectionImmediatelyUpdatesExistingAndReusedCells() {
+        let row = NativeSelectionRowView()
+        let cell = WorkspaceNativeFilesTable.Cell(frame: NSRect(x: 0, y: 0, width: 80, height: 22))
+        let normal = NSImage(size: NSSize(width: 16, height: 16))
+        let selected = NSImage(size: NSSize(width: 16, height: 16))
+        cell.normalIcon = normal; cell.selectedIcon = selected
+        cell.foregroundColor = .systemOrange; cell.badgeColor = .systemOrange
+        row.addSubview(cell)
+        row.isSelected = true
+        XCTAssertEqual(cell.label.textColor, .white)
+        XCTAssertTrue(cell.icon.image === selected)
+        cell.backgroundStyle = .normal
+        XCTAssertEqual(cell.label.textColor, .white, "The custom blue selection must keep a contrasting foreground")
+        cell.backgroundStyle = .emphasized
+        let tree = WorkspaceTreeTable.Cell(frame: NSRect(x: 0, y: 0, width: 80, height: 22))
+        tree.normalIcon = normal; tree.selectedIcon = selected
+        row.addSubview(tree)
+        XCTAssertEqual(tree.label.textColor, .white)
+        XCTAssertTrue(tree.icon.image === selected)
+        row.isSelected = false
+        XCTAssertEqual(cell.label.textColor, .systemOrange)
+        XCTAssertTrue(cell.icon.image === normal)
+        XCTAssertEqual(tree.label.textColor, .labelColor)
+        XCTAssertTrue(tree.icon.image === normal)
+    }
+
     func testTextAndIconsShareRowCenterForDifferentFontSizes() {
         let cell = WorkspaceNativeFilesTable.Cell(frame: NSRect(x: 0, y: 0, width: 180, height: 23))
         for size: CGFloat in [10, 12] {
@@ -117,10 +143,24 @@ final class WorkspaceNativeFilesTableTests: XCTestCase {
         table.appearance = NSAppearance(named: .aqua)
         let restored = try XCTUnwrap(coordinator.tableView(table, viewFor: name, row: 0) as? WorkspaceNativeFilesTable.Cell)
         XCTAssertTrue(restored.icon.image === lightImage)
+        table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        let selected = try XCTUnwrap(coordinator.tableView(table, viewFor: name, row: 0) as? WorkspaceNativeFilesTable.Cell)
+        XCTAssertEqual(selected.label.textColor, .white)
+        XCTAssertFalse(selected.icon.image === lightImage)
+        table.deselectAll(nil)
+        let reused = try XCTUnwrap(coordinator.tableView(table, viewFor: name, row: 0) as? WorkspaceNativeFilesTable.Cell)
+        XCTAssertEqual(reused.label.textColor, .labelColor)
+        XCTAssertTrue(reused.icon.image === lightImage)
         let badge = try XCTUnwrap(coordinator.tableView(table, viewFor: status, row: 0) as? WorkspaceNativeFilesTable.Cell)
         XCTAssertEqual(badge.label.textColor, .systemOrange)
+        restored.nativeSelection = nil
+        restored.backgroundStyle = .emphasized
+        XCTAssertFalse(restored.icon.image === lightImage)
+        restored.backgroundStyle = .normal
+        XCTAssertTrue(restored.icon.image === lightImage)
+        badge.nativeSelection = nil
         badge.backgroundStyle = .emphasized
-        XCTAssertEqual(badge.label.textColor, .selectedControlTextColor)
+        XCTAssertEqual(badge.label.textColor, .white)
         badge.backgroundStyle = .normal
         XCTAssertEqual(badge.label.textColor, .systemOrange)
         badge.frame = NSRect(x: 0, y: 0, width: coordinator.statusWidth, height: 22)

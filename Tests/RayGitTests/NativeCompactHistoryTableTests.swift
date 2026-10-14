@@ -166,6 +166,13 @@ final class NativeCompactHistoryTableTests: XCTestCase {
         native.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
         XCTAssertFalse(previous.isSelected)
         XCTAssertTrue(row.isSelected)
+        func graph(in view: NSView) -> CommitGraphView? {
+            if let graph = view as? CommitGraphView { return graph }
+            for child in view.subviews { if let found = graph(in: child) { return found } }
+            return nil
+        }
+        XCTAssertFalse(try XCTUnwrap(graph(in: previous)).nativeSelected)
+        XCTAssertTrue(try XCTUnwrap(graph(in: row)).nativeSelected)
         row.isEmphasized = true
         previous.needsDisplay = true
         let oldBitmap = try XCTUnwrap(previous.bitmapImageRepForCachingDisplay(in: previous.bounds))

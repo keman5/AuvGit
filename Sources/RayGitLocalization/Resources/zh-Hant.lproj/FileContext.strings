@@ -17,3 +17,16 @@
 "deleteCount" = "刪除所選的 %ld 個項目？";
 "permanentlyDelete" = "刪除";
 "moveToTrash" = "移入垃圾桶";
+
+"resolveConflict" = "解決衝突";
+
+"resolveOurs" = "採用我方";
+
+"resolveTheirs" = "採用對方";
+
+"resolveBoth" = "採用雙方";
+
+
+"recreateConflict" = "重現衝突…";
+
+"recreateConflictMessage" = "恢復已儲存的衝突版本？目前內容將被取代，這些檔案將重新變為未解決衝突。";

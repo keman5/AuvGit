@@ -10,8 +10,11 @@ struct WorkspaceContextEligibility {
     let paths: Set<String>
     let files: [GitFile]
     let existing: Set<String>
+    var recreatableConflicts: Set<String> = []
     var rows: [GitFile] { files.filter { paths.contains($0.path) } }
     var allExisting: Bool { !paths.isEmpty && paths.isSubset(of: existing) }
+    var canResolveConflicts: Bool { !paths.isEmpty && rows.count == paths.count && rows.allSatisfy(\.isConflict) }
+    var canRecreateConflict: Bool { !paths.isEmpty && paths.isSubset(of: recreatableConflicts) && rows.count == paths.count && !rows.contains(where: \.isConflict) }
     var canIgnore: Bool { allExisting && rows.count == paths.count && rows.allSatisfy(\.isUntracked) }
     func canHistory(allowCleanFile: Bool) -> Bool {
         guard paths.count == 1 else { return false }
@@ -28,16 +31,25 @@ struct WorkspaceContextMenu: View {
     let files: [GitFile]
     let repository: GitRepository?
     let isBusy: Bool
+    var recreatableConflicts: Set<String> = []
     var directories: Set<String> = []
     var readOnlyPaths: Set<String> = []
     var allowsCleanHistory = false
     let onAction: (FileAction, Set<String>) -> Void
     private var eligibility: WorkspaceContextEligibility {
-        WorkspaceContextEligibility(paths: paths, files: files, existing: Set(paths.filter { path in repository.map { FileManager.default.fileExists(atPath: $0.url.appendingPathComponent(path).path) } ?? false }))
+        WorkspaceContextEligibility(paths: paths, files: files, existing: Set(paths.filter { path in repository.map { FileManager.default.fileExists(atPath: $0.url.appendingPathComponent(path).path) } ?? false }), recreatableConflicts: recreatableConflicts)
     }
     var body: some View {
         if !paths.isEmpty {
             button("compare", .compare, enabled: paths.count == 1 && directories.isDisjoint(with: paths) && readOnlyPaths.isDisjoint(with: paths))
+            if eligibility.canResolveConflicts {
+                Menu(fileContextText("resolveConflict")) {
+                    button("resolveOurs", .resolveOurs)
+                    button("resolveTheirs", .resolveTheirs)
+                    button("resolveBoth", .resolveBoth)
+                }.disabled(isBusy || repository == nil)
+            }
+            if eligibility.canRecreateConflict { button("recreateConflict", .recreateConflict) }
             button("history", .history, enabled: directories.isDisjoint(with: paths) && readOnlyPaths.isDisjoint(with: paths) && eligibility.canHistory(allowCleanFile: allowsCleanHistory))
             Divider()
             button("stage", .stage, enabled: eligibility.canGit(.stage))

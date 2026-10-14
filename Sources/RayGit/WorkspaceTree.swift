@@ -14,6 +14,7 @@ struct WorkspaceTree: View {
     var permitsMutation: () -> Bool = { true }
     var setBusy: (Bool) -> Void = { _ in }
     var files: [GitFile] = []
+    var recreatableConflicts: Set<String> = []
     var refreshID: UUID? = nil
     let onAction: (FileAction, Set<String>) -> Void
     @State private var mutationBusy = false
@@ -51,7 +52,7 @@ struct WorkspaceTree: View {
             if let error { Text(error).foregroundStyle(.orange).font(.caption).padding(.horizontal, 12).padding(.vertical, 8).textSelection(.enabled) }
             WorkspaceTreeTable(rows: WorkspaceTreeRows.flatten(filteredNodes, expanded: displayedExpansion), expanded: treeExpansion,
                 selection: treeSelection, repository: repository, files: files, isBusy: isBusy || mutationBusy,
-                openFile: primaryAction ?? openFile, onAction: onAction)
+                openFile: primaryAction ?? openFile, onAction: onAction, recreatableConflicts: recreatableConflicts)
                 .overlay { if loading && displayedNodes.isEmpty { ProgressView().controlSize(.small) } }
         }.disabled(isBusy || mutationBusy).task(id: repository.url.path) {
             reloadID = UUID()

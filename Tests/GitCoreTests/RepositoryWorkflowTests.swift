@@ -102,7 +102,11 @@ extension RepositoryWorkflowTests {
         for action in [RepositoryWorkflow.mergeAbort, .mergeContinue] {
             do { _ = try await repo.advancedOperation(.merge, first: "topic", second: ""); XCTFail("Expected conflict") } catch { }
             let status = try await repo.status(); XCTAssertTrue(status.contains { $0.isConflict })
-            if action == .mergeContinue { try "resolved\n".write(to: root.appendingPathComponent("file"), atomically: true, encoding: .utf8); try await repo.stage(paths: ["file"]) }
+            if action == .mergeContinue {
+                try "resolved\n".write(to: root.appendingPathComponent("file"), atomically: true, encoding: .utf8)
+                let snapshot = try await repo.fileComparison(path: "file")
+                try await repo.markResolved(path: "file", expected: snapshot.worktree)
+            }
             _ = try await repo.advancedOperation(action, first: "", second: "")
             let clean = try await repo.status(); XCTAssertTrue(clean.isEmpty)
         }

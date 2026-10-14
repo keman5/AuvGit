@@ -50,6 +50,7 @@ struct RepositoryOperationIcon: View {
 struct WorkspaceStatusIcon: View {
     enum Kind { case all, modified, added, deleted, conflict, untracked, renamed, staged, ignored, ordinary }
     let kind: Kind
+    var selected = false
     init(kind: Kind) { self.kind = kind }
     init(file: GitFile?) {
         guard let file else { kind = .ignored; return }
@@ -89,11 +90,11 @@ struct WorkspaceStatusIcon: View {
     }
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            Image(systemName: kind == .all ? "doc.on.doc" : "doc").font(.system(size: 17)).foregroundStyle(.secondary)
+            Image(systemName: kind == .all ? "doc.on.doc" : "doc").font(.system(size: 17)).foregroundStyle(selected ? Color.white : Color.secondary)
                 .frame(width: 21, height: 21)
             if let (mark, tint) = badge {
-                Image(systemName: mark).font(.system(size: 9, weight: .bold)).foregroundStyle(tint)
-                    .frame(width: 11, height: 11).background(RayGitStyle.canvas, in: Circle())
+                Image(systemName: mark).font(.system(size: 9, weight: .bold)).foregroundStyle(selected ? Color.white : tint)
+                    .frame(width: 11, height: 11).background(selected ? RayGitStyle.blue : RayGitStyle.canvas, in: Circle())
                     .offset(x: 2, y: 1)
             }
         }.frame(width: 24, height: 23).accessibilityHidden(true)

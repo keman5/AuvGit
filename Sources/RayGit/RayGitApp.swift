@@ -114,8 +114,9 @@ final class RepositoryStore: ObservableObject {
     }
 
     @Published var repository: GitRepository? {
-        didSet { if oldValue !== repository { repositoryOperation = nil } }
+        didSet { if oldValue !== repository { repositoryOperation = nil; recreatableConflicts = [] } }
     }
+    @Published var recreatableConflicts: Set<String> = []
     @Published var repositoryOperation: RepositoryOperationState?
     @Published var repositoryURL: URL?
     @Published var openRepositories: [String] = []
@@ -974,6 +975,7 @@ final class RepositoryStore: ObservableObject {
             let observedState = try await stateRead
             guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
             repositoryOperation = observedState.operation
+            recreatableConflicts = observedState.recreatableConflicts ?? []
             if followsCurrentBranch, !reuseMetadata {
                 let head = result.2 + "|" + ((try? await repository.workflowRevision("HEAD")) ?? "")
                 guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
@@ -1071,6 +1073,7 @@ final class RepositoryStore: ObservableObject {
             let state = try await repository.changeState(files: newFiles)
             guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
             repositoryOperation = state.operation
+            recreatableConflicts = state.recreatableConflicts ?? []
             if workspaceStatusFailure != nil { workspaceStatusFailure = nil; errorMessage = nil }
             if repositoryChangeCounts[repository.url.path] != newFiles.count { repositoryChangeCounts[repository.url.path] = newFiles.count }
             let previous = repositorySyncStates[repository.url.path]
@@ -1199,6 +1202,7 @@ final class RepositoryStore: ObservableObject {
         files = snapshot.files; filesGeneration = snapshot.filesGeneration
         branches = snapshot.branches; branch = snapshot.branch; stashes = snapshot.stashes
         repositoryOperation = snapshot.observedState?.operation
+        recreatableConflicts = snapshot.observedState?.recreatableConflicts ?? []
         lastObservedState = snapshot.observedState; lastHistoryState = snapshot.historyState; lastMainHistoryHead = snapshot.mainHistoryHead
         if usesCheckedHistoryScope { configureCheckedHistoryRefs() }
         commits = snapshot.commits

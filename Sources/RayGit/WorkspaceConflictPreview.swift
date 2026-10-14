@@ -5,6 +5,7 @@ import RayGitLocalization
 /// Uses the same stage-aware surface as the resolver, with no editing callbacks.
 struct WorkspaceConflictPreview: View {
     let snapshot: FileComparisonSnapshot
+    var repositoryPath: String = ""
     var onOpenEditorSearch: ((ComparisonSearchOptions, String) -> Void)? = nil
     var onOpenEditorLine: ((String, Int) -> Void)? = nil
     @StateObject private var navigationCommands = ComparisonEditingCommands()
@@ -55,6 +56,7 @@ struct WorkspaceConflictPreview: View {
         return true
     }
     var body: some View {
+        let blocks = self.blocks
         VStack(spacing: 0) {
             HStack {
                 Text(snapshot.path).font(.system(size: 12, weight: .semibold)).lineLimit(1).truncationMode(.middle)
@@ -85,7 +87,7 @@ struct WorkspaceConflictPreview: View {
             }.buttonStyle(ToolbarRowButtonStyle(minimumWidth: 22)).controlSize(.small).padding(.horizontal, 12).padding(.vertical, 4).rayGitChrome()
             Divider()
             ZStack {
-                ComparisonEditor(columns: columns, wrapLines: wraps, showLineNumbers: numbers, synchronizeScroll: synchronized, search: searchOptions.query, navigation: navigation, changeNavigation: changeNavigation, onEdit: { _, _ in }, languagePath: snapshot.path, resolver: resolver, editingCommands: navigationCommands, scrollsToFirstChangeOnOpen: true, searchOptions: searchOptions)
+                ComparisonEditor(columns: columns, wrapLines: wraps, showLineNumbers: numbers, synchronizeScroll: synchronized, search: searchOptions.query, navigation: navigation, changeNavigation: changeNavigation, onEdit: { _, _ in }, languagePath: snapshot.path, resolver: resolver, editingCommands: navigationCommands, scrollsToFirstChangeOnOpen: true, searchOptions: searchOptions, readOnlyDocumentIdentity: repositoryPath + "/" + snapshot.path)
                     .opacity(compact ? 0 : 1).allowsHitTesting(!compact).accessibilityHidden(compact)
                 if compact { CompactComparisonView(columns: columns, conflict: true, wraps: wraps, numbers: numbers, onReturnToEditor: { compact = false }, onRevealLine: { id, line in
                     if let onOpenEditorLine { onOpenEditorLine(id, line) }

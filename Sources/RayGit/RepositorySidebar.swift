@@ -8,12 +8,39 @@ func sidebarRefinementText(_ key: String, _ arguments: CVarArg...) -> String {
 
 enum SidebarAction { case openRepository, revealRepository, removeRecent, checkout, createLocalBranch, createBranchFromLocal, history, rename, delete, deleteRemote, copy, stashShow, stashApply, stashApplyImmediately, stashDrop, merge, stopTracking, setTracking }
 
+private struct RepositoryRowSelectionKey: EnvironmentKey {
+    static let defaultValue = false
+}
+private extension EnvironmentValues {
+    var repositoryRowSelected: Bool {
+        get { self[RepositoryRowSelectionKey.self] }
+        set { self[RepositoryRowSelectionKey.self] = newValue }
+    }
+}
+private struct RepositoryRowIcon: View {
+    @Environment(\.repositoryRowSelected) private var selected
+    let symbol: String
+    let hasConflict: Bool
+    let hasSync: Bool
+    var body: some View {
+        Image(systemName: "folder").font(.system(size: 13)).frame(width: 20, height: 19)
+            .overlay(alignment: .bottomTrailing) {
+                if symbol != "folder" {
+                    Image(systemName: symbol).font(.system(size: 8, weight: .semibold))
+                        .padding(1).background(selected ? RayGitStyle.blue : RayGitStyle.sidebar, in: Circle())
+                }
+            }
+            .foregroundStyle(selected ? Color.white : hasConflict ? Color.orange : hasSync ? RayGitStyle.blue : Color.secondary)
+    }
+}
+
 private struct RepositoryRowButtonStyle: ButtonStyle {
     var selected: Bool
     var allowsSelection: Bool
     func makeBody(configuration: Configuration) -> some View {
         let highlighted = selected || (allowsSelection && configuration.isPressed)
         configuration.label
+            .environment(\.repositoryRowSelected, highlighted)
             .foregroundStyle(highlighted ? Color.white : Color.primary)
             .background(highlighted ? RayGitStyle.blue : Color.clear, in: RoundedRectangle(cornerRadius: 7))
     }
@@ -127,14 +154,7 @@ struct RepositorySidebar: View {
         let status = hasConflict ? sidebarRefinementText("conflicts", conflicts) : hasPush && hasPull ? sidebarRefinementText("pushPull", ahead, behind) : hasPull ? sidebarRefinementText("pull", behind) : hasPush ? sidebarRefinementText("push", ahead) : path
         return Button { focusedRepository = path; if store.canOpenRepository { onAction(.openRepository, path) } } label: {
             HStack(spacing: 6) {
-                Image(systemName: "folder").font(.system(size: 13)).frame(width: 20, height: 19)
-                    .overlay(alignment: .bottomTrailing) {
-                        if symbol != "folder" {
-                            Image(systemName: symbol).font(.system(size: 8, weight: .semibold))
-                                .padding(1).background(active ? RayGitStyle.blue : RayGitStyle.sidebar, in: Circle())
-                        }
-                    }
-                    .foregroundStyle(active ? Color.white : hasConflict ? Color.orange : hasPush || hasPull ? RayGitStyle.blue : Color.secondary)
+                RepositoryRowIcon(symbol: symbol, hasConflict: hasConflict, hasSync: hasPush || hasPull)
                     .help(status).accessibilityLabel(status)
                 Text(URL(fileURLWithPath: path).lastPathComponent).font(.system(size: 12))
                     .lineLimit(1).truncationMode(.middle)

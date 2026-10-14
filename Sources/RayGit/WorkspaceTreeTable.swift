@@ -13,6 +13,7 @@ struct WorkspaceTreeTable: NSViewRepresentable {
     let isBusy: Bool
     let openFile: (String) -> Void
     let onAction: (FileAction, Set<String>) -> Void
+    var recreatableConflicts: Set<String> = []
     @Environment(\.isEnabled) private var isEnabled
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -46,6 +47,10 @@ struct WorkspaceTreeTable: NSViewRepresentable {
         weak var coordinator: Coordinator?
         var isTrackingMouse = false
         override func menu(for event: NSEvent) -> NSMenu? { coordinator?.menu(at: convert(event.locationInWindow, from: nil)) }
+        override func rightMouseDown(with event: NSEvent) {
+            guard let menu = menu(for: event) else { return }
+            NSMenu.popUpContextMenu(menu, with: event, for: self)
+        }
         override func mouseDown(with event: NSEvent) {
             guard coordinator?.enabled == true else { return }
             let generation = coordinator?.mouseGeneration
@@ -73,9 +78,12 @@ struct WorkspaceTreeTable: NSViewRepresentable {
             }
         }
     }
-    final class Cell: NSTableCellView {
+    final class Cell: NSTableCellView, NativeSelectionCellStyling {
         let disclosure = NSButton()
         let icon = NSImageView()
+        var nativeSelection: Bool? { didSet { applyForeground() } }
+        var normalIcon: NSImage? { didSet { applyForeground() } }
+        var selectedIcon: NSImage? { didSet { applyForeground() } }
         let label = NSTextField(labelWithString: "")
         var depth = 0
         override init(frame: NSRect) {
@@ -98,7 +106,14 @@ struct WorkspaceTreeTable: NSViewRepresentable {
             label.frame = NSRect(x: left + 40, y: (bounds.height - textHeight) / 2, width: max(0, bounds.width - left - 43), height: textHeight)
         }
         override var backgroundStyle: NSView.BackgroundStyle {
-            didSet { label.textColor = backgroundStyle == .emphasized ? .selectedControlTextColor : .labelColor }
+            didSet { applyForeground() }
+        }
+        private func applyForeground() {
+            let selected = nativeSelection ?? (backgroundStyle == .emphasized)
+            label.textColor = selected ? .white : .labelColor
+            icon.image = selected ? selectedIcon ?? normalIcon : normalIcon
+            icon.contentTintColor = selected ? .white : .secondaryLabelColor
+            disclosure.contentTintColor = selected ? .white : .secondaryLabelColor
         }
     }
     @MainActor final class Coordinator: NSObject, NSTableViewDelegate, NSTableViewDataSource {
@@ -144,13 +159,16 @@ struct WorkspaceTreeTable: NSViewRepresentable {
             if generation == expected, enabled, parent.selection.wrappedValue != selected { parent.selection.wrappedValue = selected }
             update(parent)
         }
+        func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { NativeSelectionRowView() }
         func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
             guard rows.indices.contains(row) else { return nil }
             let id = NSUserInterfaceItemIdentifier("treeCell")
             let cell = tableView.makeView(withIdentifier: id, owner: nil) as? Cell ?? Cell(frame: .zero)
             cell.identifier = id
+            cell.nativeSelection = tableView.isRowSelected(row)
             let value = rows[row]
+            cell.selectedIcon = nil
             cell.depth = value.depth; cell.needsLayout = true
             cell.label.stringValue = value.name; cell.toolTip = value.path
             cell.disclosure.isHidden = !value.isDirectory
@@ -161,7 +179,7 @@ struct WorkspaceTreeTable: NSViewRepresentable {
                 cell.disclosure.setAccessibilityLabel(value.name)
                 cell.disclosure.setAccessibilityValue(L10n.text(parent.expanded.contains(value.path) ? "Expanded" : "Collapsed", table: "SidebarRefinement"))
             }
-            if value.isDirectory { cell.icon.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil) }
+            if value.isDirectory { cell.normalIcon = NSImage(systemSymbolName: "folder", accessibilityDescription: nil) }
             else if let file = filesByPath[value.path] {
                 let dark = tableView.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
                 let scale = tableView.window?.backingScaleFactor ?? 2
@@ -170,8 +188,16 @@ struct WorkspaceTreeTable: NSViewRepresentable {
                     let renderer = ImageRenderer(content: WorkspaceStatusIcon(file: file).frame(width: 24, height: 23).environment(\.colorScheme, dark ? .dark : .light))
                     renderer.scale = scale; icons[key] = renderer.nsImage
                 }
-                cell.icon.image = icons[key]
-            } else { cell.icon.image = NSImage(systemSymbolName: "doc", accessibilityDescription: nil) }
+                cell.normalIcon = icons[key]
+                let selectedKey = key + "|selected"
+                if icons[selectedKey] == nil {
+                    var selectedIcon = WorkspaceStatusIcon(file: file)
+                    selectedIcon.selected = true
+                    let renderer = ImageRenderer(content: selectedIcon.frame(width: 24, height: 23).environment(\.colorScheme, dark ? .dark : .light))
+                    renderer.scale = scale; icons[selectedKey] = renderer.nsImage
+                }
+                cell.selectedIcon = icons[selectedKey]
+            } else { cell.normalIcon = NSImage(systemSymbolName: "doc", accessibilityDescription: nil) }
             return cell
         }
         func tableViewSelectionDidChange(_ notification: Notification) {
@@ -211,15 +237,25 @@ struct WorkspaceTreeTable: NSViewRepresentable {
             let paths = table.selectedRowIndexes.contains(row) ? self.paths(table.selectedRowIndexes) : [rows[row].path]
             let directories = Set(paths.filter { indices[$0].map { rows[$0].isDirectory } ?? false })
             let existing = Set(paths.filter { FileManager.default.fileExists(atPath: parent.repository.url.appendingPathComponent($0).path) })
-            let eligibility = WorkspaceContextEligibility(paths: paths, files: parent.files, existing: existing)
+            let eligibility = WorkspaceContextEligibility(paths: paths, files: parent.files, existing: existing, recreatableConflicts: parent.recreatableConflicts)
             let menu = NSMenu(); menu.autoenablesItems = false
             menuActions.removeAll()
             func item(_ key: String, _ action: FileAction, _ allowed: Bool = true) {
                 let entry = NSMenuItem(title: fileContextText(key), action: #selector(performMenu(_:)), keyEquivalent: "")
-                entry.target = self; entry.tag = menu.items.count; entry.isEnabled = allowed && enabled
+                entry.target = self; entry.tag = menuActions.count; entry.isEnabled = allowed && enabled
                 menuActions[entry.tag] = (action, paths, generation); menu.addItem(entry)
             }
             item("compare", .compare, paths.count == 1 && directories.isEmpty)
+            if eligibility.canResolveConflicts && directories.isEmpty {
+                let submenu = NSMenu(); submenu.autoenablesItems = false
+                for (key, action) in [("resolveOurs", FileAction.resolveOurs), ("resolveTheirs", .resolveTheirs), ("resolveBoth", .resolveBoth)] {
+                    item(key, action)
+                    let option = menu.items.last!; menu.removeItem(option); submenu.addItem(option)
+                }
+                let entry = NSMenuItem(title: fileContextText("resolveConflict"), action: nil, keyEquivalent: "")
+                entry.submenu = submenu; menu.addItem(entry)
+            }
+            if eligibility.canRecreateConflict { item("recreateConflict", .recreateConflict) }
             item("history", .history, directories.isEmpty && eligibility.canHistory(allowCleanFile: true))
             menu.addItem(.separator())
             item("stage", .stage, eligibility.canGit(.stage)); item("unstage", .unstage, eligibility.canGit(.unstage)); item("discard", .discard, eligibility.canGit(.discard))

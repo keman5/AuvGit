@@ -115,6 +115,8 @@ final class NativeFocusAppearance: ObservableObject {
         setVisible(true)
     }
 
+    func preserveExplicitFocus() { hasInteracted = true }
+
     private func clearInitialFocus() {
         guard !hasInteracted, let window, window.attachedSheet == nil else { return }
         window.initialFirstResponder = nil

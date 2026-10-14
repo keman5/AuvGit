@@ -690,12 +690,22 @@ struct MainWindow: View {
     var filesPane: some View {
         VStack(spacing: 0) {
             if let operation = store.repositoryOperation {
+                let continuation = operation == .merge ? RepositoryWorkflow.mergeContinue : .rebaseContinue
                 let abort = operation == .merge ? RepositoryWorkflow.mergeAbort : .rebaseAbort
                 HStack(spacing: 8) {
                     Image(systemName: "arrow.triangle.branch").accessibilityHidden(true)
                     Text(workflowText(operation == .merge ? "Merge in progress" : "Rebase in progress"))
                         .fontWeight(.medium)
                     Spacer()
+                    Button(workflowText(continuation.rawValue)) {
+                        store.operation(workflowText(continuation.rawValue)) { repo in
+                            guard try await repo.operationState() == operation else { return }
+                            guard !(try await repo.status()).contains(where: \.isConflict) else {
+                                throw GitError("Resolve conflicts before continuing")
+                            }
+                            _ = try await repo.advancedOperation(continuation, first: "", second: "")
+                        }
+                    }.disabled(store.isBusy || store.pendingRepositoryPath != nil || store.workspaceStatusFailure != nil || store.files.contains(where: \.isConflict))
                     Button(workflowText(abort.rawValue)) {
                         guard let repository = store.repository else { return }
                         confirm(workflowText(abort.rawValue), workflowText(abort.rawValue + ".help")) {
@@ -710,7 +720,7 @@ struct MainWindow: View {
                     .background(Color.orange.opacity(0.12))
                 Divider()
             }
-            WorkspaceFilesPane(files: store.files, statusFailure: store.workspaceStatusFailure == nil ? nil : store.error, automaticallySelectedPath: store.automaticallySelectedPath, initialSelectionReady: store.initialWorkspaceSelectionReady, selection: $store.selectedPaths, filter: $store.fileFilter, treeMode: $fileTree, isBusy: store.isBusy || store.workspaceStatusFailure != nil, onAction: fileAction, treeContent: { paths in workspaceTreeContent(paths) }, repository: store.repository, fileFocus: fileFocus, shortcutRequest: fileShortcutRequest)
+            WorkspaceFilesPane(files: store.files, recreatableConflicts: store.recreatableConflicts, statusFailure: store.workspaceStatusFailure == nil ? nil : store.error, automaticallySelectedPath: store.automaticallySelectedPath, initialSelectionReady: store.initialWorkspaceSelectionReady, selection: $store.selectedPaths, filter: $store.fileFilter, treeMode: $fileTree, isBusy: store.isBusy || store.workspaceStatusFailure != nil, onAction: fileAction, treeContent: { paths in workspaceTreeContent(paths) }, repository: store.repository, fileFocus: fileFocus, shortcutRequest: fileShortcutRequest)
             .onChange(of: fileTree) { _, visible in if handlesStoreEvents { store.showsWorkspaceTree = visible } }
         }
     }
@@ -724,7 +734,7 @@ struct MainWindow: View {
                     if RayGitPreferences.doubleClick == "stage", let file = store.files.first(where: { $0.path == path }), !file.isConflict {
                         fileAction(file.isUnstaged ? .stage : .unstage, [path])
                     } else { fileAction(.compare, [path]) }
-                }, isBusy: store.isBusy, permitsMutation: { store.pendingRepositoryPath == nil && !store.isBusy && store.repositoryURL == repository.url }, setBusy: { store.isBusy = $0 }, files: store.files, refreshID: store.filesGeneration, onAction: { action, targets in
+                }, isBusy: store.isBusy, permitsMutation: { store.pendingRepositoryPath == nil && !store.isBusy && store.repositoryURL == repository.url }, setBusy: { store.isBusy = $0 }, files: store.files, recreatableConflicts: store.recreatableConflicts, refreshID: store.filesGeneration, onAction: { action, targets in
                     guard store.repositoryURL == repository.url else { return }; fileAction(action, targets)
                 })
             }
@@ -733,7 +743,7 @@ struct MainWindow: View {
     var diffPane: some View {
         VStack(spacing: 0) {
             if let snapshot = store.conflictPreview {
-                WorkspaceConflictPreview(snapshot: snapshot, onOpenEditorSearch: { options, replacement in
+                WorkspaceConflictPreview(snapshot: snapshot, repositoryPath: store.repositoryURL?.path ?? "", onOpenEditorSearch: { options, replacement in
                     guard !store.isBusy, store.canMutateDisplayedDiff, store.selectedFile?.path == snapshot.path, let repository = store.repository else { return }
                     ComparePresenter.show(title: (snapshot.path as NSString).lastPathComponent, repository: repository,
                         target: .worktree(path: snapshot.path, untracked: false), searchOptions: options, replacement: replacement)
@@ -972,6 +982,22 @@ extension MainWindow {
         let files = store.files.filter { paths.contains($0.path) }
         let ordered = paths.sorted()
         switch action {
+        case .resolveOurs, .resolveTheirs, .resolveBoth:
+            let conflicts = files.filter(\.isConflict).sorted { $0.path < $1.path }
+            guard !store.isBusy, !paths.isEmpty, conflicts.count == paths.count else { return }
+            let side: ConflictDraft.Side = action == .resolveOurs ? .ours : action == .resolveTheirs ? .theirs : .oursThenTheirs
+            store.operation(fileContextText("resolveConflict"), refreshFilesOnly: true) { repo in
+                for file in conflicts { try await repo.resolveConflict(path: file.path, side: side) }
+            }
+        case .recreateConflict:
+            guard !store.isBusy,
+                  WorkspaceContextEligibility(paths: paths, files: store.files, existing: [], recreatableConflicts: store.recreatableConflicts).canRecreateConflict else { return }
+            confirm(fileContextText("recreateConflict"), fileContextText("recreateConflictMessage")) {
+                guard store.repository === repository, !store.isBusy else { return }
+                store.operation(fileContextText("recreateConflict"), refreshFilesOnly: true) { repo in
+                    for path in ordered { try await repo.recreateConflict(path: path) }
+                }
+            }
         case .compare:
             guard paths.count == 1, let path = ordered.first else { return }
             guard let file = files.first else {

@@ -4,8 +4,8 @@
 "Next conflict" = "下一个冲突";
 "Use Ours" = "采用我方（Stage 2）";
 "Use Theirs" = "采用对方（Stage 3）";
-"Ours → Theirs" = "我方 → 对方";
-"Theirs → Ours" = "对方 → 我方";
+"Ours → Theirs" = "采用双方：我方 → 对方";
+"Theirs → Ours" = "采用双方：对方 → 我方";
 "Use Base" = "采用基准";
 "Lines %d–%d" = "第 %d–%d 行";
 "Apply to the current conflict only" = "只应用到当前冲突块";
@@ -16,3 +16,5 @@
 "Resolve Conflict" = "解决冲突";
 "Incomplete conflict markers — repair the result manually" = "冲突标记不完整，请手工修复合并结果";
 "Ours = Stage 2; Theirs = Stage 3. During rebase, Ours is the upstream side." = "我方 = Stage 2；对方 = Stage 3。变基时，我方指上游版本。";
+
+"Use Both" = "采用双方";

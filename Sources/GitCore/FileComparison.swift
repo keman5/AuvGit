@@ -242,21 +242,31 @@ extension GitRepository {
         guard fields.count == 3 else { return missingContent() }
         return try await blobContent(String(fields[2]), mode: String(fields[0]))
     }
-    private func checkedWorktree(_ path: String, expected: FileRevisionContent, encoding: ComparisonEncoding? = nil) throws -> (URL, FileRevisionContent) {
+    private func checkedWorktree(_ path: String, expected: FileRevisionContent, encoding: ComparisonEncoding? = nil, allowMissing: Bool = false) throws -> (URL, FileRevisionContent) {
         let file = try comparisonURL(path), current = try diskContent(file)
         let explicitlyDecoded = encoding.flatMap { selected in current.data.flatMap { ComparisonTextDecoder.decode($0, as: selected) } }
-        guard (current.isEditable && expected.isEditable) || (encoding != nil && explicitlyDecoded != nil && current.data != nil && !current.isBinary && current.gitMode?.hasPrefix("100") == true && current.unavailableReason != "The file is read-only." && current.data!.count <= comparisonLimit) else { throw GitError(current.unavailableReason ?? "Only existing regular UTF-8 files can be edited.") }
+        guard (allowMissing && !current.exists && !expected.exists) || (current.isEditable && expected.isEditable) || (encoding != nil && explicitlyDecoded != nil && current.data != nil && !current.isBinary && current.gitMode?.hasPrefix("100") == true && current.unavailableReason != "The file is read-only." && current.data!.count <= comparisonLimit) else { throw GitError(current.unavailableReason ?? "Only existing regular UTF-8 files can be edited.") }
         guard current.data == expected.data else { throw GitError("The file changed outside this comparison. Reload before saving or resolving.") }
         return (file, current)
     }
-    public func saveWorktree(path: String, text: String, expected: FileRevisionContent, format: ComparisonTextFormat? = nil) async throws -> FileRevisionContent {
-        let (file, current) = try checkedWorktree(path, expected: expected, encoding: format?.encoding)
+    public func saveWorktree(path: String, text: String, expected: FileRevisionContent, format: ComparisonTextFormat? = nil, newFileMode: String? = nil) async throws -> FileRevisionContent {
+        let (file, current) = try checkedWorktree(path, expected: expected, encoding: format?.encoding, allowMissing: true)
         guard !text.contains("\0") else { throw GitError("Binary content cannot be saved by the text editor.") }
         let data = try ComparisonTextDecoder.encode(text, format: format ?? ComparisonTextDecoder.format(of: current.data ?? Data()))
         guard data.count <= comparisonLimit else { throw GitError("Files larger than 2 MB cannot be saved by the text editor.") }
-        let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
-        try data.write(to: file, options: .atomic)
-        if let mode = attrs[.posixPermissions] { try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: file.path) }
+        if current.exists {
+            let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
+            try data.write(to: file, options: .atomic)
+            if let mode = attrs[.posixPermissions] { try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: file.path) }
+        } else {
+            if let newFileMode, !["100644", "100755"].contains(newFileMode) { throw GitError("Only existing regular UTF-8 files can be edited.") }
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: file, options: .withoutOverwriting)
+            if newFileMode == "100755" {
+                let permissions = (try FileManager.default.attributesOfItem(atPath: file.path)[.posixPermissions] as? NSNumber)?.intValue ?? 0o600
+                try FileManager.default.setAttributes([.posixPermissions: permissions | 0o100], ofItemAtPath: file.path)
+            }
+        }
         let saved = try diskContent(file)
         return format.map { saved.reinterpreting(as: $0.encoding) } ?? saved
     }
@@ -270,6 +280,63 @@ extension GitRepository {
 }
 
 extension GitRepository {
+    public func resolveConflict(path: String, side: ConflictDraft.Side) async throws {
+        let snapshot = try await fileComparison(path: path)
+        guard snapshot.isConflict else { throw GitError("The file or conflict changed. Reload before continuing.") }
+        switch side {
+        case .ours, .theirs:
+            let source = side == .ours ? snapshot.ours : snapshot.theirs
+            if let source, source.exists { try await restoreComparedVersion(path: path, source: source, expected: snapshot, resolve: true) }
+            else { try await deleteComparedFile(path: path, expected: snapshot, resolve: true) }
+        case .oursThenTheirs, .theirsThenOurs:
+            if snapshot.ours?.exists != true || snapshot.theirs?.exists != true {
+                let source = snapshot.ours?.exists == true ? snapshot.ours : snapshot.theirs
+                if let source, source.exists { try await restoreComparedVersion(path: path, source: source, expected: snapshot, resolve: true) }
+                else { try await deleteComparedFile(path: path, expected: snapshot, resolve: true) }
+                return
+            }
+            guard let ours = snapshot.ours, let theirs = snapshot.theirs else { throw GitError("No file loaded") }
+            guard let oursText = ours.text, let theirsText = theirs.text else { throw GitError("Binary files are read-only.") }
+            var text = snapshot.worktree.text ?? ""
+            if ConflictDraft.blocks(in: text).isEmpty {
+                text = try await MergePreview.create(base: snapshot.base?.text ?? "", ours: oursText, theirs: theirsText).text
+            }
+            for index in ConflictDraft.blocks(in: text).indices.reversed() {
+                guard let result = ConflictDraft.accepting(side, block: index, in: text) else { throw GitError("Remove the conflict markers before marking this file resolved.") }
+                text = result
+            }
+            guard !ConflictDraft.hasConflictMarkers(in: text) else { throw GitError("Remove the conflict markers before marking this file resolved.") }
+            let current = try await fileComparison(path: path)
+            guard comparisonIdentity(current.worktree, snapshot.worktree), comparisonIdentity(current.ours, snapshot.ours), comparisonIdentity(current.theirs, snapshot.theirs), comparisonIdentity(current.base, snapshot.base) else {
+                throw GitError("The file or conflict changed. Reload before continuing.")
+            }
+            let saved = try await saveWorktree(path: path, text: text, expected: snapshot.worktree,
+                format: ComparisonTextDecoder.format(of: snapshot.worktree.data ?? ours.data ?? Data()))
+            try await markResolved(path: path, expected: saved)
+        case .base:
+            guard let source = snapshot.base else { throw GitError("No file loaded") }
+            try await restoreComparedVersion(path: path, source: source, expected: snapshot, resolve: true)
+        }
+    }
+
+    public func recreateConflict(path: String) async throws {
+        let file = try comparisonURL(path)
+        let expected = try diskContent(file)
+        guard !expected.exists || expected.data != nil else { throw GitError("The file is read-only.") }
+        guard try await recreatableConflictPaths().contains(path), !(try await status()).contains(where: { $0.path == path && $0.isConflict }) else {
+            throw GitError("No saved conflict is available for this file.")
+        }
+        guard comparisonIdentity(try diskContent(file), expected) else { throw GitError("The file changed outside this comparison. Reload before saving or resolving.") }
+        _ = try await GitProcess.run(at: url, arguments: ["update-index", "--unresolve", "--", path])
+        let restored = try await fileComparison(path: path)
+        guard restored.isConflict else { throw GitError("No saved conflict is available for this file.") }
+        if restored.ours?.exists == true, restored.theirs?.exists == true {
+            _ = try await GitProcess.run(at: url, arguments: ["checkout", "-m", "--", path])
+        } else if let source = restored.ours ?? restored.theirs {
+            try await restoreComparedVersion(path: path, source: source, expected: restored, resolve: false)
+        }
+    }
+
     public func convertWorktree(path: String, text: String, format: ComparisonTextFormat, expected: FileRevisionContent) async throws -> FileRevisionContent {
         let file = try comparisonURL(path), current = try diskContent(file)
         guard current.exists, !current.isBinary, current.data == expected.data, current.data != nil, current.unavailableReason != "The file is read-only." else { throw GitError("The file changed or cannot be converted. Reload before continuing.") }

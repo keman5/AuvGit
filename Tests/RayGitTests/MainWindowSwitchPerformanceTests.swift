@@ -63,7 +63,7 @@ final class MainWindowSwitchPerformanceTests: XCTestCase {
         let tables = tables(in: host)
         guard let files = tables.first(where: { $0.numberOfRows == fileCount }),
               let history = tables.first(where: { $0.numberOfRows == commitCount }),
-              let branches = tables.first(where: { $0.numberOfRows == 16 }),
+              let branches = tables.first(where: { $0 is NativeBranchTable.Table }),
               let fileImage = rowImage(files), let historyImage = rowImage(history),
               let branchImage = rowImage(branches, row: 2, branchContent: true, host: host) else { return nil }
         return (fileImage, historyImage, branchImage)

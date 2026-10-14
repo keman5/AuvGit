@@ -164,6 +164,9 @@ public actor GitRepository {
         guard !paths.isEmpty else { return }
         let entries = try await status()
         let selected = Set(paths)
+        guard !entries.contains(where: { selected.contains($0.path) && $0.isConflict }) else {
+            throw GitError("Resolve unmerged conflicts before staging.")
+        }
         let originals = entries.filter { selected.contains($0.path) }.compactMap(\.originalPath)
         let renameOrigins = Set(entries.compactMap(\.originalPath))
         let tracked = Set(fields(try await run(["ls-files", "-z"]).data))

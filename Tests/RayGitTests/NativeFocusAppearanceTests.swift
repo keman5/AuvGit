@@ -288,7 +288,10 @@ final class NativeFocusAppearanceTests: XCTestCase {
         scope.register(field, request: UUID())
         drain()
         XCTAssertTrue(window.firstResponder === window)
-        window.sendEvent(key(48, in: window))
+        let event = key(48, in: window)
+        // Direct window dispatch bypasses the application's local event monitor.
+        NativeFocusAppearance.forWindow(window).handle(event)
+        window.sendEvent(event)
         XCTAssertTrue(window.firstResponder === field.currentEditor() || window.firstResponder === field)
         XCTAssertTrue(NativeFocusAppearance.isVisible(in: window))
     }
