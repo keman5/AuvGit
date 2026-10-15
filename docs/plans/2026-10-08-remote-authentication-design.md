@@ -2,7 +2,7 @@
 
 ## Problem
 
-RayGit disables terminal prompts for every Git child process. Clone has a one-shot HTTPS credential helper, but fetch, pull, push, push preview, and guarded force push do not have an application-owned authentication path. When Git cannot obtain credentials from the existing environment it exits with `terminal prompts disabled`, and RayGit only displays the error.
+AuvGit disables terminal prompts for every Git child process. Clone has a one-shot HTTPS credential helper, but fetch, pull, push, push preview, and guarded force push do not have an application-owned authentication path. When Git cannot obtain credentials from the existing environment it exits with `terminal prompts disabled`, and AuvGit only displays the error.
 
 Git URL rewriting also means the remote stored in `.git/config` is not necessarily the endpoint Git uses. Authentication must therefore be based on `git remote get-url`, which applies `insteadOf` rules, and on the remote selected by the current branch and operation.
 
@@ -26,7 +26,7 @@ Git URL rewriting also means the remote stored in `.git/config` is not necessari
 
 HTTPS secrets and optional SSH passphrases are stored as generic passwords in macOS Keychain. Account identifiers contain the normalized protocol, host, port, and username. Private-key paths and security-scoped bookmarks are stored in application preferences under the same non-secret identity.
 
-The UI never reads arbitrary Git credential-helper secrets. It only reads credentials previously saved by RayGit under its own Keychain service.
+The UI never reads arbitrary Git credential-helper secrets. It only reads credentials previously saved by AuvGit under its own Keychain service.
 
 ## Git Injection
 

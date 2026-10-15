@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-resources = root / 'Sources/RayGitLocalization/Resources'
+resources = root / 'Sources/AuvGitLocalization/Resources'
 locales = ('en', 'zh-Hans', 'zh-Hant', 'ja')
 def table(locale, name):
     path = resources / (locale + '.lproj') / (name + '.strings')
@@ -25,11 +25,11 @@ for name, original in all_tables.items():
                 return Counter(match.group(2) for match in re.finditer(pattern, text.replace('%%', '')))
             assert placeholders(value) == placeholders(translated[key]), f'{locale}/{name}/{key}: placeholder mismatch'
 for filename, helper, name in [('MainWindow.swift', 'mainText', 'Main'), ('DiffPane.swift', 'diffText', 'Detail'), ('HistoryPane.swift', 'historyText', 'Detail')]:
-    source = (root / 'Sources/RayGit' / filename).read_text()
+    source = (root / 'Sources/AuvGit' / filename).read_text()
     for key in re.findall(r'\b' + helper + r'\("([^"\n]+)"', source):
         assert key in all_tables[name], f'{filename}: missing {key}'
 # Helpers shared across UI files must be checked at every static call site.
-for path in (root / 'Sources/RayGit').glob('*.swift'):
+for path in (root / 'Sources/AuvGit').glob('*.swift'):
     source = path.read_text()
     for helper, name in [('historyActionText', 'HistoryActions'), ('interactionText', 'Interactions'), ('compareText', 'Compare'), ('diffControlText', 'DiffControls'), ('terminalText', 'Terminal'), ('sessionText', 'SessionWorkflows'), ('workflowText', 'Workflow'), ('panelText', 'VisualPanels'), ('compareExtra', 'CompareExtras'), ('prefsText', 'Preferences'), ('gitPrefsText', 'GitPreferences'), ('editorPrefsText', 'EditorPreferences')]:
         for key in re.findall(r'\b' + helper + r'\("([^"\n]+)"', source):
@@ -39,12 +39,12 @@ for path in (root / 'Sources/RayGit').glob('*.swift'):
             assert key in all_tables['Files'], f'{path.name}: missing Files/{key}'
     for key, name in re.findall(r'L10n\.text\("([^"\n]+)",\s*table:\s*"([^"\n]+)"', source):
         assert key in all_tables[name], f'{path.name}: missing {name}/{key}'
-preferences = (root / 'Sources/RayGit/PreferencesWindow.swift').read_text()
+preferences = (root / 'Sources/AuvGit/PreferencesWindow.swift').read_text()
 for key in re.findall(r'choices\("([^"\n]+)"', preferences):
     assert key in all_tables['Preferences'], f'PreferencesWindow.swift: missing Preferences/{key}'
 for key in re.findall(r'\("[^"\n]+", "([^"\n]+)"\)', preferences):
     assert key in all_tables['Preferences'], f'PreferencesWindow.swift: missing picker label Preferences/{key}'
-source = (root / 'Sources/RayGit/RayGitApp.swift').read_text()
+source = (root / 'Sources/AuvGit/AuvGitApp.swift').read_text()
 for key in re.findall(r'\b(?:setStatus|setDiffTitle)\("([^"\n]+)"', source):
     assert key in all_tables['App'], f'RepositoryStore: missing {key}'
 print(f'{len(locales)} languages, {len(all_tables)} tables, {sum(map(len, all_tables.values()))} keys: parity and static lookup checks passed')

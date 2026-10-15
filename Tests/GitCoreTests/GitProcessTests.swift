@@ -14,16 +14,16 @@ final class GitProcessTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let executable = directory.appendingPathComponent("git-fixture")
-        try Data("#!/bin/sh\nprintf '%s' \"$RAYGIT_TEST_AUTH\"\n".utf8).write(to: executable)
+        try Data("#!/bin/sh\nprintf '%s' \"$AUVGIT_TEST_AUTH\"\n".utf8).write(to: executable)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
 
         let output = try await GitProcess.run(
             at: directory, arguments: ["status"], executable: executable.path,
-            environmentOverrides: ["RAYGIT_TEST_AUTH": "isolated"]
+            environmentOverrides: ["AUVGIT_TEST_AUTH": "isolated"]
         )
 
         XCTAssertEqual(output.text, "isolated")
-        XCTAssertNil(ProcessInfo.processInfo.environment["RAYGIT_TEST_AUTH"])
+        XCTAssertNil(ProcessInfo.processInfo.environment["AUVGIT_TEST_AUTH"])
     }
 
     func testSerialCheapCommandsReportLatency() async throws {

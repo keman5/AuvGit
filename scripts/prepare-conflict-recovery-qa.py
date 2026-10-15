@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 project = Path(__file__).resolve().parents[1]
-root = Path(tempfile.mkdtemp(prefix="raygit-conflict-qa-"))
+root = Path(tempfile.mkdtemp(prefix="auvgit-conflict-qa-"))
 
 def git(repo, *args, success=True):
     result = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
@@ -59,12 +59,12 @@ for name in ["Discard", "Reset"] + (["Merge", "Rebase"] if "--interactions" in s
     paths.append(str(repo))
     heads[name] = git(repo, "rev-parse", "HEAD")
 
-app = root / "RayGit Recovery QA.app"
-subprocess.run(["ditto", str(project / ".artifacts/RayGit.app"), str(app)], check=True)
+app = root / "AuvGit Recovery QA.app"
+subprocess.run(["ditto", str(project / ".artifacts/AuvGit.app"), str(app)], check=True)
 info_file = app / "Contents/Info.plist"
 info = plistlib.loads(info_file.read_bytes())
-bundle_id = "dev.raygit.recovery-qa-" + root.name.rsplit("-", 1)[-1]
-info.update(CFBundleIdentifier=bundle_id, CFBundleName="RayGit Recovery QA", CFBundleDisplayName="RayGit Recovery QA")
+bundle_id = "dev.auvgit.recovery-qa-" + root.name.rsplit("-", 1)[-1]
+info.update(CFBundleIdentifier=bundle_id, CFBundleName="AuvGit Recovery QA", CFBundleDisplayName="AuvGit Recovery QA")
 info_file.write_bytes(plistlib.dumps(info))
 subprocess.run(["codesign", "--force", "--sign", "-", str(app)], check=True, capture_output=True)
 subprocess.run(["codesign", "--verify", "--strict", str(app)], check=True)
@@ -74,5 +74,5 @@ preferences = {"appLanguage": "zh-Hans", "window.frameMode": "borderless", "pref
 (Path.home() / "Library/Preferences" / (bundle_id + ".plist")).write_bytes(plistlib.dumps(preferences))
 metadata = dict(root=str(root), app=str(app), bundle_id=bundle_id, heads=heads)
 (root / "fixture.json").write_text(json.dumps(metadata))
-Path("/tmp/raygit-conflict-qa-path").write_text(str(root))
+Path("/tmp/auvgit-conflict-qa-path").write_text(str(root))
 print(json.dumps(metadata, indent=2))

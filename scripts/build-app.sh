@@ -8,7 +8,7 @@ case "${1:-}" in
   *) print -u2 "Usage: $0 [--no-install]"; exit 1 ;;
 esac
 # Compile the native icon so macOS 26+ does not wrap the legacy icns in a gray tile.
-ICON_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/raygit-app-icon.XXXXXX")"
+ICON_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/auvgit-app-icon.XXXXXX")"
 trap 'rm -rf -- "$ICON_BUILD_DIR"' EXIT
 xcrun actool Resources/AppIcon.icon \
   --compile "$ICON_BUILD_DIR" \
@@ -23,19 +23,19 @@ if [[ ! -s "$ICON_BUILD_DIR/Assets.car" ]]; then
 fi
 swift build --build-system native -c release
 BUILD_BIN_PATH="$(swift build --build-system native -c release --show-bin-path)"
-APP="$PWD/.artifacts/RayGit.app"
+APP="$PWD/.artifacts/AuvGit.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp "$ICON_BUILD_DIR/Assets.car" "$APP/Contents/Resources/Assets.car"
 cp Resources/THIRD_PARTY_NOTICES.txt "$APP/Contents/Resources/THIRD_PARTY_NOTICES.txt"
-cp "$BUILD_BIN_PATH/RayGit" "$APP/Contents/MacOS/RayGit"
-RESOURCE_BUNDLE="$BUILD_BIN_PATH/RayGit_RayGitLocalization.bundle"
+cp "$BUILD_BIN_PATH/AuvGit" "$APP/Contents/MacOS/AuvGit"
+RESOURCE_BUNDLE="$BUILD_BIN_PATH/AuvGit_AuvGitLocalization.bundle"
 if [[ ! -d "$RESOURCE_BUNDLE" ]]; then
   print -u2 "Missing localization resource bundle: $RESOURCE_BUNDLE"
   exit 1
 fi
 # Keep translated resources self-contained in the distributable app.
-rm -rf "$APP/Contents/Resources/RayGit_RayGitLocalization.bundle"
+rm -rf "$APP/Contents/Resources/AuvGit_AuvGitLocalization.bundle"
 cp -R "$RESOURCE_BUNDLE" "$APP/Contents/Resources/"
 TERMINAL_RESOURCE_BUNDLE="$BUILD_BIN_PATH/SwiftTerm_SwiftTerm.bundle"
 if [[ ! -d "$TERMINAL_RESOURCE_BUNDLE" ]]; then
@@ -51,10 +51,10 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <plist version="1.0"><dict>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundleIconName</key><string>AppIcon</string>
-<key>CFBundleExecutable</key><string>RayGit</string>
-<key>CFBundleIdentifier</key><string>dev.raygit.mac</string>
-<key>CFBundleName</key><string>RayGit</string>
-<key>CFBundleDisplayName</key><string>RayGit</string>
+<key>CFBundleExecutable</key><string>AuvGit</string>
+<key>CFBundleIdentifier</key><string>dev.auvgit.mac</string>
+<key>CFBundleName</key><string>AuvGit</string>
+<key>CFBundleDisplayName</key><string>AuvGit</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>0.1.0</string>
 <key>CFBundleVersion</key><string>2</string>
@@ -69,16 +69,18 @@ codesign --force --sign - "$APP"
 touch "$APP/Contents/Resources" "$APP/Contents" "$APP"
 print "Built $APP"
 if $INSTALL_APP; then
-  LOCAL_APP="/Applications/RayGit.app"
+  LOCAL_APP="/Applications/AuvGit.app"
   codesign --verify --strict "$APP"
-  swift - "$LOCAL_APP" <<'SWIFT'
+  swift - "$LOCAL_APP" "/Applications/RayGit.app" <<'SWIFT'
 import AppKit
-let appURL = URL(fileURLWithPath: CommandLine.arguments[1]).standardizedFileURL
-let apps = NSRunningApplication.runningApplications(withBundleIdentifier: "dev.raygit.mac")
-    .filter { $0.bundleURL?.standardizedFileURL == appURL }
+let appURLs = Set(CommandLine.arguments.dropFirst().map { URL(fileURLWithPath: $0).standardizedFileURL })
+let apps = NSWorkspace.shared.runningApplications.filter {
+    ["dev.auvgit.mac", "dev.raygit.mac"].contains($0.bundleIdentifier ?? "") &&
+    $0.bundleURL.map { appURLs.contains($0.standardizedFileURL) } == true
+}
 for app in apps where !app.isTerminated {
     guard app.terminate() else {
-        fputs("RayGit could not quit. Quit it before rebuilding.\n", stderr)
+        fputs("AuvGit could not quit. Quit it before rebuilding.\n", stderr)
         exit(1)
     }
 }
@@ -87,12 +89,19 @@ while apps.contains(where: { !$0.isTerminated }) && Date() < deadline {
     RunLoop.current.run(until: Date().addingTimeInterval(0.1))
 }
 guard apps.allSatisfy({ $0.isTerminated }) else {
-    fputs("RayGit is still running. Local application was not replaced.\n", stderr)
+    fputs("AuvGit is still running. Local application was not replaced.\n", stderr)
     exit(1)
 }
 SWIFT
   ditto "$APP" "$LOCAL_APP"
   codesign --verify --strict "$LOCAL_APP"
-  cmp "$APP/Contents/MacOS/RayGit" "$LOCAL_APP/Contents/MacOS/RayGit"
+  cmp "$APP/Contents/MacOS/AuvGit" "$LOCAL_APP/Contents/MacOS/AuvGit"
+  swift - <<'SWIFT'
+import AppKit
+let legacy = URL(fileURLWithPath: "/Applications/RayGit.app")
+if FileManager.default.fileExists(atPath: legacy.path), Bundle(url: legacy)?.bundleIdentifier == "dev.raygit.mac" {
+    try FileManager.default.trashItem(at: legacy, resultingItemURL: nil)
+}
+SWIFT
   print "Installed $LOCAL_APP"
 fi

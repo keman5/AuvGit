@@ -8,7 +8,7 @@ import tempfile
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("directory", nargs="?", help="new, empty fixture directory (default: temporary)")
 args = parser.parse_args()
-root = pathlib.Path(args.directory).expanduser().resolve() if args.directory else pathlib.Path(tempfile.mkdtemp(prefix="raygit-resolver-"))
+root = pathlib.Path(args.directory).expanduser().resolve() if args.directory else pathlib.Path(tempfile.mkdtemp(prefix="auvgit-resolver-"))
 root.mkdir(parents=True, exist_ok=True)
 if any(root.iterdir()):
     parser.error("fixture directory must be empty")

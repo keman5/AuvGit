@@ -218,7 +218,7 @@ extension GitRepository {
     public func streamingContent(path: String, revision: StreamingRevision) async throws -> StreamingTextFile {
         if revision == .worktree { return try streamingWorktree(path: path) }
         guard let oid = try await streamingBlob(path: path, revision: revision) else { throw GitError("This revision has no file content.") }
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("raygit-stream-\(UUID().uuidString)", isDirectory: true)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("auvgit-stream-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         do {
             let file = directory.appendingPathComponent("blob")

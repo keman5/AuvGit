@@ -5,17 +5,17 @@ public final class GitRuntimePreferences: @unchecked Sendable {
     public static let shared = GitRuntimePreferences()
     private let defaults: UserDefaults
     public init(defaults: UserDefaults = .standard) { self.defaults = defaults }
-    public var executablePath: String { defaults.string(forKey: "raygit.git.executablePath") ?? "/usr/bin/git" }
-    public var timeout: TimeInterval { let v = defaults.double(forKey: "raygit.git.timeout"); return (5...3600).contains(v) ? v : 120 }
-    public var commitCleanup: String { let v = defaults.string(forKey: "raygit.git.commitCleanup") ?? "default"; return ["default", "whitespace", "strip", "verbatim"].contains(v) ? v : "default" }
-    public var proxyMode: String { defaults.string(forKey: "raygit.network.proxyMode") ?? "inherit" }
-    public var proxyURL: String { defaults.string(forKey: "raygit.network.proxyURL") ?? "" }
-    public var sshCommand: String { defaults.string(forKey: "raygit.network.sshCommand") ?? "" }
-    public var fetchPrune: Bool { defaults.object(forKey: "raygit.network.fetchPrune") == nil ? true : defaults.bool(forKey: "raygit.network.fetchPrune") }
+    public var executablePath: String { defaults.string(forKey: "auvgit.git.executablePath") ?? "/usr/bin/git" }
+    public var timeout: TimeInterval { let v = defaults.double(forKey: "auvgit.git.timeout"); return (5...3600).contains(v) ? v : 120 }
+    public var commitCleanup: String { let v = defaults.string(forKey: "auvgit.git.commitCleanup") ?? "default"; return ["default", "whitespace", "strip", "verbatim"].contains(v) ? v : "default" }
+    public var proxyMode: String { defaults.string(forKey: "auvgit.network.proxyMode") ?? "inherit" }
+    public var proxyURL: String { defaults.string(forKey: "auvgit.network.proxyURL") ?? "" }
+    public var sshCommand: String { defaults.string(forKey: "auvgit.network.sshCommand") ?? "" }
+    public var fetchPrune: Bool { defaults.object(forKey: "auvgit.network.fetchPrune") == nil ? true : defaults.bool(forKey: "auvgit.network.fetchPrune") }
     public func setGit(path: String, timeout: Double, cleanup: String) throws {
         guard path.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: path) else { throw GitError("Choose an absolute path to an executable Git binary.") }
         guard (5...3600).contains(timeout), ["default", "whitespace", "strip", "verbatim"].contains(cleanup) else { throw GitError("Invalid Git preferences.") }
-        defaults.set(path, forKey: "raygit.git.executablePath"); defaults.set(timeout, forKey: "raygit.git.timeout"); defaults.set(cleanup, forKey: "raygit.git.commitCleanup")
+        defaults.set(path, forKey: "auvgit.git.executablePath"); defaults.set(timeout, forKey: "auvgit.git.timeout"); defaults.set(cleanup, forKey: "auvgit.git.commitCleanup")
     }
     public func setNetwork(mode: String, proxy: String, ssh: String, prune: Bool) throws {
         guard ["inherit", "off", "manual"].contains(mode) else { throw GitError("Invalid proxy mode.") }
@@ -23,7 +23,7 @@ public final class GitRuntimePreferences: @unchecked Sendable {
             guard let u = URLComponents(string: proxy), ["http", "https"].contains(u.scheme ?? ""), let host = u.host, !host.isEmpty, u.user == nil, u.password == nil, u.query == nil, u.fragment == nil else { throw GitError("Enter an HTTP(S) proxy URL without credentials, query or fragment.") }
         }
         guard !ssh.contains("\n"), !ssh.contains("\0") else { throw GitError("SSH command must be one line.") }
-        defaults.set(mode, forKey: "raygit.network.proxyMode"); defaults.set(mode == "manual" ? proxy : "", forKey: "raygit.network.proxyURL"); defaults.set(ssh, forKey: "raygit.network.sshCommand"); defaults.set(prune, forKey: "raygit.network.fetchPrune")
+        defaults.set(mode, forKey: "auvgit.network.proxyMode"); defaults.set(mode == "manual" ? proxy : "", forKey: "auvgit.network.proxyURL"); defaults.set(ssh, forKey: "auvgit.network.sshCommand"); defaults.set(prune, forKey: "auvgit.network.fetchPrune")
     }
     public func environment(_ original: [String: String]) -> [String: String] {
         var env = original
@@ -35,8 +35,8 @@ public final class GitRuntimePreferences: @unchecked Sendable {
         if env["GIT_SSH_COMMAND"] == nil, !sshCommand.isEmpty { env["GIT_SSH_COMMAND"] = sshCommand }
         return env
     }
-    public func resetGit() { for key in ["executablePath", "timeout", "commitCleanup"] { defaults.removeObject(forKey: "raygit.git." + key) } }
-    public func resetNetwork() { for key in ["proxyMode", "proxyURL", "sshCommand", "fetchPrune"] { defaults.removeObject(forKey: "raygit.network." + key) } }
+    public func resetGit() { for key in ["executablePath", "timeout", "commitCleanup"] { defaults.removeObject(forKey: "auvgit.git." + key) } }
+    public func resetNetwork() { for key in ["proxyMode", "proxyURL", "sshCommand", "fetchPrune"] { defaults.removeObject(forKey: "auvgit.network." + key) } }
     public static func validateExecutable(_ path: String) async throws -> String {
         guard path.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: path) else { throw GitError("Choose an absolute path to an executable Git binary.") }
         let output = try await GitProcess.run(at: FileManager.default.temporaryDirectory, arguments: ["--version"], timeout: 10, executable: path)

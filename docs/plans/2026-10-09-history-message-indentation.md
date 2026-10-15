@@ -13,8 +13,8 @@
 ### Task 1: Define row layout geometry
 
 **Files:**
-- Modify: `Sources/RayGit/HistoryColumnLayout.swift`
-- Test: `Tests/RayGitTests/HistoryColumnLayoutTests.swift`
+- Modify: `Sources/AuvGit/HistoryColumnLayout.swift`
+- Test: `Tests/AuvGitTests/HistoryColumnLayoutTests.swift`
 
 1. Add a failing test proving that rows with more active lanes receive a wider graph and a larger message indent.
 2. Prove that graph width plus message width stays constant for every row.
@@ -24,7 +24,7 @@
 ### Task 2: Apply row-specific graph and message widths
 
 **Files:**
-- Modify: `Sources/RayGit/HistoryPane.swift`
+- Modify: `Sources/AuvGit/HistoryPane.swift`
 
 1. Compute row widths from `CommitGraph.Row.laneCount` and the graph-wide maximum lane count.
 2. Render each graph cell with its active lane count so lane spacing remains stable.

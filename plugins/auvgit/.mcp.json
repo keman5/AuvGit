@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "auvgit": {
+      "command": "sh",
+      "args": [
+        "${PLUGIN_ROOT}/scripts/start.sh"
+      ]
+    }
+  }
+}

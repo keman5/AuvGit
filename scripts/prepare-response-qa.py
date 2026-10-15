@@ -12,7 +12,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--revision-edit", action="store_true")
 options = parser.parse_args()
 project = Path(__file__).resolve().parents[1]
-root = Path(tempfile.mkdtemp(prefix="raygit-response-qa-"))
+root = Path(tempfile.mkdtemp(prefix="auvgit-response-qa-"))
 
 def git(path, *args):
     subprocess.run(["/usr/bin/git", "-C", str(path), *args], check=True, capture_output=True)
@@ -88,12 +88,12 @@ if options.revision_edit:
     assert (copies / "file.txt").read_text() == "current\n"
     assert not (copies / "extra.txt").exists()
     paths.insert(3, str(copies))
-app = root / "RayGit Response QA.app"
-subprocess.run(["ditto", str(project / ".artifacts/RayGit.app"), str(app)], check=True)
+app = root / "AuvGit Response QA.app"
+subprocess.run(["ditto", str(project / ".artifacts/AuvGit.app"), str(app)], check=True)
 info_path = app / "Contents/Info.plist"
 info = plistlib.loads(info_path.read_bytes())
-bundle_id = "dev.raygit.response-qa-" + root.name.rsplit("-", 1)[-1]
-info.update(CFBundleIdentifier=bundle_id, CFBundleName="RayGit Response QA", CFBundleDisplayName="RayGit Response QA")
+bundle_id = "dev.auvgit.response-qa-" + root.name.rsplit("-", 1)[-1]
+info.update(CFBundleIdentifier=bundle_id, CFBundleName="AuvGit Response QA", CFBundleDisplayName="AuvGit Response QA")
 info_path.write_bytes(plistlib.dumps(info))
 subprocess.run(["codesign", "--force", "--sign", "-", str(app)], check=True, capture_output=True)
 subprocess.run(["codesign", "--verify", "--strict", str(app)], check=True)
@@ -112,6 +112,6 @@ assert sum(line.startswith("MM ") for line in status) == 80
 assert any(line == "?? untracked.txt" for line in status)
 assert (preview / "index.html").stat().st_size > 50_000
 assert len(html.splitlines()) == 77 and max(map(len, html.splitlines())) == 12550
-assert app.joinpath("Contents/MacOS/RayGit").is_file()
-Path("/tmp/raygit-response-qa-path").write_text(str(root))
+assert app.joinpath("Contents/MacOS/AuvGit").is_file()
+Path("/tmp/auvgit-response-qa-path").write_text(str(root))
 print(json.dumps(dict(root=str(root), app=str(app), bundle_id=bundle_id, source=str(seed)), indent=2))

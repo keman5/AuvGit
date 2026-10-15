@@ -4,7 +4,7 @@
 
 **Goal:** Render a color-blind-resilient commit graph whose color, line pattern, and node shape encode independent Git semantics.
 
-**Architecture:** Keep `GitCore.CommitGraph` responsible for topology and place all visual classification in a pure RayGit presentation model. The SwiftUI Canvas consumes resolved styles for segments and nodes, while history labels reuse the same branch color plan.
+**Architecture:** Keep `GitCore.CommitGraph` responsible for topology and place all visual classification in a pure AuvGit presentation model. The SwiftUI Canvas consumes resolved styles for segments and nodes, while history labels reuse the same branch color plan.
 
 **Tech Stack:** Swift 6, SwiftUI Canvas, XCTest, Swift Package Manager.
 
@@ -13,8 +13,8 @@
 ### Task 1: Specify branch and commit semantics
 
 **Files:**
-- Replace: `Sources/RayGit/HistoryGraphColors.swift`
-- Replace: `Tests/RayGitTests/HistoryGraphColorsTests.swift`
+- Replace: `Sources/AuvGit/HistoryGraphColors.swift`
+- Replace: `Tests/AuvGitTests/HistoryGraphColorsTests.swift`
 
 1. Add failing tests for fixed `main`/`develop` colors, stable feature palette allocation, remote-only purple, merged/unmerged stroke kinds, and tag amber.
 2. Add failing tests for ordinary, merge, remote-only, and `HEAD` node kinds.
@@ -36,8 +36,8 @@
 ### Task 3: Render stroke and node variants
 
 **Files:**
-- Modify: `Sources/RayGit/HistoryPane.swift`
-- Modify: `Sources/RayGit/WorkspaceStyle.swift`
+- Modify: `Sources/AuvGit/HistoryPane.swift`
+- Modify: `Sources/AuvGit/WorkspaceStyle.swift`
 
 1. Add testable rendering-style helpers for line width, dash pattern, and node kind.
 2. Update `CommitGraphCell` to draw background halos, rounded Bezier strokes, filled/ring/hollow nodes, and the `HEAD` outer ring.
@@ -47,9 +47,9 @@
 ### Task 4: Enforce accessible graph geometry
 
 **Files:**
-- Modify: `Sources/RayGit/HistoryColumnLayout.swift`
-- Modify: `Sources/RayGit/HistoryPane.swift`
-- Modify: `Tests/RayGitTests/HistoryColumnLayoutTests.swift`
+- Modify: `Sources/AuvGit/HistoryColumnLayout.swift`
+- Modify: `Sources/AuvGit/HistoryPane.swift`
+- Modify: `Tests/AuvGitTests/HistoryColumnLayoutTests.swift`
 
 1. Add failing layout tests for 18-point lane spacing and stable graph/message width totals.
 2. Run the focused layout tests and confirm failure.

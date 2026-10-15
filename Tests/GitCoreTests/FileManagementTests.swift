@@ -69,7 +69,7 @@ final class FileManagementTests: XCTestCase {
         let entries = try await repo.status()
         XCTAssertTrue(entries.contains { $0.path == "tracked" && $0.isStaged && !$0.isUnstaged })
     }
-    func testDiscardWorkspaceValidatesAllPathsBeforeMutationAndRejectsSymlinksAndIgnoredFiles() async throws {
+    func testDiscardWorkspaceValidatesAllPathsAndUnlinksSymlinkWithoutFollowingIt() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -79,11 +79,14 @@ final class FileManagementTests: XCTestCase {
         try Data("ignored\n".utf8).write(to: root.appendingPathComponent(".gitignore"))
         try Data("keep ignored".utf8).write(to: root.appendingPathComponent("ignored"))
         try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("link"), withDestinationURL: root.appendingPathComponent("new"))
-        for invalid in ["link", "ignored", "missing", "../outside", ".git/config"] {
+        for invalid in ["ignored", "missing", "../outside", ".git/config"] {
             do { try await repo.discardWorkspace(paths: ["new", invalid]); XCTFail("Unsafe target must be rejected: \(invalid)") } catch { }
             XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("new"), encoding: .utf8), "keep")
         }
         XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("ignored"), encoding: .utf8), "keep ignored")
+        try await repo.discardWorkspace(paths: ["link"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("link").path))
+        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("new"), encoding: .utf8), "keep")
     }
     func testPermanentDeletionRejectsProtectedAndSymbolicPaths() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

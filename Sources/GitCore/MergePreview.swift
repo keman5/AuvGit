@@ -7,7 +7,7 @@ public struct MergePreviewResult: Sendable {
 public enum MergePreview {
     /// Writes only disposable input files; the returned result is a draft, never a repository mutation.
     public static func create(base: String, ours: String, theirs: String) async throws -> MergePreviewResult {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("raygit-merge-\(UUID().uuidString)", isDirectory: true)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("auvgit-merge-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         for (name, value) in [("base", base), ("ours", ours), ("theirs", theirs)] {

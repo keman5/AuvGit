@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-root = Path(tempfile.mkdtemp(prefix="raygit-alignment-"))
+root = Path(tempfile.mkdtemp(prefix="auvgit-alignment-"))
 
 
 def git(*args, conflict=False):

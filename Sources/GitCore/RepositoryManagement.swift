@@ -32,7 +32,7 @@ final class HTTPSCredentialLease {
         let port = components.port ?? 443
         let expectedHost = host.lowercased() + (port == 443 ? "" : ":\(port)")
         let manager = FileManager.default
-        let directory = manager.temporaryDirectory.appendingPathComponent("raygit-credential-" + UUID().uuidString, isDirectory: true)
+        let directory = manager.temporaryDirectory.appendingPathComponent("auvgit-credential-" + UUID().uuidString, isDirectory: true)
         let credentialFile = directory.appendingPathComponent("credential")
         let helperFile = directory.appendingPathComponent("helper.sh")
         let storageCommand = keychainHelper.map { Self.shellQuote($0.path) } ?? "/usr/bin/git credential-osxkeychain"
@@ -185,7 +185,7 @@ public extension GitRepository {
     }
     private func workflowShellPath(_ path: String) -> String { "'" + path.replacingOccurrences(of: "'", with: "'\"'\"'") + "'" }
     func rebaseToolsDirectory() async throws -> URL {
-        let path = try await workflowRead(["rev-parse", "--git-path", "raygit-rebase-tools"]).trimmingCharacters(in: .newlines)
+        let path = try await workflowRead(["rev-parse", "--git-path", "auvgit-rebase-tools"]).trimmingCharacters(in: .newlines)
         return path.hasPrefix("/") ? URL(fileURLWithPath: path) : url.appendingPathComponent(path)
     }
     func cleanupRebaseToolsIfFinished() async {

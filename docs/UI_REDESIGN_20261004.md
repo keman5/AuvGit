@@ -8,13 +8,13 @@
 
 | 用户设计文件 | 实际页面 / 入口 | 对应实现 |
 | --- | --- | --- |
-| `/Users/kevin/Downloads/3d021ac9-b134-42f5-832b-d2adc537a4f9.png` | 主窗口工作区、仓库 / 分支侧栏、文件列表、差异和提交面板 | `Sources/RayGit/MainWindow.swift`、`RepositorySidebar.swift`、`WorkspaceFilesPane.swift`、`HistoryPane.swift`、`DiffPane.swift`、`WorkspaceStyle.swift` |
-| `/Users/kevin/Downloads/76c797b7-3755-4a5b-97d4-bd1d812160f6.png` | 文件双击 / 比较操作打开的独立普通编辑对比窗口 | `Sources/RayGit/CompareWindow.swift`、`ComparisonEditor.swift`、`DesignComparisonUI.swift`、`ComparisonExtrasMenu.swift` |
-| `/Users/kevin/Downloads/ed57d6a5-7dd6-41ea-8314-ce4e0a8a8fbe.png` | 冲突文件独立解决窗口；工作区使用共享只读预览 | `Sources/RayGit/CompareWindow.swift`、`ComparisonResolver.swift`、`ComparisonEditor.swift`、`WorkspaceConflictPreview.swift`、`DesignComparisonUI.swift` |
-| `/Users/kevin/Downloads/683ab669-7df7-40d7-b9d6-88ec30635e18.png` | 应用设置及编辑器设置 | `Sources/RayGit/PreferencesWindow.swift`、`EditorPreferencesView.swift` |
-| `/Users/kevin/Downloads/1ff00d40-d8a0-4a7a-b3a1-382c2bda15ca.png` | Fetch / Pull / Push 网络操作面板 | `Sources/RayGit/NetworkOperationsView.swift` |
-| `/Users/kevin/Downloads/40b87c88-a6ea-428d-9562-475f2a095ae2.png` | 标签管理面板 | `Sources/RayGit/TagManagementView.swift` |
-| `/Users/kevin/Downloads/ac16ba35-29ba-4f02-9889-7f65c6877837.png` | 交互式 Rebase 工作流面板 | `Sources/RayGit/RebaseWorkflowView.swift` |
+| `/Users/kevin/Downloads/3d021ac9-b134-42f5-832b-d2adc537a4f9.png` | 主窗口工作区、仓库 / 分支侧栏、文件列表、差异和提交面板 | `Sources/AuvGit/MainWindow.swift`、`RepositorySidebar.swift`、`WorkspaceFilesPane.swift`、`HistoryPane.swift`、`DiffPane.swift`、`WorkspaceStyle.swift` |
+| `/Users/kevin/Downloads/76c797b7-3755-4a5b-97d4-bd1d812160f6.png` | 文件双击 / 比较操作打开的独立普通编辑对比窗口 | `Sources/AuvGit/CompareWindow.swift`、`ComparisonEditor.swift`、`DesignComparisonUI.swift`、`ComparisonExtrasMenu.swift` |
+| `/Users/kevin/Downloads/ed57d6a5-7dd6-41ea-8314-ce4e0a8a8fbe.png` | 冲突文件独立解决窗口；工作区使用共享只读预览 | `Sources/AuvGit/CompareWindow.swift`、`ComparisonResolver.swift`、`ComparisonEditor.swift`、`WorkspaceConflictPreview.swift`、`DesignComparisonUI.swift` |
+| `/Users/kevin/Downloads/683ab669-7df7-40d7-b9d6-88ec30635e18.png` | 应用设置及编辑器设置 | `Sources/AuvGit/PreferencesWindow.swift`、`EditorPreferencesView.swift` |
+| `/Users/kevin/Downloads/1ff00d40-d8a0-4a7a-b3a1-382c2bda15ca.png` | Fetch / Pull / Push 网络操作面板 | `Sources/AuvGit/NetworkOperationsView.swift` |
+| `/Users/kevin/Downloads/40b87c88-a6ea-428d-9562-475f2a095ae2.png` | 标签管理面板 | `Sources/AuvGit/TagManagementView.swift` |
+| `/Users/kevin/Downloads/ac16ba35-29ba-4f02-9889-7f65c6877837.png` | 交互式 Rebase 工作流面板 | `Sources/AuvGit/RebaseWorkflowView.swift` |
 
 ## 本轮源码变化
 
@@ -61,13 +61,13 @@
 | 1100pt 窄窗口、长路径、四语言、深浅主题 | 待截图和交互；语法解析不能证明没有截断 |
 | AI Codex CLI 默认入口 | 安装版两次点击成功填入草稿；HEAD和暂存差异不变。4项草稿保护/子进程成功、取消、超时测试通过；GUI取消未完成（点击前请求已结束），API、未登录、缺少CLI未测 |
 | 设计截图视觉对比 | 初始基线测量值65.04，覆盖率100%；首轮改版测量值74，覆盖率89.31%。工具栏修正后测量71.37/覆盖99.14%；恢复无换行状态最终73.39/覆盖99.31%。差异包括原生控件、间距、窗口比例及真实内容；未达到95%目标，不能当成七页整体还原度 |
-| 安装 / 签名 / 提交 | 已用 `ditto` 更新 `/Applications/RayGit.app`；严格签名检查和安装可执行文件 `cmp` 通过。Git 提交结果仍待主代理补充 |
+| 安装 / 签名 / 提交 | 已用 `ditto` 更新 `/Applications/AuvGit.app`；严格签名检查和安装可执行文件 `cmp` 通过。Git 提交结果仍待主代理补充 |
 
 
 ## 本轮原生截图与磁盘边界
 
-本轮截图目录为 `/tmp/raygit-design-review/`：`network.png`、`tags.png`、`tag-create.png`、`editor-settings.png`、`compare.png`、`compare-wrapped.png`、`conflict-base.png`。这些截图是当前局部原生界面证据，不代表所有交互、四语言、深色或最终工具栏相似度都通过。
+本轮截图目录为 `/tmp/auvgit-design-review/`：`network.png`、`tags.png`、`tag-create.png`、`editor-settings.png`、`compare.png`、`compare-wrapped.png`、`conflict-base.png`。这些截图是当前局部原生界面证据，不代表所有交互、四语言、深色或最终工具栏相似度都通过。
 
-冲突测试位于 `/tmp/raygit-visual-polish-20261004`，仅更改内存草稿并撤销；未保存或暂存。`resolver-demo.txt` 的 SHA1 仍为 `c923f59cbe92dfad1567c93214cf5d0cbd925766`，磁盘内容保持原样。上述新增 GUI 验证不替代此前完整保存并解决工作流，也不宣称本轮重测了保存流程。
+冲突测试位于 `/tmp/auvgit-visual-polish-20261004`，仅更改内存草稿并撤销；未保存或暂存。`resolver-demo.txt` 的 SHA1 仍为 `c923f59cbe92dfad1567c93214cf5d0cbd925766`，磁盘内容保持原样。上述新增 GUI 验证不替代此前完整保存并解决工作流，也不宣称本轮重测了保存流程。
 
 最终补充截图：`ai-result.png`、`rebase-clean.png`、`rebase-reword.png`、`workspace-final-nowrap.png`，视觉报告 `after-3/report.md`。最终工具栏刷新/网络/标签/更多/搜索无障碍名称经重装运行确认，Cmd-K搜索ThreePane正确筛出文件。换行设置已恢复原值。完整四语逐页、深色、API、真实互联网远端推送、缺少CLI仍未验证。

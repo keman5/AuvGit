@@ -22,7 +22,7 @@ case "${1:-all}" in
     TEST_FILTER='ConflictPreviewPerformanceTests|RepositorySwitchLatencyTests|RepositoryPresentationOpeningTests|WorkspaceOpeningPreviewTests|DiffPreviewPerformanceTests|ComparisonDocumentGeometryTests|ComparisonInitialNavigationTests|ComparisonBandNavigationTests|ComparisonUndoTests|RevisionCopyEditingTests|ConflictResolutionMenuTests|WorkspaceTableMouseTests|RepositoryQuietRefreshTests'
     ;;
   switch-real)
-    export RAYGIT_RESPONSE_REPOSITORIES="$PWD/../stashx
+    export AUVGIT_RESPONSE_REPOSITORIES="$PWD/../stashx
 $PWD/../raydock"
     TEST_FILTER='RealProjectResponseTests'
     ;;
@@ -49,7 +49,7 @@ $PWD/../raydock"
     fi
     ;;
   dimming)
-    export RAYGIT_DIALOG_CAPTURE=1
+    export AUVGIT_DIALOG_CAPTURE=1
     TEST_FILTER='DialogAppearanceTests.testDimmingSurvivesSheetAnimationAndParentRedraw'
     ;;
   sidebar-polish)
@@ -79,7 +79,7 @@ $PWD/../raydock"
     TEST_FILTER='NativeBranchTableTests|DialogAppearanceTests|DialogButtonWidthTests|ComparisonSearchTests|NativeFocusBridgeTests.testComparisonPopoverDoesNotRebindParentScope|NativeFocusBridgeTests.testComparisonSearchFocusesQueryAfterAttachingToWindow|NativeFocusBridgeTests.testClonePresentationFocusesSourceWithoutStealingFocusOnUpdate|NativeFocusBridgeTests.testRealAlertButtonsAreKeyboardReachableAndSkipDisabled|NativeFocusBridgeTests.testRealCloneSheetStartsInSourceThenTabVisitsDestination|NativeFocusBridgeTests.testRealSwiftUISearchPopoverFocusesQueryOnPresentation'
     ;;
   real)
-    export RAYGIT_RESPONSE_REPOSITORIES="$PWD/../raydock
+    export AUVGIT_RESPONSE_REPOSITORIES="$PWD/../raydock
 $PWD"
     TEST_FILTER='RealProjectResponseTests'
     ;;

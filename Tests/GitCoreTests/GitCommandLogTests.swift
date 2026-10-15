@@ -30,7 +30,7 @@ final class GitCommandLogTests: XCTestCase {
     }
     func testArchiveIsRemovedWhenRecordIsReleased() throws {
         func files() throws -> Set<String> {
-            Set(try FileManager.default.contentsOfDirectory(atPath: FileManager.default.temporaryDirectory.path).filter { $0.hasPrefix("raygit-log-") })
+            Set(try FileManager.default.contentsOfDirectory(atPath: FileManager.default.temporaryDirectory.path).filter { $0.hasPrefix("auvgit-log-") })
         }
         let before = try files()
         var record: GitCommandRecord? = GitCommandRecord(date: Date(), directory: "", command: "git diff", output: String(repeating: "x", count: 40_000), error: nil, duration: 0, exitCode: 0, operation: "diff")

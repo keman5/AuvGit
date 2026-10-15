@@ -1,6 +1,6 @@
 # 首选项
 
-参考检查覆盖 SmartGit 26.1 的仓库重新打开、工作区/日志默认视图、主题与语言、日期显示、文件双击、路径搜索大小写、提交消息策略、后台刷新、Git 可执行文件与配置、编辑器、快捷键、外部工具和代理。RayGit 按自身实际能力提供可搜索分类，未声称与 SmartGit 逐项完全等价。
+参考检查覆盖 SmartGit 26.1 的仓库重新打开、工作区/日志默认视图、主题与语言、日期显示、文件双击、路径搜索大小写、提交消息策略、后台刷新、Git 可执行文件与配置、编辑器、快捷键、外部工具和代理。AuvGit 按自身实际能力提供可搜索分类，未声称与 SmartGit 逐项完全等价。
 
 ## 主框架与本地设置
 
@@ -21,17 +21,17 @@
 
 ## Git 与网络
 
-Git 运行设置使用 `raygit.git.{executablePath,timeout,commitCleanup}`，默认 `/usr/bin/git`、120 秒、default 清理策略。可执行路径通过实际 `--version` 验证；无效保存被拒绝。超时限定 5–3600 秒，对新 Git 进程生效。提交消息清理接入 `GitRepository.commit --cleanup`；default 省略参数以保留 Git 默认行为。
+Git 运行设置使用 `auvgit.git.{executablePath,timeout,commitCleanup}`，默认 `/usr/bin/git`、120 秒、default 清理策略。可执行路径通过实际 `--version` 验证；无效保存被拒绝。超时限定 5–3600 秒，对新 Git 进程生效。提交消息清理接入 `GitRepository.commit --cleanup`；default 省略参数以保留 Git 默认行为。
 
 全局身份页读取 name/email、`gpg.format`、`user.signingkey`、`commit.gpgsign`。明确点击应用仅写改变的键，空值移除该键，保留未知配置；界面说明全局作用范围及仓库配置覆盖关系。签名格式及开关有实际配置消费者。
 
-网络设置使用 `raygit.network.{proxyMode,proxyURL,sshCommand,fetchPrune}`，默认为继承、空代理、空 SSH 命令、开启 prune。HTTP(S) 代理 URL 禁止内嵌用户名和密码；覆盖模式清理代理环境并仅给 RayGit 子进程传递 Git `http.proxy`。界面说明仓库 URL 专用或 remote 配置可能覆盖，以及 SSH 代理需通过 SSH 配置处理。既有 `GIT_SSH_COMMAND` 优先。Fetch 的两个实际入口传递 `--prune` 或 `--no-prune`。凭据页不读取秘密，既有仓库凭据 helper 操作保留。恢复运行默认不改全局 gitconfig。
+网络设置使用 `auvgit.network.{proxyMode,proxyURL,sshCommand,fetchPrune}`，默认为继承、空代理、空 SSH 命令、开启 prune。HTTP(S) 代理 URL 禁止内嵌用户名和密码；覆盖模式清理代理环境并仅给 AuvGit 子进程传递 Git `http.proxy`。界面说明仓库 URL 专用或 remote 配置可能覆盖，以及 SSH 代理需通过 SSH 配置处理。既有 `GIT_SSH_COMMAND` 优先。Fetch 的两个实际入口传递 `--prune` 或 `--no-prune`。凭据页不读取秘密，既有仓库凭据 helper 操作保留。恢复运行默认不改全局 gitconfig。
 
 终端仍采用现有实现，未增加无消费者的终端配置分类。没有新增无实际效果的 diff 开关。
 
 ## 验证边界
 
-最终 `swift test --build-system native` 全集 96 项测试通过，日志 `/tmp/raygit-preferences-tests-final.log`。首次全集中终端 Ctrl-C 用例的 timeout/running 两断言失败，同一旧用例独立重跑两次均成功。随后只收紧测试就绪条件：前台进程组必须为正数且不同于 shell 组，未就绪时失败并返回；未修改终端实现或扩大超时，修改后全集通过。此证据排除了测试未就绪即继续的条件问题，不证明它必然是首次失败的唯一根因。
+最终 `swift test --build-system native` 全集 96 项测试通过，日志 `/tmp/auvgit-preferences-tests-final.log`。首次全集中终端 Ctrl-C 用例的 timeout/running 两断言失败，同一旧用例独立重跑两次均成功。随后只收紧测试就绪条件：前台进程组必须为正数且不同于 shell 组，未就绪时失败并返回；未修改终端实现或扩大超时，修改后全集通过。此证据排除了测试未就绪即继续的条件问题，不证明它必然是首次失败的唯一根因。
 
 四语资源格式与静态查找/参数标签检查通过。Git RuntimePreferencesTests 四项使用隔离 Defaults suite 与临时 `git config --file`，验证可执行路径、URL/环境、默认值/恢复、全局变更键与空值移除/布尔解析，不写真实设置。
 
@@ -39,4 +39,4 @@ Git 运行设置使用 `raygit.git.{executablePath,timeout,commitCleanup}`，默
 
 最终新包原生复验通过：搜索“字体”“超时”“代理”“主题”分别显示对应分类，“不存在的设置”显示中文空结果提示。Git 页标签已正确对应，无效 Git 路径和外部参数 JSON 显示中文错误且不保存。重启后字号 14、关闭行号和深色主题均保留；验收结束已恢复字号 12、开启行号、跟随系统外观和语言，并丢弃无效工具参数草稿。
 
-最终 Release 构建通过，日志 `/tmp/raygit-preferences-release-verified.log`。应用通过 `codesign --verify --deep --strict`；四语共 21 张表、837 个键检查通过。已更新 `/Applications/RayGit.app`，签名验证通过且内容与构建产物一致。源码检查、构建和上述局部 UI 证据不代替全部设置或真实网络/签名操作验收。
+最终 Release 构建通过，日志 `/tmp/auvgit-preferences-release-verified.log`。应用通过 `codesign --verify --deep --strict`；四语共 21 张表、837 个键检查通过。已更新 `/Applications/AuvGit.app`，签名验证通过且内容与构建产物一致。源码检查、构建和上述局部 UI 证据不代替全部设置或真实网络/签名操作验收。

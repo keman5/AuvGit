@@ -14,9 +14,9 @@
 
 **Files:**
 - Modify: `Sources/GitCore/RemoteAuthentication.swift`
-- Modify: `Sources/RayGit/RemoteAuthenticationSheet.swift`
+- Modify: `Sources/AuvGit/RemoteAuthenticationSheet.swift`
 - Test: `Tests/GitCoreTests/RemoteAuthenticationTests.swift`
-- Test: `Tests/RayGitTests/NetworkAuthenticationPolicyTests.swift`
+- Test: `Tests/AuvGitTests/NetworkAuthenticationPolicyTests.swift`
 
 1. Add failing tests for the default HTTPS token method, separate password mode, SSH form validation, safe HTTPS-to-SSH URL conversion, custom SSH port, and invalid input.
 2. Run `swift test --build-system native --filter RemoteAuthenticationTests` and `swift test --build-system native --filter NetworkAuthenticationPolicyTests`; confirm the new tests fail because the method and migration APIs do not exist.
@@ -37,12 +37,12 @@
 ### Task 3: Build the segmented authentication sheet
 
 **Files:**
-- Modify: `Sources/RayGit/RemoteAuthenticationSheet.swift`
-- Modify: `Sources/RayGitLocalization/Resources/en.lproj/Network.strings`
-- Modify: `Sources/RayGitLocalization/Resources/ja.lproj/Network.strings`
-- Modify: `Sources/RayGitLocalization/Resources/zh-Hans.lproj/Network.strings`
-- Modify: `Sources/RayGitLocalization/Resources/zh-Hant.lproj/Network.strings`
-- Test: `Tests/RayGitTests/NetworkAuthenticationPolicyTests.swift`
+- Modify: `Sources/AuvGit/RemoteAuthenticationSheet.swift`
+- Modify: `Sources/AuvGitLocalization/Resources/en.lproj/Network.strings`
+- Modify: `Sources/AuvGitLocalization/Resources/ja.lproj/Network.strings`
+- Modify: `Sources/AuvGitLocalization/Resources/zh-Hans.lproj/Network.strings`
+- Modify: `Sources/AuvGitLocalization/Resources/zh-Hant.lproj/Network.strings`
+- Test: `Tests/AuvGitTests/NetworkAuthenticationPolicyTests.swift`
 
 1. Render a segmented picker with access token/app password as the HTTPS default, account password, and SSH private key.
 2. Keep username and secret values method-local so switching segments cannot expose or reuse a password as an SSH passphrase.
@@ -53,10 +53,10 @@
 ### Task 4: Integrate migration into every retry path
 
 **Files:**
-- Modify: `Sources/RayGit/RemoteAuthenticationSheet.swift`
-- Modify: `Sources/RayGit/MainWindow.swift`
-- Modify: `Sources/RayGit/NetworkOperationsView.swift`
-- Test: `Tests/RayGitTests/NetworkAuthenticationPolicyTests.swift`
+- Modify: `Sources/AuvGit/RemoteAuthenticationSheet.swift`
+- Modify: `Sources/AuvGit/MainWindow.swift`
+- Modify: `Sources/AuvGit/NetworkOperationsView.swift`
+- Test: `Tests/AuvGitTests/NetworkAuthenticationPolicyTests.swift`
 
 1. Add a coordinator preparation step that scopes the selected key, verifies SSH access, applies the guarded migration, and only then executes the existing retry callback.
 2. Route toolbar push, network-sheet push/preview, fetch/pull, and guarded force-push retries through that preparation step.

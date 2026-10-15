@@ -1,13 +1,13 @@
 # Release signing and update feed
 
-Run `scripts/notarize-app.sh` on the local Mac after setting `RAYGIT_SIGN_IDENTITY` to an installed Developer ID Application identity and `RAYGIT_NOTARY_PROFILE` to a keychain profile created with `xcrun notarytool store-credentials`. The script builds locally, signs with hardened runtime and timestamp, submits to Apple, staples the accepted ticket, assesses Gatekeeper, and produces `.artifacts/RayGit-release.zip`. No signing identity or notarization credentials are included in the repository. These steps require the user's Apple developer account; creating this script does not establish that a release has been notarized.
+Run `scripts/notarize-app.sh` on the local Mac after setting `AUVGIT_SIGN_IDENTITY` to an installed Developer ID Application identity and `AUVGIT_NOTARY_PROFILE` to a keychain profile created with `xcrun notarytool store-credentials`. The script builds locally, signs with hardened runtime and timestamp, submits to Apple, staples the accepted ticket, assesses Gatekeeper, and produces `.artifacts/AuvGit-release.zip`. No signing identity or notarization credentials are included in the repository. These steps require the user's Apple developer account; creating this script does not establish that a release has been notarized.
 
-In RayGit Settings → Extensions, configure a trusted HTTPS manifest URL. An update check reads this JSON and displays its release link; it never replaces the installed application automatically:
+In AuvGit Settings → Extensions, configure a trusted HTTPS manifest URL. An update check reads this JSON and displays its release link; it never replaces the installed application automatically:
 
 ```json
 {
   "version": "0.2.0",
-  "downloadURL": "https://your-release-host.example/RayGit-release.zip",
+  "downloadURL": "https://your-release-host.example/AuvGit-release.zip",
   "notes": "Release notes"
 }
 ```

@@ -15,7 +15,7 @@ class BuildAppInstallTests(unittest.TestCase):
             with self.subTest(enabled=enabled, quit=quit_status, verify=verify_status):
                 stub = f'''
 set -euo pipefail
-APP=/tmp/RayGit-build-test.app
+APP=/tmp/AuvGit-build-test.app
 INSTALL_APP={str(enabled).lower()}
 function codesign() {{
   print "CALL:codesign $*"
@@ -33,7 +33,7 @@ function cmp() {{ print "CALL:compare $*"; }}
                 self.assertEqual("CALL:compare" in result.stdout, success)
                 if success:
                     self.assertLess(result.stdout.index("CALL:quit"), result.stdout.index("CALL:copy"))
-                    self.assertIn("Installed /Applications/RayGit.app", result.stdout)
+                    self.assertIn("Installed /Applications/AuvGit.app", result.stdout)
 
 
 if __name__ == "__main__":

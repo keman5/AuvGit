@@ -37,7 +37,7 @@ extension GitRepository {
         }
 
         let previous = try? await workflowRevision("refs/stash")
-        try await stash(message: "RayGit auto-stash before pull")
+        try await stash(message: "AuvGit auto-stash before pull")
         let saved = try await workflowRevision("refs/stash")
         guard saved != previous else { throw GitError("No recoverable auto-stash was created; pull stopped.") }
         do {

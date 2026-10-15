@@ -4,7 +4,7 @@
 
 **Goal:** Present native HTTPS or SSH authentication when a Git network operation lacks credentials, securely retry it, and reuse credentials by effective remote endpoint and username.
 
-**Architecture:** GitCore resolves the effective remote, models a normalized credential identity, and accepts an explicit one-operation credential lease. RayGit owns Keychain/bookmark persistence and the protocol-locked sheet, then retries the exact failed operation. Existing Git helpers and SSH configuration remain the first attempt.
+**Architecture:** GitCore resolves the effective remote, models a normalized credential identity, and accepts an explicit one-operation credential lease. AuvGit owns Keychain/bookmark persistence and the protocol-locked sheet, then retries the exact failed operation. Existing Git helpers and SSH configuration remain the first attempt.
 
 **Tech Stack:** Swift 6, SwiftUI/AppKit, Swift Package Manager, Security.framework, Git credential helper protocol, OpenSSH askpass, XCTest.
 
@@ -22,8 +22,8 @@
 **Files:**
 - Create: `Sources/GitCore/RemoteAuthentication.swift`
 - Create: `Tests/GitCoreTests/RemoteAuthenticationTests.swift`
-- Create: `Sources/RayGit/NetworkAuthenticationPolicy.swift`
-- Create: `Tests/RayGitTests/NetworkAuthenticationPolicyTests.swift`
+- Create: `Sources/AuvGit/NetworkAuthenticationPolicy.swift`
+- Create: `Tests/AuvGitTests/NetworkAuthenticationPolicyTests.swift`
 
 1. Write failing tests for HTTPS, `ssh://`, and SCP-style remotes, default/nondefault ports, explicit usernames, URL rewriting output, and malformed/local remotes.
 2. Run `swift test --build-system native --filter 'RemoteAuthenticationTests|NetworkAuthenticationPolicyTests'` and confirm failures are caused by missing APIs.
@@ -50,11 +50,11 @@
 ### Task 3: Keychain and bookmark persistence
 
 **Files:**
-- Create: `Sources/RayGit/RemoteCredentialStore.swift`
-- Create: `Tests/RayGitTests/RemoteCredentialStoreTests.swift`
+- Create: `Sources/AuvGit/RemoteCredentialStore.swift`
+- Create: `Tests/AuvGitTests/RemoteCredentialStoreTests.swift`
 
 1. Define a small Keychain client protocol and write failing tests with an in-memory client.
-2. Store HTTPS passwords/PATs and SSH passphrases under the RayGit service using the normalized identity as account.
+2. Store HTTPS passwords/PATs and SSH passphrases under the AuvGit service using the normalized identity as account.
 3. Store the last successful username, private-key path, and security-scoped bookmark as non-secret preferences scoped to the endpoint and username.
 4. Persist only after a successful retry; failed and canceled retries must leave prior state unchanged.
 5. Run the focused store tests.
@@ -62,9 +62,9 @@
 ### Task 4: Shared authentication sheet
 
 **Files:**
-- Create: `Sources/RayGit/RemoteAuthenticationSheet.swift`
-- Modify: `Sources/RayGitLocalization/Resources/{en,zh-Hans,zh-Hant,ja}.lproj/Network.strings`
-- Test: `Tests/RayGitTests/NetworkAuthenticationPolicyTests.swift`
+- Create: `Sources/AuvGit/RemoteAuthenticationSheet.swift`
+- Modify: `Sources/AuvGitLocalization/Resources/{en,zh-Hans,zh-Hant,ja}.lproj/Network.strings`
+- Test: `Tests/AuvGitTests/NetworkAuthenticationPolicyTests.swift`
 
 1. Add HTTPS and SSH form-state tests before production code.
 2. Implement a protocol-locked sheet with username, secure HTTPS secret, private-key chooser, optional secure SSH passphrase, save toggle, redacted error, Cancel, and Retry.
@@ -74,8 +74,8 @@
 ### Task 5: Network page retry integration
 
 **Files:**
-- Modify: `Sources/RayGit/NetworkOperationsView.swift`
-- Test: `Tests/RayGitTests/NetworkAuthenticationPolicyTests.swift`
+- Modify: `Sources/AuvGit/NetworkOperationsView.swift`
+- Test: `Tests/AuvGitTests/NetworkAuthenticationPolicyTests.swift`
 
 1. Add failing retry-state tests for fetch, pull, push preview, push, and force push.
 2. On a recognized first-attempt authentication failure, resolve the endpoint and present the shared sheet.
@@ -85,9 +85,9 @@
 ### Task 6: Main toolbar retry integration
 
 **Files:**
-- Modify: `Sources/RayGit/MainWindow.swift`
-- Modify: `Sources/RayGit/RayGitApp.swift` only if shared store state is required
-- Test: `Tests/RayGitTests/NetworkAuthenticationPolicyTests.swift`
+- Modify: `Sources/AuvGit/MainWindow.swift`
+- Modify: `Sources/AuvGit/AuvGitApp.swift` only if shared store state is required
+- Test: `Tests/AuvGitTests/NetworkAuthenticationPolicyTests.swift`
 
 1. Add failing policy tests for toolbar fetch, pull, push, and confirmed force push.
 2. Route toolbar network commands through one authentication-aware runner.

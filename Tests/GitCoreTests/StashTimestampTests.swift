@@ -3,7 +3,7 @@ import XCTest
 
 final class StashTimestampTests: XCTestCase {
     func testStashCreationTimesRemainAttachedWhenRenamed() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("raygit-stash-date-" + UUID().uuidString)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("auvgit-stash-date-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         for args in [["init", "-b", "main"], ["config", "user.name", "Fixture"], ["config", "user.email", "fixture@example.invalid"], ["config", "commit.gpgsign", "false"], ["config", "core.hooksPath", root.appendingPathComponent("no-hooks").path]] {

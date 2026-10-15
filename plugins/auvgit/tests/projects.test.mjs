@@ -1,0 +1,30 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, rm, realpath, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { git } from '../src/git.mjs';
+import { codexProjects, projectCatalog, rememberProject, selectOpeningRepository } from '../src/projects.mjs';
+import { projectFixture } from './helpers/project-fixture.mjs';
+
+test('project catalog paginates, preserves labels, caches offline, restores history and handles removed repositories', async t => {
+ const parent=await realpath(await mkdtemp(path.join(tmpdir(),'auvgit-catalog-')));
+ t.after(()=>rm(parent,{recursive:true,force:true}));
+ process.env.AUVGIT_CONFIG_DIR=path.join(parent,'settings');
+ const a=path.join(parent,'a'), b=path.join(parent,'b'), nonGit=path.join(parent,'non-git');
+ await git(parent,['init',a]);await git(parent,['init',b]);await mkdir(nonGit);
+ const executable=await projectFixture(parent,[{name:'自定义名称',roots:[{path:a}]},{name:'Beta',roots:[{path:b}]},{name:'Notes',roots:[{path:nonGit}]}]);
+ const fetchProjects=()=>codexProjects(executable);
+ const catalog=await projectCatalog([],{fetchProjects});
+ assert.equal(catalog.projects.length,3);assert.equal(catalog.projects[0].name,'自定义名称');assert.equal(catalog.projects[2].available,false);
+ await rememberProject(b,'Beta');
+ const offline=await projectCatalog([],{fetchProjects:async()=>{throw Error('offline');}});
+ assert.equal(offline.projects.length,3);assert.equal(offline.lastRepo,b);assert.ok(offline.catalogWarning);
+ assert.equal((await selectOpeningRepository({needsRepository:true},offline)).repo,b);
+ assert.equal((await selectOpeningRepository({repo:a,source:'roots'},offline)).repo,a);
+ await rm(b,{recursive:true});
+ assert.equal((await selectOpeningRepository({needsRepository:true},offline)).needsRepository,true);
+ const removed=await projectCatalog([],{fetchProjects});assert.equal(removed.projects.find(p=>p.repo===b).available,false);
+ await writeFile(path.join(parent,'settings/workspace.json'),'invalid');
+ const malformed=await projectCatalog([],{fetchProjects});assert.equal(malformed.projects.length,3);assert.ok(malformed.catalogWarning);
+});

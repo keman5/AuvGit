@@ -1,4 +1,4 @@
-# RayGit
+# AuvGit
 
 参考 SmartGit 工作布局的原生 macOS Git 客户端。当前首版重点为工作区操作、代码对比与提交历史。
 
@@ -11,12 +11,12 @@ swift test
 ./scripts/build-app.sh
 ```
 
-构建成功后会正常退出正在运行的本地 RayGit，并替换 `/Applications/RayGit.app`；退出失败时停止替换。使用 `./scripts/build-app.sh --no-install` 可仅生成构建产物。
+构建成功后会正常退出正在运行的本地 AuvGit，并替换 `/Applications/AuvGit.app`；退出失败时停止替换。使用 `./scripts/build-app.sh --no-install` 可仅生成构建产物。
 
-双击 `/Applications/RayGit.app`，点击“打开仓库”。也可从终端运行：
+双击 `/Applications/AuvGit.app`，点击“打开仓库”。也可从终端运行：
 
 ```sh
-swift run RayGit --repo /absolute/path/to/repository
+swift run AuvGit --repo /absolute/path/to/repository
 ```
 
 构建产物使用本机 ad-hoc 签名，尚未进行 Developer ID 签名或公证。
@@ -37,7 +37,7 @@ swift run RayGit --repo /absolute/path/to/repository
 
 历史、差异、操作提示、确认框及应用自有错误文案均已翻译；代码、提交内容、路径和 Git 原始错误保持原样。macOS 原生菜单和系统对话框的部分文案由系统语言控制。
 
-新增语言时，在 `Sources/RayGitLocalization/Resources/<locale>.lproj/` 补齐四个 `.strings` 表，并更新 `AppLanguage` 和打包声明。运行 `python3 scripts/check-localizations.py` 及 `swift test` 检查键、占位符和语言回退。翻译资源随 `.app` 一同打包。
+新增语言时，在 `Sources/AuvGitLocalization/Resources/<locale>.lproj/` 补齐四个 `.strings` 表，并更新 `AppLanguage` 和打包声明。运行 `python3 scripts/check-localizations.py` 及 `swift test` 检查键、占位符和语言回退。翻译资源随 `.app` 一同打包。
 
 ## 验收仓库
 

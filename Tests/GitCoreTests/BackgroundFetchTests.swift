@@ -23,7 +23,7 @@ final class BackgroundFetchTests: XCTestCase {
         exec /usr/bin/git "$@"
         """.write(to: wrapper, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
-        let key = "raygit.git.executablePath", previous = UserDefaults.standard.object(forKey: key)
+        let key = "auvgit.git.executablePath", previous = UserDefaults.standard.object(forKey: key)
         UserDefaults.standard.set(wrapper.path, forKey: key)
         defer { if let previous { UserDefaults.standard.set(previous, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) } }
         let repo = GitRepository(url: clone)
@@ -73,7 +73,7 @@ final class BackgroundFetchTests: XCTestCase {
         exec /usr/bin/git "$@"
         """.write(to: wrapper, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
-        let key = "raygit.git.executablePath", previous = UserDefaults.standard.object(forKey: "raygit.git.executablePath")
+        let key = "auvgit.git.executablePath", previous = UserDefaults.standard.object(forKey: "auvgit.git.executablePath")
         UserDefaults.standard.set(wrapper.path, forKey: key)
         defer { if let previous { UserDefaults.standard.set(previous, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) } }
         let repo = GitRepository(url: root)
@@ -81,7 +81,7 @@ final class BackgroundFetchTests: XCTestCase {
         let environment = try String(contentsOf: capture, encoding: .utf8)
         XCTAssertTrue(environment.hasPrefix("ssh -oBatchMode=yes -oBatchMode=no -F /tmp/custom-config -p 2222\n"))
         XCTAssertTrue(environment.contains("/usr/bin/false\n/usr/bin/false\nnever\nNever"))
-        let sshKey = "raygit.network.sshCommand", previousSSH = UserDefaults.standard.object(forKey: "raygit.network.sshCommand")
+        let sshKey = "auvgit.network.sshCommand", previousSSH = UserDefaults.standard.object(forKey: "auvgit.network.sshCommand")
         defer { if let previousSSH { UserDefaults.standard.set(previousSSH, forKey: sshKey) } else { UserDefaults.standard.removeObject(forKey: sshKey) } }
         UserDefaults.standard.set("ssh -F /tmp/runtime-config", forKey: sshKey)
         try await repo.backgroundFetch()

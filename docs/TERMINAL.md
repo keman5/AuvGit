@@ -12,7 +12,7 @@ Closing the window releases its sessions. Application termination synchronously 
 
 The shortcut monitor belongs only to the project window, ignores attached sheets and does not intercept settings or comparison windows. It recognizes Control + the physical backtick key regardless of keyboard layout. Command + backtick retains macOS window cycling; combinations with additional Shift, Option or Command modifiers retain their normal behavior. Language changes rebuild localized window content below `MainWindow` while retaining its session owner and running shells.
 
-The panel has a 210-point minimum height and a preferred height of 280 points, with a draggable divider. The terminal is labelled as an accessibility text area so VoiceOver can locate it. SwiftTerm 1.20's macOS accessibility service is a stub and its `screenReaderMode` option has no active implementation; reading terminal text through VoiceOver remains an upstream limitation. RayGit does not add rich-text accessibility probing.
+The panel has a 210-point minimum height and a preferred height of 280 points, with a draggable divider. The terminal is labelled as an accessibility text area so VoiceOver can locate it. SwiftTerm 1.20's macOS accessibility service is a stub and its `screenReaderMode` option has no active implementation; reading terminal text through VoiceOver remains an upstream limitation. AuvGit does not add rich-text accessibility probing.
 
 When the terminal is open, workspace panes use smaller minimum heights and the commit form scrolls instead of forcing its full intrinsic height onto the nested split view. This keeps the project selectors inside their own visible pane. Hiding the terminal restores the normal workspace height preferences.
 

@@ -1,6 +1,6 @@
 # Public 8pt main-window frame
 
-RayGit uses a public borderless/resizable NSWindow by default. The transparent
+AuvGit uses a public borderless/resizable NSWindow by default. The transparent
 window and owned full-window layer create an eight-point outer alpha boundary.
 No NSThemeFrame, KVC, private selector or private toolbar view is used.
 

@@ -46,18 +46,28 @@ extension GitRepository {
         let entries = Dictionary(try await status().map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
         var tracked: [String] = []
         var untracked: [String] = []
+        var symlinks: [URL] = []
         for path in Set(paths).sorted() {
             guard let file = entries[path], file.isUnstaged || file.isConflict else { throw GitError("Cannot discard this worktree path: " + path) }
             if file.isUntracked {
-                let file = try managedURL(path)
-                let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
-                guard attributes[.type] as? FileAttributeType == .typeRegular else { throw GitError("Only regular untracked files can be discarded.") }
-                untracked.append(path)
+                let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+                guard !path.isEmpty, !path.hasPrefix("/"), !parts.contains(""), !parts.contains("."),
+                      !parts.contains(".."), !parts.contains(where: { $0.lowercased() == ".git" }),
+                      !path.contains("\0"), let name = parts.last else { throw GitError("Invalid repository file path.") }
+                let parent = parts.dropLast().joined(separator: "/")
+                let leaf = (parent.isEmpty ? url : try managedURL(parent)).appendingPathComponent(String(name))
+                let attributes = try FileManager.default.attributesOfItem(atPath: leaf.path)
+                switch attributes[.type] as? FileAttributeType {
+                case .typeRegular: untracked.append(path)
+                case .typeSymbolicLink: symlinks.append(leaf)
+                default: throw GitError("Only regular untracked files and symbolic links can be discarded.")
+                }
             } else { tracked.append(path) }
         }
         // Restore tracked worktrees from the index, leaving all staged contents untouched.
         try await discardWorktree(paths: tracked, includeConflicts: true)
         for path in untracked { try permanentlyDeleteWorkspaceFile(path: path) }
+        for link in symlinks { try FileManager.default.removeItem(at: link) }
     }
     public func trashWorkspaceFile(path: String) throws -> TrashedRepositoryFile {
         let file = try managedURL(path)

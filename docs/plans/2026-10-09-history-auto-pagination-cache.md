@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:test-driven-development while implementing this plan.
 
-**Goal:** Automatically load more commits near the bottom of the history list and retain each repository's loaded history in memory while RayGit remains open.
+**Goal:** Automatically load more commits near the bottom of the history list and retain each repository's loaded history in memory while AuvGit remains open.
 
 **Architecture:** `HistoryPane` owns a small, deterministic prefetch gate keyed by the current commit count, so reaching the final rows requests one next page without displaying a button or issuing duplicate requests. `RepositoryStore` keeps process-local snapshots keyed by normalized repository root path; switching away captures the current history and switching back restores it immediately, then refreshes the same loaded depth from Git.
 
@@ -13,8 +13,8 @@
 ### Task 1: History prefetch policy
 
 **Files:**
-- Modify: `Sources/RayGit/HistoryPane.swift`
-- Test: `Tests/RayGitTests/HistoryPaginationTests.swift`
+- Modify: `Sources/AuvGit/HistoryPane.swift`
+- Test: `Tests/AuvGitTests/HistoryPaginationTests.swift`
 
 1. Add failing tests for the near-bottom threshold, loading/terminal-state suppression, and one request per commit count.
 2. Run `swift test --build-system native --filter HistoryPaginationTests` and confirm the new policy symbols are missing.
@@ -25,8 +25,8 @@
 ### Task 2: Process-local per-repository history cache
 
 **Files:**
-- Modify: `Sources/RayGit/RayGitApp.swift`
-- Test: `Tests/RayGitTests/HistoryPaginationTests.swift`
+- Modify: `Sources/AuvGit/AuvGitApp.swift`
+- Test: `Tests/AuvGitTests/HistoryPaginationTests.swift`
 
 1. Add a failing integration test that loads more than one page in repository A, switches to B, and switches back to A.
 2. Assert repository A restores its previous commit count immediately and a reset refresh requests at least that cached depth.

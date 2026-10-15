@@ -11,7 +11,7 @@ final class PullRecoveryTests: XCTestCase {
         try await repo.commit(message: message)
     }
     private func fixture() async throws -> Fixture {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("raygit-pull-" + UUID().uuidString)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("auvgit-pull-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let remote = root.appendingPathComponent("remote.git")
         _ = try await GitProcess.run(at: root, arguments: ["init", "--bare", "-b", "main", remote.path])

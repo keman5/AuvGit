@@ -3,7 +3,7 @@ import XCTest
 
 final class RuntimePreferencesTests: XCTestCase {
     func testIsolatedPreferencesAndReset() throws {
-        let suite = "raygit.tests.preferences." + UUID().uuidString
+        let suite = "auvgit.tests.preferences." + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = GitRuntimePreferences(defaults: defaults)
@@ -19,7 +19,7 @@ final class RuntimePreferencesTests: XCTestCase {
         XCTAssertEqual(settings.commitCleanup, "default")
     }
     func testProxyValidationAndEnvironmentPrecedence() throws {
-        let suite = "raygit.tests.network." + UUID().uuidString
+        let suite = "auvgit.tests.network." + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = GitRuntimePreferences(defaults: defaults)

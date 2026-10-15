@@ -94,7 +94,7 @@ public actor GitRepository {
                 selected.formUnion(try await run(traversal).text.split(separator: "\n").map(String.init))
             }
             if selected.isEmpty { return [] }
-            let input = FileManager.default.temporaryDirectory.appendingPathComponent("raygit-history-" + UUID().uuidString)
+            let input = FileManager.default.temporaryDirectory.appendingPathComponent("auvgit-history-" + UUID().uuidString)
             try Data((selected.sorted().joined(separator: "\n") + "\n").utf8).write(to: input, options: .atomic)
             revisionInput = input
             args += ["--no-walk=sorted", "--stdin"]

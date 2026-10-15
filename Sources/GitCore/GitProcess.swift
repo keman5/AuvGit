@@ -209,7 +209,7 @@ enum GitProcess {
         let output = GitOutput(data: data, error: String(decoding: errorData, as: UTF8.self), code: code)
         let prefixFinished = out.completedPrefix && [Int32(0), 128 + SIGTERM, 128 + SIGPIPE, 128 + SIGKILL].contains(code)
         if !allowedCodes.contains(code), output.error.contains("git-lfs"), output.error.contains("not found") || output.error.contains("No such file") {
-            throw GitError("Git LFS is required by this repository but git-lfs was not found. Install Git LFS or add its executable directory to PATH, then reopen RayGit.")
+            throw GitError("Git LFS is required by this repository but git-lfs was not found. Install Git LFS or add its executable directory to PATH, then reopen AuvGit.")
         }
         if !allowedCodes.contains(code) && !prefixFinished {
             // Porcelain commands (including push) also report rejection details on stdout.

@@ -1,12 +1,12 @@
 # SmartGit 快捷键对齐
 
-默认键取自本机 SmartGit 的「Keyboard shortcuts」设置；保留 RayGit 已有的用户自定义配置。只接已有操作，没有添加 SmartGit 独有功能。
+默认键取自本机 SmartGit 的「Keyboard shortcuts」设置；保留 AuvGit 已有的用户自定义配置。只接已有操作，没有添加 SmartGit 独有功能。
 
 同一个键按当前视图路由：主窗口的储藏与比较编辑器的保存都可用 ⌘S；历史、文件、比较分别使用 ⌘F；分支、储藏、文件重命名共用 F2。原生文本复制、输入及撤销行为保留，sheet 打开时暂停父窗口快捷键。
 
 ## 来源
 
-- 设置界面的逐行观察记录：`/tmp/raygit-smartgit-shortcuts.txt`。
+- 设置界面的逐行观察记录：`/tmp/auvgit-smartgit-shortcuts.txt`。
 - 比较快捷键补充证据：本机 `/Applications/SmartGit.app/Contents/Resources/Java/smartgit.jar` 的注册调用，类 `amC`、`apG`、`ayh`、`bVO`。`Ii.b` 来自 macOS `SWT.MOD1`；`LJ.a(IIII)` 第三、第四参数为 macOS 默认键。
 - 数字常量用随应用附带的 `org.eclipse.swt.cocoa.macosx.aarch64.jar` 校验：COMMAND=4194304、SHIFT=131072、CTRL=262144、F6=16777231、左右方向键=16777219/16777220。未猜测功能键。
 - 全部实际配置来自 `KeyboardShortcuts.swift`；菜单提示与事件匹配共用同一个注册表。
@@ -18,7 +18,7 @@
 | Blame | ⌥⌘L | files | SmartGit 设置 |
 | Show Log Window | ⇧⌘N | workspace | SmartGit 设置 |
 | Show Changes | F4 | files, history | SmartGit 设置 |
-| Open Repository | ⌘O | application | 保留 RayGit 已有默认键 |
+| Open Repository | ⌘O | application | 保留 AuvGit 已有默认键 |
 | Refresh Repository | F5 | workspace, history | SmartGit 设置 |
 | Stage | ⌘T | files | SmartGit 设置 |
 | Unstage | ⇧⌘T | files | SmartGit 设置 |
@@ -26,10 +26,10 @@
 | View Log | ⌘L | workspace, history | SmartGit 设置 |
 | Hard Reset | ⌘R | history | SmartGit 设置 |
 | Advanced Reset | ⇧⌘R | history | SmartGit 设置 |
-| Copy Commit Hash | ⌘C | history | 保留 RayGit 已有默认键 |
+| Copy Commit Hash | ⌘C | history | 保留 AuvGit 已有默认键 |
 | Create Branch | F7 | workspace, history | SmartGit 设置 |
 | Create Tag | ⇧F7 | workspace, history | SmartGit 设置 |
-| Commit Details | ↩ | history | 保留 RayGit 已有默认键 |
+| Commit Details | ↩ | history | 保留 AuvGit 已有默认键 |
 | Filter Commits | ⌘F | history | SmartGit 设置 |
 | Refresh Repository (Alternate) | 未分配 | workspace, history | 保留可配置备用入口，默认不分配 |
 | Clone Repository | ⇧⌘O | workspace | SmartGit 设置 |

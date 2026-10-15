@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Register usable linked Git worktrees as RayGit projects and route branch selection to the project that already owns the branch.
+**Goal:** Register usable linked Git worktrees as AuvGit projects and route branch selection to the project that already owns the branch.
 
 **Architecture:** GitCore owns parsing and discovery of Git's worktree porcelain format. RepositoryStore owns application registration and navigation, querying GitCore live before branch switching while retaining the existing checkout and auto-stash behavior for unowned branches.
 
@@ -40,8 +40,8 @@ Expected: all GitWorktreeTests pass.
 ### Task 2: Synchronize linked worktrees when opening a repository
 
 **Files:**
-- Modify: `Sources/RayGit/RayGitApp.swift`
-- Test: `Tests/RayGitTests/WorktreeRepositoryStoreTests.swift`
+- Modify: `Sources/AuvGit/AuvGitApp.swift`
+- Test: `Tests/AuvGitTests/WorktreeRepositoryStoreTests.swift`
 
 **Step 1: Write the failing test**
 
@@ -66,8 +66,8 @@ Expected: all WorktreeRepositoryStoreTests pass.
 ### Task 3: Route occupied branches to their worktree project
 
 **Files:**
-- Modify: `Sources/RayGit/BranchSwitch.swift`
-- Test: `Tests/RayGitTests/BranchSwitchTests.swift`
+- Modify: `Sources/AuvGit/BranchSwitch.swift`
+- Test: `Tests/AuvGitTests/BranchSwitchTests.swift`
 
 **Step 1: Write the failing test**
 

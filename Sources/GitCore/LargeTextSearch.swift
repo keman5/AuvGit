@@ -114,7 +114,7 @@ public enum LargeTextSearch {
 
 public enum LargeTextComparison {
     public static func patch(source: String, target: String, ignoreWhitespace: Bool = false) async throws -> String {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("raygit-large-diff-" + UUID().uuidString)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("auvgit-large-diff-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         defer { try? FileManager.default.removeItem(at: directory) }
         let writer = Task.detached {

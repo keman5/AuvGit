@@ -39,7 +39,7 @@ private final class GitLogArchive: @unchecked Sendable {
     private static var files: [(URL, Int)] = {
         let manager = FileManager.default
         let urls = (try? manager.contentsOfDirectory(at: manager.temporaryDirectory, includingPropertiesForKeys: [.fileSizeKey, .creationDateKey])) ?? []
-        return urls.filter { $0.lastPathComponent.hasPrefix("raygit-log-") }.sorted {
+        return urls.filter { $0.lastPathComponent.hasPrefix("auvgit-log-") }.sorted {
             ((try? $0.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast) < ((try? $1.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast)
         }.compactMap { url in
             guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .creationDateKey]) else { return nil }
@@ -51,7 +51,7 @@ private final class GitLogArchive: @unchecked Sendable {
     private let url: URL
     init?(output: String, error: String?) {
         guard let data = try? JSONEncoder().encode(Contents(output: output, error: error)), data.count <= Self.budget else { return nil }
-        url = FileManager.default.temporaryDirectory.appendingPathComponent("raygit-log-" + UUID().uuidString)
+        url = FileManager.default.temporaryDirectory.appendingPathComponent("auvgit-log-" + UUID().uuidString)
         Self.lock.lock(); defer { Self.lock.unlock() }
         Self.files.removeAll { !FileManager.default.fileExists(atPath: $0.0.path) }
         while Self.files.reduce(data.count, { $0 + $1.1 }) > Self.budget || Self.files.count >= 200 {
@@ -81,7 +81,7 @@ public enum GitCommandLog {
     @TaskLocal public static var userInitiated = false
     @TaskLocal public static var operationID: UUID?
     @TaskLocal public static var progress: (@Sendable (NetworkProgress) -> Void)?
-    public static let notification = Notification.Name("RayGitCommandCompleted")
+    public static let notification = Notification.Name("AuvGitCommandCompleted")
     public static func userOperation(directory: URL, name: String, started: Date, error: String? = nil, cancelled: Bool = false, operationID: UUID? = nil) -> GitCommandRecord {
         GitCommandRecord(date: started, directory: directory.path, command: "",
                          output: cancelled ? "Cancelled" : "", error: error.map(redact),

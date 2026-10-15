@@ -19,7 +19,7 @@ final class TerminalTests: XCTestCase {
 
     @MainActor
     func testPTYWorkingDirectoryAndInteractiveInput() async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("raygit terminal \(UUID().uuidString)")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("auvgit terminal \(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let delegate = Probe()

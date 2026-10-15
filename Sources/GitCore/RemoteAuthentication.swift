@@ -129,7 +129,7 @@ final class NetworkCredentialLease {
             if let passphrase, !passphrase.isEmpty {
                 guard Self.valid(passphrase) else { throw GitError("SSH key passphrase must be a single-line value.") }
                 let manager = FileManager.default
-                let directory = manager.temporaryDirectory.appendingPathComponent("raygit-ssh-" + UUID().uuidString, isDirectory: true)
+                let directory = manager.temporaryDirectory.appendingPathComponent("auvgit-ssh-" + UUID().uuidString, isDirectory: true)
                 let secret = directory.appendingPathComponent("passphrase")
                 let helper = directory.appendingPathComponent("askpass.sh")
                 do {
@@ -143,7 +143,7 @@ final class NetworkCredentialLease {
                     throw error
                 }
                 directoryURL = directory; secretURL = secret; askpassURL = helper
-                environment = ["GIT_SSH_COMMAND": command, "SSH_ASKPASS": helper.path, "SSH_ASKPASS_REQUIRE": "force", "DISPLAY": "raygit"]
+                environment = ["GIT_SSH_COMMAND": command, "SSH_ASKPASS": helper.path, "SSH_ASKPASS_REQUIRE": "force", "DISPLAY": "auvgit"]
                 privateValues = [passphrase]
             } else {
                 directoryURL = nil; secretURL = nil; askpassURL = nil
