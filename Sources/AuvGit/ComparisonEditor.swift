@@ -8,9 +8,8 @@ enum ComparisonEditorMetrics {
     static let lineFragmentPadding: CGFloat = 2
     static var minimumTextViewportWidth: CGFloat { 2 * (textInset.width + lineFragmentPadding) }
     static let headerHeight: CGFloat = 28
-    static let actionRailWidth: CGFloat = 56
     static let actionButtonWidth: CGFloat = 20
-    static let actionButtonHeight: CGFloat = 24
+    static let actionRailWidth = actionButtonWidth * 2 + 4
     static func signWidth(codeFont: NSFont) -> CGFloat {
         max(12, ceil(codeFont.pointSize * 0.65) + 4)
     }
@@ -38,6 +37,14 @@ enum ComparisonEditorMetrics {
 }
 
 enum DiffVisualStyle {
+    static let actionBackgroundColor = NSColor(name: nil) { appearance in
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return NSColor(white: dark ? 0.16 : 0.93, alpha: 1)
+    }
+    static let actionColor = NSColor(name: nil) { appearance in
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return NSColor(white: dark ? 0.72 : 0.40, alpha: 1)
+    }
     static func lineNumberFont(codeSize: CGFloat) -> NSFont {
         .monospacedDigitSystemFont(ofSize: max(8, codeSize - 2), weight: .regular)
     }
@@ -48,7 +55,7 @@ enum DiffVisualStyle {
         }
     }
     static func lineBackground(_ color: NSColor, dark: Bool) -> NSColor {
-        color.withAlphaComponent(dark ? 0.28 : 0.22)
+        color.withAlphaComponent(dark ? 0.18 : 0.10)
     }
     static func characterBackground(_ color: NSColor, dark: Bool) -> NSColor {
         color.withAlphaComponent(dark ? 0.48 : 0.43)
@@ -475,6 +482,7 @@ struct ComparisonEditor: NSViewRepresentable {
             for (position, pane) in panes.enumerated() {
                 for (rail, neighbor, pointsRight) in [(pane.leftRail, position - 1, true), (pane.rightRail, position + 1, false)] {
                     rail.pointsRight = pointsRight
+                    rail.oppositeRail = panes.indices.contains(neighbor) ? (pointsRight ? panes[neighbor].rightRail : panes[neighbor].leftRail) : nil
                     rail.color = model.resolver != nil ? .systemOrange : EditorPreferences.color(model.modificationColor, fallback: .systemOrange)
                     var entries: [ComparisonActionRail.Entry] = []
                     if pane.text.isEditable, panes.indices.contains(neighbor), !panes[neighbor].scroll.isHidden {
@@ -496,10 +504,12 @@ struct ComparisonEditor: NSViewRepresentable {
                         } else if model.resolver == nil {
                             let diff = TextLineDiff(source: source.text.string, target: pane.text.string)
                             entries = diff.blocks().map { block in
+                                let leftLines = pointsRight ? block.sourceLines : block.targetLines
+                                let rightLines = pointsRight ? block.targetLines : block.sourceLines
                                 return ComparisonActionRail.Entry(text: pane.text, range: characterRange(block.targetLines, in: pane),
                                     sourceText: source.text, sourceRange: characterRange(block.sourceLines, in: source),
-                                    tint: block.sourceLines.isEmpty ? EditorPreferences.color(model.deletionColor, fallback: .systemRed)
-                                        : block.targetLines.isEmpty ? EditorPreferences.color(model.additionColor, fallback: .systemGreen) : nil,
+                                    tint: leftLines.isEmpty ? EditorPreferences.color(model.additionColor, fallback: .systemGreen)
+                                        : rightLines.isEmpty ? EditorPreferences.color(model.deletionColor, fallback: .systemRed) : nil,
                                     title: block.sourceLines.isEmpty ? L10n.text("Delete change", table: "AdvancedDiff") : L10n.text("acceptBlock", table: "AdvancedDiff", arguments: [source.title.stringValue]),
                                     deletesContent: block.sourceLines.isEmpty,
                                     action: { [weak self, weak pane, weak source] in
@@ -521,7 +531,8 @@ struct ComparisonEditor: NSViewRepresentable {
                     // must never change the text container's horizontal geometry.
                     let hasSource = panes.indices.contains(neighbor) && !panes[neighbor].scroll.isHidden
                     let acceptsSource = model.resolver == nil || (pane.id == "worktree" && hasSource && ["ours", "theirs"].contains(panes[neighbor].id))
-                    let width = pane.preservesUndo && hasSource && acceptsSource ? ComparisonEditorMetrics.actionRailWidth : CGFloat(0)
+                    let shared = model.resolver == nil && hasSource && panes[neighbor].preservesUndo
+                    let width = pane.preservesUndo && hasSource && acceptsSource ? ComparisonEditorMetrics.actionRailWidth / (shared ? 2 : 1) : CGFloat(0)
                     let constraint = pointsRight ? pane.leftRailWidth! : pane.rightRailWidth!
                     if constraint.constant != width { constraint.constant = width; pane.needsLayout = true }
                 }
@@ -671,8 +682,6 @@ struct ComparisonEditor: NSViewRepresentable {
                 pane.fitDocument()
                 pane.gutter.needsDisplay = true
                 pane.text.needsDisplay = true
-                pane.leftRail.refresh()
-                pane.rightRail.refresh()
             }
             refreshOverviews()
             // TextKit may shrink the document while measuring its unpadded layout. Restore
@@ -683,6 +692,7 @@ struct ComparisonEditor: NSViewRepresentable {
                 clip.scroll(to: NSPoint(x: origins[index].x, y: min(max(0, y), max(0, pane.text.bounds.height - clip.bounds.height))))
                 pane.scroll.reflectScrolledClipView(clip)
             }
+            panes.forEach { $0.leftRail.refresh(); $0.rightRail.refresh() }
         }
         /// Runs only after TextKit and every pane have their final shared geometry.
         /// Inspect the first actual range directly; next-change navigation intentionally
@@ -776,19 +786,22 @@ struct ComparisonEditor: NSViewRepresentable {
             lineDiffs = [:]
             var lineChanges: [String: Set<Int>] = [:]
             var lineColors: [String: [Int: NSColor]] = [:]
+            func recordColors(_ diff: TextLineDiff, source: Pane, target: Pane) {
+                for block in diff.blocks() {
+                    if model.resolver == nil, block.sourceLines.isEmpty { source.text.missingLineAnchors[block.sourceLines.lowerBound] = EditorPreferences.color(model.additionColor, fallback: .systemGreen) }
+                    if model.resolver == nil, block.targetLines.isEmpty { target.text.missingLineAnchors[block.targetLines.lowerBound] = EditorPreferences.color(model.deletionColor, fallback: .systemRed) }
+                    let sourceColor = EditorPreferences.color(block.targetLines.isEmpty ? model.deletionColor : model.modificationColor, fallback: block.targetLines.isEmpty ? .systemRed : .systemOrange)
+                    let targetColor = EditorPreferences.color(block.sourceLines.isEmpty ? model.additionColor : model.modificationColor, fallback: block.sourceLines.isEmpty ? .systemGreen : .systemOrange)
+                    for line in block.sourceLines { lineColors[source.id, default: [:]][line] = sourceColor }
+                    for line in block.targetLines { lineColors[target.id, default: [:]][line] = targetColor }
+                }
+            }
             for pane in panes.dropFirst() {
                 let diff = difference(baseline, pane)
                 lineDiffs[pane.id] = diff
                 lineChanges[baseline.id, default: []].formUnion(diff.sourceChangedLines)
                 lineChanges[pane.id] = diff.targetChangedLines
-                for block in diff.blocks() {
-                    if model.resolver == nil, block.sourceLines.isEmpty { baseline.text.missingLineAnchors[block.sourceLines.lowerBound] = EditorPreferences.color(model.deletionColor, fallback: .systemRed) }
-                    if model.resolver == nil, block.targetLines.isEmpty { pane.text.missingLineAnchors[block.targetLines.lowerBound] = EditorPreferences.color(model.additionColor, fallback: .systemGreen) }
-                    let sourceColor = EditorPreferences.color(block.targetLines.isEmpty ? model.deletionColor : model.modificationColor, fallback: block.targetLines.isEmpty ? .systemRed : .systemOrange)
-                    let targetColor = EditorPreferences.color(block.sourceLines.isEmpty ? model.additionColor : model.modificationColor, fallback: block.sourceLines.isEmpty ? .systemGreen : .systemOrange)
-                    for line in block.sourceLines { lineColors[baseline.id, default: [:]][line] = sourceColor }
-                    for line in block.targetLines { lineColors[pane.id, default: [:]][line] = targetColor }
-                }
+                recordColors(diff, source: baseline, target: pane)
             }
             var signs: [String: [Int: Bool]] = [:]
             for pane in panes {
@@ -798,6 +811,7 @@ struct ComparisonEditor: NSViewRepresentable {
             }
             for (source, target) in zip(panes, panes.dropFirst()) {
                 let diff = difference(source, target)
+                recordColors(diff, source: source, target: target)
                 for line in diff.sourceChangedLines { signs[source.id, default: [:]][line] = false }
                 for line in diff.targetChangedLines { signs[target.id, default: [:]][line] = true }
             }
@@ -849,6 +863,7 @@ struct ComparisonEditor: NSViewRepresentable {
                 pane.gutter.needsDisplay = true
                 var offset = 0
                 var changes: [NSRange] = []
+                var backgrounds: [Int: NSColor] = [:]
                 let lines = pane.text.string.components(separatedBy: "\n")
                 for (index, line) in lines.enumerated() {
                     let length = (line as NSString).length
@@ -859,15 +874,16 @@ struct ComparisonEditor: NSViewRepresentable {
                         } else { changes.append(NSRange(location: offset, length: displayedLength)) }
                         if displayedLength > 0 && !(model.resolver != nil && pane.id == "worktree" && conflictLines.contains(index)) {
                             var color = conflictLines.contains(index) ? conflictColor : (lineColors[pane.id]?[index] ?? EditorPreferences.color(model.modificationColor, fallback: .systemOrange))
-                            if (model.resolver == nil || pane.id != "worktree"), let addition = pane.gutter.lineSigns[index] {
+                            if lineColors[pane.id]?[index] == nil, (model.resolver == nil || pane.id != "worktree"), let addition = pane.gutter.lineSigns[index] {
                                 color = EditorPreferences.color(addition ? model.additionColor : model.deletionColor, fallback: addition ? .systemGreen : .systemRed)
                             }
                             pane.gutter.lineBackgrounds[index] = DiffVisualStyle.lineBackground(color, dark: dark)
-                            layout.addTemporaryAttribute(.backgroundColor, value: DiffVisualStyle.lineBackground(color, dark: dark), forCharacterRange: NSRange(location: offset, length: displayedLength))
+                            backgrounds[offset] = DiffVisualStyle.lineBackground(color, dark: dark)
                         }
                     }
                     offset += length + 1
                 }
+                pane.text.lineBackgrounds = backgrounds
                 if let diff = lineDiffs[pane.id] {
                     for removedLine in diff.sourceChangedLines {
                         let targetLine = diff.sourceToTarget[removedLine]
@@ -1142,6 +1158,7 @@ final class ComparisonTextView: UndoableComparisonTextView {
     var conflictBlocks: [ConflictDraft.Block] = []
     var selectedConflict = 0
     var missingLineAnchors: [Int: NSColor] = [:]
+    var lineBackgrounds: [Int: NSColor] = [:] { didSet { needsDisplay = true } }
     func missingChangeY(at line: Int) -> CGFloat {
         guard line > 0, let layout = layoutManager, let container = textContainer else { return ComparisonEditorMetrics.textInset.height }
         let source = string as NSString
@@ -1156,6 +1173,16 @@ final class ComparisonTextView: UndoableComparisonTextView {
     }
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
+        if let layoutManager, let textContainer, !lineBackgrounds.isEmpty {
+            let content = string as NSString
+            let glyphs = layoutManager.glyphRange(forBoundingRect: rect.offsetBy(dx: -textContainerInset.width, dy: -textContainerInset.height), in: textContainer)
+            layoutManager.enumerateLineFragments(forGlyphRange: glyphs) { fragment, used, _, range, _ in
+                let start = content.lineRange(for: NSRange(location: layoutManager.characterIndexForGlyph(at: range.location), length: 0)).location
+                guard let color = self.lineBackgrounds[start] else { return }
+                color.setFill()
+                NSRect(x: 0, y: fragment.minY + self.textContainerInset.height, width: self.bounds.width, height: used.height).intersection(rect).fill()
+            }
+        }
         for (line, color) in missingLineAnchors {
             color.setFill()
             NSRect(x: 0, y: missingChangeY(at: line), width: bounds.width, height: 1).intersection(rect).fill()

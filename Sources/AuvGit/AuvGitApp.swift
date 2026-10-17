@@ -268,7 +268,7 @@ final class RepositoryStore: ObservableObject {
     var footerStatus: String {
         if let liveProgress, progressRepository == repositoryURL {
             let detail = Self.progressDetail(liveProgress.message)
-            return status + " · " + detail
+            return detail.isEmpty ? status : detail
         }
         if !hasLatestOperation, error == nil, statusKey == "Refreshed · %@ changes · %@ staged" {
             return L10n.text("Refreshed", table: "OperationLog")

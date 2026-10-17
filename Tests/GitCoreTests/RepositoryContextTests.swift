@@ -32,8 +32,14 @@ final class RepositoryContextTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let repository = GitRepository(url: directory), file = directory.appendingPathComponent(".gitignore")
         let missing = try await repository.gitignoreSnapshot(); XCTAssertNil(missing)
+        try await repository.saveGitignore(text: "", expected: missing)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
         try await repository.saveGitignore(text: "first\n", expected: missing)
         let snapshot = try await repository.gitignoreSnapshot()
+        let originalDate = Date(timeIntervalSince1970: 1_000)
+        try FileManager.default.setAttributes([.modificationDate: originalDate], ofItemAtPath: file.path)
+        try await repository.saveGitignore(text: "first\n", expected: snapshot)
+        XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: file.path)[.modificationDate] as? Date, originalDate)
         try Data("external\n".utf8).write(to: file)
         do { try await repository.saveGitignore(text: "overwrite", expected: snapshot); XCTFail("Must protect newer content") } catch { }
         try FileManager.default.removeItem(at: file)
@@ -43,5 +49,20 @@ final class RepositoryContextTests: XCTestCase {
         do { _ = try await repository.gitignoreSnapshot(); XCTFail("Must reject symlink read") } catch { }
         do { try await repository.saveGitignore(text: "overwrite", expected: nil); XCTFail("Must reject symlink save") } catch { }
         XCTAssertEqual(try Data(contentsOf: destination), Data("untouched".utf8))
+    }
+    func testRemovingAnExplicitEmptyPushURLIsStillAChange() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        _ = try await GitProcess.run(at: directory, arguments: ["init"])
+        _ = try await GitProcess.run(at: directory, arguments: ["remote", "add", "origin", "https://example.test/repo"])
+        _ = try await GitProcess.run(at: directory, arguments: ["config", "remote.origin.pushurl", ""])
+        let repository = GitRepository(url: directory)
+        let initial = try await repository.remoteConfigurations()
+        let remote = try XCTUnwrap(initial.first)
+        XCTAssertEqual(remote.pushURLs, [""])
+        try await repository.updateRemoteURL(expected: remote, fetchIndex: 0, fetchURL: remote.fetchURLs[0], pushURL: "")
+        let updated = try await repository.remoteConfigurations()
+        XCTAssertEqual(updated.first?.pushURLs, [])
     }
 }

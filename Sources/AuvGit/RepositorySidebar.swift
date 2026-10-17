@@ -51,6 +51,7 @@ struct RepositorySidebar: View {
     @ObservedObject private var shortcuts = KeyboardShortcuts.shared
     @State private var renameStash: String?
     @State private var stashName = ""
+    @State private var originalStashName = ""
     @State private var rebaseReference: String?
     let onAction: (SidebarAction, String) -> Void
     var repositoryFocusRequest: UUID? = nil
@@ -77,6 +78,7 @@ struct RepositorySidebar: View {
                     DialogButton(workflowText("Cancel"), role: .cancel) { renameStash = nil }
                     DialogButton(shortcutText("Rename Stash"), prominent: true) {
                         guard let reference = renameStash else { return }; let name = stashName; renameStash = nil
+                        guard name != originalStashName else { return }
                         store.operation(shortcutText("Rename Stash")) { _ = try await $0.renameStash(reference: reference, message: name) }
                     }.disabled(stashName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }.buttonStyle(AuvGitDialogButtonStyle()).frame(maxWidth: .infinity)
@@ -119,6 +121,7 @@ struct RepositorySidebar: View {
 
     private func prepareStashRename(_ reference: String) {
         stashName = store.stashes.first { $0.ref == reference }?.subject ?? ""
+        originalStashName = stashName
         renameStash = reference
     }
     private func handleShortcut(_ event: NSEvent) -> Bool {

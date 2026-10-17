@@ -170,7 +170,9 @@ struct WorkspaceTreeTable: NSViewRepresentable {
             let value = rows[row]
             cell.selectedIcon = nil
             cell.depth = value.depth; cell.needsLayout = true
-            cell.label.stringValue = value.name; cell.toolTip = value.path
+            cell.label.stringValue = value.name
+            cell.toolTip = value.name
+            cell.label.toolTip = cell.toolTip
             cell.disclosure.isHidden = !value.isDirectory
             if value.isDirectory {
                 cell.disclosure.isEnabled = enabled

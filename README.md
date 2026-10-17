@@ -8,10 +8,10 @@
 
 ```sh
 swift test
-./scripts/build-app.sh
+./scripts/build.sh
 ```
 
-构建成功后会正常退出正在运行的本地 AuvGit，并替换 `/Applications/AuvGit.app`；退出失败时停止替换。使用 `./scripts/build-app.sh --no-install` 可仅生成构建产物。
+构建成功后会正常退出正在运行的本地 AuvGit，并替换 `/Applications/AuvGit.app`；退出失败时停止替换。使用 `./scripts/build.sh --no-install` 可仅生成构建产物。
 
 双击 `/Applications/AuvGit.app`，点击“打开仓库”。也可从终端运行：
 

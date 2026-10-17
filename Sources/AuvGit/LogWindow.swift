@@ -7,6 +7,24 @@ import AuvGitLocalization
 func logText(_ key: String) -> String { L10n.text(key, table: "LogWindow") }
 extension Notification.Name { static let auvGitReuseCommitMessage = Notification.Name("AuvGitReuseCommitMessage") }
 
+extension GitCommitFile {
+    var logFileName: String { (path as NSString).lastPathComponent }
+    var logPathHelp: String { originalPath.map { $0 + " → " + path } ?? path }
+}
+
+enum LogFileSorting {
+    static func cycle(_ proposed: [KeyPathComparator<GitCommitFile>], after previous: [KeyPathComparator<GitCommitFile>]) -> [KeyPathComparator<GitCommitFile>] {
+        guard let next = proposed.first else { return [] }
+        if let old = previous.first, old.keyPath == next.keyPath,
+           old.order == .reverse, next.order == .forward { return [] }
+        return [next]
+    }
+    static func sorted(_ files: [GitCommitFile], by order: [KeyPathComparator<GitCommitFile>]) -> [GitCommitFile] {
+        guard !order.isEmpty else { return files }
+        return files.sorted(using: order + [KeyPathComparator(\.path, comparator: .localizedStandard)])
+    }
+}
+
 @MainActor
 enum LogPresenter {
     private static var controllers: [URL: LogWindowController] = [:]
@@ -138,6 +156,7 @@ private struct LogWindowContent: View {
     @State private var rebaseCommit: GitCommit?
     @State private var name = ""
     @State private var parent = 1
+    @State private var fileSortOrder: [KeyPathComparator<GitCommitFile>] = []
     private struct Mutation: Identifiable {
         let id = UUID()
         let action: HistoryAction
@@ -159,7 +178,7 @@ private struct LogWindowContent: View {
                         VSplitView {
                             commitMetadata.frame(minWidth: 270, minHeight: 145, idealHeight: 230)
                             changedFiles.frame(minWidth: 270, minHeight: 130, idealHeight: 220)
-                        }.frame(minWidth: 270, idealWidth: 330, maxWidth: 480)
+                        }.frame(minWidth: 270, idealWidth: 420, maxWidth: 580)
                     }.frame(minHeight: 300, idealHeight: 500)
                     DiffPane(text: store.diffText, title: store.diffTitle, isLoading: store.loadingDiff, preview: store.staticPreview, leftRevisionTitle: store.diffLeftRevisionTitle, rightRevisionTitle: store.diffRightRevisionTitle)
                         .frame(minHeight: 180, idealHeight: 290)
@@ -289,12 +308,27 @@ private struct LogWindowContent: View {
             if store.selectedCommit == nil { AuvGitEmptyState(title: logText("Select a commit"), systemImage: "doc.on.doc") }
             else if store.commitFiles.isEmpty { AuvGitEmptyState(title: historyActionText("noFiles"), systemImage: "doc.on.doc") }
             else {
-                List(store.commitFiles, selection: $store.selectedCommitPath) { file in
-                    HStack(spacing: 7) { Text(file.status).font(.system(size: 10, design: .monospaced)).foregroundStyle(store.selectedCommitPath == file.path ? Color.white : file.status.hasPrefix("D") ? Color.red : file.status.hasPrefix("A") ? Color.green : Color.orange); Text(file.path).font(.system(size: 12)).lineLimit(2) }
-                        .foregroundStyle(store.selectedCommitPath == file.path ? Color.white : Color.primary)
-                        .listRowBackground(store.selectedCommitPath == file.path ? AuvGitStyle.blue : Color.clear)
-                        .tag(file.path).help(file.originalPath.map { $0 + " → " + file.path } ?? file.path)
-                }.listStyle(.plain).scrollContentBackground(.hidden)
+                Table(LogFileSorting.sorted(store.commitFiles, by: fileSortOrder), selection: $store.selectedCommitPath,
+                      sortOrder: Binding(get: { fileSortOrder }, set: { fileSortOrder = LogFileSorting.cycle($0, after: fileSortOrder) })) {
+                    TableColumn(L10n.text("name", table: "Files"), value: \.logFileName) { file in
+                        Label(file.logFileName, systemImage: "doc")
+                            .font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                            .help(file.logFileName)
+                    }.width(min: 100, ideal: 150)
+                    TableColumn(designWorkspaceText("Status"), value: \.status) { file in
+                        let key = ["M": "modified", "A": "added", "D": "deleted", "R": "renamed", "C": "copied", "T": "type", "U": "conflict"][String(file.status.prefix(1))]
+                        Text(String(file.status.prefix(1)))
+                            .font(.system(size: 11, design: .monospaced)).lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .foregroundStyle(store.selectedCommitPath == file.path ? Color.primary : file.status.hasPrefix("D") ? Color.red : file.status.hasPrefix("A") ? Color.green : Color.orange)
+                            .help(key.map { L10n.text($0, table: "Files") } ?? file.status)
+                    }.width(36)
+                    TableColumn(workflowText("File path"), value: \.path) { file in
+                        Text(file.path).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                            .foregroundStyle(store.selectedCommitPath == file.path ? Color.primary : Color.secondary)
+                            .help(file.logPathHelp)
+                    }.width(min: 100, ideal: 190)
+                }.tableStyle(.inset(alternatesRowBackgrounds: true)).scrollContentBackground(.hidden)
                     .contextMenu(forSelectionType: String.self) { paths in
                         if let path = paths.first {
                             Button(interactionText("Show Changes")) { compare(path) }.configuredShortcut(.showChanges, using: shortcuts)

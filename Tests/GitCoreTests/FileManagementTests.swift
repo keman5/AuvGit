@@ -32,6 +32,8 @@ final class FileManagementTests: XCTestCase {
         try Data("other".utf8).write(to: dir.appendingPathComponent("literal1X name "))
         var tree = try await repo.workspaceTree()
         XCTAssertEqual(tree.first { $0.path == "folder" }?.children.first?.path, "folder/file")
+        try await repo.renameWorkspaceFile(path: "folder/file", destination: "folder/file")
+        XCTAssertEqual(try String(contentsOf: dir.appendingPathComponent("folder/file"), encoding: .utf8), "source")
         try await repo.renameWorkspaceFile(path: "folder/file", destination: "folder/renamed")
         do { try await repo.renameWorkspaceFile(path: "folder/renamed", destination: "literal1X name "); XCTFail("prevent overwrite") } catch { }
         do { try await repo.renameWorkspaceFile(path: "folder/renamed", destination: "../escape"); XCTFail("prevent traversal") } catch { }
@@ -45,6 +47,9 @@ final class FileManagementTests: XCTestCase {
         do { try await repo.saveGitignore(text: "overwrite", expected: expected); XCTFail("stale ignore edit") } catch { }
         try FileManager.default.createSymbolicLink(at: dir.appendingPathComponent("link"), withDestinationURL: dir.appendingPathComponent("folder"))
         do { try await repo.renameWorkspaceFile(path: "link/renamed", destination: "moved"); XCTFail("symlink parent") } catch { }
+        for path in ["../escape", ".git/config", "link/renamed"] {
+            do { try await repo.renameWorkspaceFile(path: path, destination: path); XCTFail("Unchanged names must not bypass path protection") } catch { }
+        }
     }
     func testDiscardWorkspaceDeletesOnlySelectedUntrackedFilesAndPreservesIndex() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

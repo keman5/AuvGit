@@ -140,12 +140,34 @@ final class NativeCompactHistoryTableTests: XCTestCase {
             showAvatars: false, showNames: true, showRemoteLabels: true, showTagLabels: true,
             isBusy: false, hasMore: false, isLoading: false, onLoadMore: {}, onAction: action)
     }
+    func testExpandedGraphRetainsPixelsAcrossUnchangedUpdatesAndUnrelatedSelections() throws {
+        _ = NSApplication.shared
+        let commit = GitCommit(hash: "retained", parents: [], author: "Test", date: .distantPast, subject: "Retained", body: "", refs: [])
+        let row = CommitGraph(commits: [commit]).rows[0]
+        let styles = HistoryGraphStylePlan(commits: [commit], remoteBranchNames: [])
+        let graph = CommitGraphView(frame: NSRect(x: 0, y: 0, width: 48, height: 24))
+        graph.configure(row: row, rowIndex: 0, styles: styles, selected: false)
+        XCTAssertTrue(graph.wantsLayer)
+        let bitmap = try XCTUnwrap(graph.bitmapImageRepForCachingDisplay(in: graph.bounds))
+        graph.cacheDisplay(in: graph.bounds, to: bitmap)
+        graph.needsDisplay = false
+        graph.layer?.displayIfNeeded()
+        graph.configure(row: row, rowIndex: 0, styles: styles, selected: false)
+        XCTAssertFalse(graph.layer?.needsDisplay() ?? true, "Detail loading must not invalidate unchanged graph pixels")
+        for name in [NSTableView.selectionIsChangingNotification, NSTableView.selectionDidChangeNotification] {
+            NotificationCenter.default.post(name: name, object: NSTableView())
+            XCTAssertFalse(graph.layer?.needsDisplay() ?? true, "Changed-file selection must not redraw the history graph")
+        }
+        graph.configure(row: row, rowIndex: 0, styles: styles, selected: true)
+        XCTAssertTrue(graph.layer?.needsDisplay() ?? false, "The selected graph must still update its contrast")
+    }
+
     func testExpandedHistoryUsesNativeSelectedTextColorDuringTracking() async throws {
         _ = NSApplication.shared
         let commit = GitCommit(hash: "123456789abcdef", parents: [], author: "Test", date: .distantPast,
-            subject: "WWWWWWWWWWWWWWWWWWWW", body: "", refs: [])
+            subject: "WWWWWWWWWWWWWWWWWWWW", body: "", refs: ["HEAD -> main"])
         let second = GitCommit(hash: "second", parents: [], author: "Test", date: .distantPast,
-            subject: commit.subject, body: "", refs: [])
+            subject: commit.subject, body: "", refs: ["other"])
         let host = NSHostingView(rootView: HistoryPane(commits: [commit, second], selection: .constant(commit.hash),
             search: .constant(""), isLoading: false, hasMore: false, onLoadMore: {},
             showsDetails: false, authorFilter: .constant("")).frame(width: 900, height: 200))
@@ -163,7 +185,21 @@ final class NativeCompactHistoryTableTests: XCTestCase {
         let native = try XCTUnwrap(table(in: host))
         let previous = try XCTUnwrap(native.rowView(atRow: 0, makeIfNecessary: true))
         let row = try XCTUnwrap(native.rowView(atRow: 1, makeIfNecessary: true))
+        func selectionViews(in view: NSView) -> [HistorySelectionView] {
+            if let view = view as? HistorySelectionView { return [view] }
+            return view.subviews.flatMap { selectionViews(in: $0) }
+        }
+        window.orderFront(nil)
+        window.display()
+        let previousViews = selectionViews(in: previous)
+        let selectedViews = selectionViews(in: row)
+        XCTAssertEqual(previousViews.count, 2, "The real row must include its graph and reference badge")
+        XCTAssertEqual(selectedViews.count, 2)
+        XCTAssertTrue(previousViews.allSatisfy { $0.drawnSelection == true })
+        XCTAssertTrue(selectedViews.allSatisfy { $0.drawnSelection == false })
         native.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
+        XCTAssertTrue(previousViews.allSatisfy { $0.drawnSelection == false }, "Old graph and badge must finish drawing synchronously")
+        XCTAssertTrue(selectedViews.allSatisfy { $0.drawnSelection == true }, "New graph and badge must finish drawing synchronously")
         XCTAssertFalse(previous.isSelected)
         XCTAssertTrue(row.isSelected)
         func graph(in view: NSView) -> CommitGraphView? {
@@ -187,6 +223,15 @@ final class NativeCompactHistoryTableTests: XCTestCase {
         let scale = CGFloat(bitmap.pixelsWide) / row.bounds.width
         let background = try XCTUnwrap(bitmap.colorAt(x: Int(80 * scale), y: Int(2 * scale))?.usingColorSpace(.deviceRGB))
         XCTAssertGreaterThan(background.blueComponent - background.redComponent, 0.1, "Verify a selected background, not white canvas")
+        let selectedGraph = try XCTUnwrap(graph(in: row))
+        let graphFrame = row.convert(selectedGraph.bounds, from: selectedGraph)
+        // Just outside the 3pt node radius: the painter's erasing halo must
+        // match the actual native selection, including its emphasis state.
+        let halo = try XCTUnwrap(bitmap.colorAt(x: Int((graphFrame.minX + HistoryColumnLayout.laneSpacing / 2 + 4) * scale),
+                                               y: Int(graphFrame.midY * scale))?.usingColorSpace(.deviceRGB))
+        XCTAssertEqual(halo.redComponent, background.redComponent, accuracy: 0.025)
+        XCTAssertEqual(halo.greenComponent, background.greenComponent, accuracy: 0.025)
+        XCTAssertEqual(halo.blueComponent, background.blueComponent, accuracy: 0.025)
         let whiteText = (Int(80 * scale)..<Int(230 * scale)).contains { x in
             (0..<bitmap.pixelsHigh).contains { y in
                 guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { return false }
@@ -194,6 +239,35 @@ final class NativeCompactHistoryTableTests: XCTestCase {
             }
         }
         XCTAssertTrue(whiteText, "Native selection must color the message before SwiftUI's binding changes")
+        // Native row changes must draw even before AppKit posts a tracking notification.
+        previous.isSelected = true
+        row.isSelected = false
+        XCTAssertTrue(previousViews.allSatisfy { $0.drawnSelection == true })
+        XCTAssertTrue(selectedViews.allSatisfy { $0.drawnSelection == false })
+
+    }
+
+    func testGraphHalosPreserveTheActualRowBackgroundForBothSelectionStates() throws {
+        let commit = GitCommit(hash: "halo", parents: [], author: "Test", date: .distantPast, subject: "Halo", body: "", refs: [])
+        let row = CommitGraph(commits: [commit]).rows[0]
+        let styles = HistoryGraphStylePlan(commits: [commit], remoteBranchNames: [])
+        let background = NSColor(deviceRed: 0.85, green: 0.15, blue: 0.55, alpha: 1)
+        for selected in [false, true] {
+            let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 48, pixelsHigh: 48,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+            let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: bitmap))
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = context
+            context.cgContext.scaleBy(x: 2, y: 2)
+            background.setFill(); NSRect(x: 0, y: 0, width: 24, height: 24).fill()
+            HistoryGraphPainter.draw(row: row, styles: styles, rowIndex: 0, height: 24, selected: selected)
+            NSGraphicsContext.restoreGraphicsState()
+            let halo = try XCTUnwrap(bitmap.colorAt(x: 20, y: 24)?.usingColorSpace(.deviceRGB))
+            XCTAssertEqual(halo.redComponent, background.redComponent, accuracy: 0.02)
+            XCTAssertEqual(halo.greenComponent, background.greenComponent, accuracy: 0.02)
+            XCTAssertEqual(halo.blueComponent, background.blueComponent, accuracy: 0.02)
+        }
     }
 
     func testNativeSelectionPaintsWhiteTextBeforeSwiftUISelectionUpdates() throws {
@@ -206,9 +280,11 @@ final class NativeCompactHistoryTableTests: XCTestCase {
         window.isReleasedWhenClosed = false
         window.contentView = row
         defer { window.close() }
+        window.orderFront(nil)
+        window.display()
         cell.needsDisplay = false
         row.isSelected = true
-        XCTAssertTrue(cell.needsDisplay)
+        XCTAssertEqual(cell.drawnSelection, true, "Selection must finish drawing synchronously")
         let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 650, pixelsHigh: 24,
             bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
             colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
@@ -225,8 +301,7 @@ final class NativeCompactHistoryTableTests: XCTestCase {
         cell.needsDisplay = false
         row.needsDisplay = false
         row.isSelected = false
-        XCTAssertTrue(row.needsDisplay)
-        XCTAssertTrue(cell.needsDisplay)
+        XCTAssertEqual(cell.drawnSelection, false, "The old row must finish drawing synchronously")
     }
 
     func testCellFirstBitmapDrawIncludesSystemAndMonospacedText() throws {

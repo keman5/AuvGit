@@ -7,7 +7,7 @@ import unittest
 
 class BuildAppInstallTests(unittest.TestCase):
     def test_installation_stops_on_failure_and_can_be_skipped(self):
-        script = Path(__file__).with_name("build-app.sh").read_text()
+        script = Path(__file__).with_name("build.sh").read_text()
         install = script[script.index('codesign --force --sign - "$APP"'):]
         for enabled, quit_status, verify_status in [
             (True, 0, 0), (False, 0, 0), (True, 1, 0), (True, 0, 1)

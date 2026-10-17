@@ -34,12 +34,15 @@ extension GitRepository {
     }
     private func remoteValues(name: String, field: String) async throws -> [String] {
         let output = try await GitProcess.run(at: url, arguments: ["config", "--local", "--null", "--get-all", "remote.\(name).\(field)"], allowedCodes: [0, 1])
-        return output.data.split(separator: 0).map { String(decoding: $0, as: UTF8.self) }
+        return output.data.split(separator: 0, omittingEmptySubsequences: false).dropLast().map { String(decoding: $0, as: UTF8.self) }
     }
     public func updateRemoteURL(expected: RepositoryRemoteConfiguration, fetchIndex: Int, fetchURL: String, pushURL: String?) async throws {
         guard !fetchURL.isEmpty, !fetchURL.contains("\0"), !fetchURL.contains("\n"), pushURL.map({ !$0.contains("\0") && !$0.contains("\n") }) ?? true else { throw GitError("Enter a valid remote URL.") }
-        guard try await remoteConfigurations().contains(expected), expected.fetchURLs.indices.contains(fetchIndex) else { throw GitError("The remote configuration changed. Reload before saving.") }
+        guard expected.fetchURLs.indices.contains(fetchIndex) else { throw GitError("The remote configuration changed. Reload before saving.") }
         let old = expected.fetchURLs[fetchIndex]
+        let changesPush = pushURL.map { $0.isEmpty ? !expected.pushURLs.isEmpty : $0 != expected.pushURLs.first } ?? false
+        guard old != fetchURL || changesPush else { return }
+        guard try await remoteConfigurations().contains(expected) else { throw GitError("The remote configuration changed. Reload before saving.") }
         if old != fetchURL {
             _ = try await GitProcess.run(at: url, arguments: ["config", "--local", "--fixed-value", "--replace-all", "remote.\(expected.name).url", fetchURL, old])
         }

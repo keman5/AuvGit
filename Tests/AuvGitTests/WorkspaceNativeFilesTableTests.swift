@@ -7,6 +7,50 @@ import AuvGitLocalization
 
 @MainActor
 final class WorkspaceNativeFilesTableTests: XCTestCase {
+    func testFileNameTooltipOmitsDirectoriesAndPathTooltipIsRepositoryRelative() throws {
+        let root = URL(fileURLWithPath: "/tmp/Tooltip Repository")
+        let path = "Deep Folder/完整的文件名.swift"
+        let parent = WorkspaceNativeFilesTable(rows: [.init(path: path, file: nil)], files: [], repository: GitRepository(url: root),
+            selection: .constant([]), isBusy: false, sortOrder: .constant([]), onAction: { _, _ in }, onCompare: { _ in })
+        let coordinator = parent.makeCoordinator()
+        let table = WorkspaceNativeFilesTable.FileTable()
+        coordinator.table = table; coordinator.update(parent)
+        for id in ["filename", "directory"] {
+            let cell = try XCTUnwrap(coordinator.tableView(table, viewFor: NSTableColumn(identifier: .init(id)), row: 0) as? WorkspaceNativeFilesTable.Cell)
+            XCTAssertEqual(cell.toolTip, id == "filename" ? "完整的文件名.swift" : path)
+            XCTAssertEqual(cell.label.toolTip, cell.toolTip)
+        }
+    }
+
+    func testHeaderSortCyclesToDefaultAndDropsPreviousColumnsWithoutChangingSelection() {
+        let state = State()
+        state.selection = ["b"]
+        let parent = WorkspaceNativeFilesTable(rows: ["a", "b"].map { WorkspaceFileRow(path: $0, file: nil) }, files: [], repository: nil,
+            selection: Binding(get: { state.selection }, set: { state.selection = $0 }), isBusy: false,
+            sortOrder: Binding(get: { state.sort }, set: { state.sort = $0 }), onAction: { _, _ in }, onCompare: { _ in })
+        let coordinator = parent.makeCoordinator()
+        let table = WorkspaceNativeFilesTable.FileTable()
+        table.addTableColumn(NSTableColumn(identifier: .init("filename")))
+        table.dataSource = coordinator; table.delegate = coordinator; coordinator.table = table
+        coordinator.update(parent)
+        for _ in 0..<2 {
+            table.sortDescriptors = [NSSortDescriptor(key: "filename", ascending: true)]
+            XCTAssertEqual(state.sort, [.init(column: .name, ascending: true)])
+            table.sortDescriptors = [NSSortDescriptor(key: "filename", ascending: false)]
+            XCTAssertEqual(state.sort, [.init(column: .name, ascending: false)])
+            table.sortDescriptors = [NSSortDescriptor(key: "filename", ascending: true)]
+            XCTAssertEqual(state.sort, [])
+            XCTAssertEqual(table.sortDescriptors, [])
+        }
+        table.sortDescriptors = [NSSortDescriptor(key: "filename", ascending: true)]
+        table.sortDescriptors = [NSSortDescriptor(key: "status", ascending: true), NSSortDescriptor(key: "filename", ascending: true)]
+        XCTAssertEqual(state.sort, [.init(column: .status, ascending: true)])
+        XCTAssertEqual(table.sortDescriptors.count, 1)
+        table.sortDescriptors = []
+        XCTAssertEqual(state.sort, [])
+        XCTAssertEqual(state.selection, ["b"])
+    }
+
     func testDoubleClickCollapsesMultiSelectionBeforeRunningDefaultAction() {
         let state = State()
         state.selection = ["a", "b"]

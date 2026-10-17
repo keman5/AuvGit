@@ -93,6 +93,7 @@ struct WorkspaceTree: View {
                         DialogButton(compareText("Cancel"), role: .cancel) { showIgnoreEditor = false }
                         DialogButton(compareText("Save"), prominent: true) {
                             guard !isBusy, !mutationBusy, permitsMutation() else { return }
+                            if Data(ignoreDraft.utf8) == (expectedIgnore ?? Data()) { editorError = nil; showIgnoreEditor = false; return }
                             mutationBusy = true; setBusy(true)
                             Task {
                                 defer { mutationBusy = false; setBusy(false) }

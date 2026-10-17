@@ -8,6 +8,25 @@ private final class CommandRecordCapture: @unchecked Sendable {
     var values: [GitCommandRecord] { lock.lock(); defer { lock.unlock() }; return records }
 }
 final class GitCommandLogTests: XCTestCase {
+    func testUnchangedBranchAndRemoteEditsRunNoGitCommands() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        _ = try await GitProcess.run(at: directory, arguments: ["init", "-b", "main"])
+        _ = try await GitProcess.run(at: directory, arguments: ["remote", "add", "origin", "https://example.test/repo"])
+        let repository = GitRepository(url: directory)
+        let remotes = try await repository.remoteConfigurations()
+        let remote = try XCTUnwrap(remotes.first)
+        let capture = CommandRecordCapture()
+        let observer = NotificationCenter.default.addObserver(forName: GitCommandLog.notification, object: nil, queue: nil) { notification in
+            if let record = notification.object as? GitCommandRecord, record.directory == directory.path { capture.append(record) }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        try await repository.renameBranch(oldName: "main", newName: "main")
+        try await repository.updateRemoteURL(expected: remote, fetchIndex: 0, fetchURL: remote.fetchURLs[0], pushURL: nil)
+        try await repository.updateRemoteURL(expected: remote, fetchIndex: 0, fetchURL: remote.fetchURLs[0], pushURL: "")
+        XCTAssertTrue(capture.values.isEmpty)
+    }
     func testRemoteRejectionPreservesSanitizedReasonBeforeGenericHookSummary() {
         let diagnostic = "remote: Counting objects: 100% (10/10), done.\nremote: error: Force pushing to protected branch main is forbidden.\nremote: token=private\nTo https://user:private@host/repo\n! [remote rejected] main -> main (pre-receive hook declined)\nerror: failed to push some refs"
         XCTAssertEqual(GitFailureSummary.key(for: diagnostic), "Remote rejected the push")

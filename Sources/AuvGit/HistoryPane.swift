@@ -142,15 +142,11 @@ struct HistoryPane: View {
                         HStack(spacing: compact ? 4 : 8) {
                             CommitGraphCell(row: row, rowIndex: index, styles: graphStyles, selected: selection == commit.hash)
                                 .frame(width: rowWidths.graph, height: HistoryColumnLayout.rowHeight(compact: compact)).clipped()
-                            HStack(spacing: 5) {
+                            HStack(spacing: 4) {
                                 ForEach(visibleRefs(commit, compact: compact, styles: graphStyles), id: \.self) { ref in
                                     let tint = graphStyles.referenceStyle(for: ref, commitHash: commit.hash).color.color
-                                    Text(graphStyles.referenceLabel(ref)).font(.system(size: 10, weight: .medium))
-                                        .padding(.horizontal, 4).padding(.vertical, 1)
-                                        .foregroundStyle(tint)
-                                        .background(selection == commit.hash ? Color.white.opacity(0.92) : tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 4))
-                                        .overlay { RoundedRectangle(cornerRadius: 4).stroke(tint.opacity(0.4), lineWidth: 0.5) }
-                                        .lineLimit(1).frame(maxWidth: compact ? 90 : 120, alignment: .leading)
+                                    HistoryReferenceBadge(label: graphStyles.referenceLabel(ref), tint: NSColor(tint), selected: selection == commit.hash)
+                                        .frame(width: min(120, (graphStyles.referenceLabel(ref) as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 10, weight: .medium)]).width + 8), height: 16)
                                         .help(ref)
                                 }
                                 Text(commit.subject).lineLimit(1).help(commit.subject)
@@ -451,34 +447,101 @@ private struct CommitGraphCell: NSViewRepresentable {
     var selected = false
     func makeNSView(context: Context) -> CommitGraphView { CommitGraphView() }
     func updateNSView(_ view: CommitGraphView, context: Context) {
-        view.row = row; view.rowIndex = rowIndex; view.styles = styles; view.selected = selected
-        view.needsDisplay = true
+        view.configure(row: row, rowIndex: rowIndex, styles: styles, selected: selected)
     }
 }
 
-final class CommitGraphView: NSView {
+/// Read selection during AppKit tracking, before SwiftUI publishes the new binding.
+class HistorySelectionView: NSView {
+    var selected = false
+    private(set) var drawnSelection: Bool?
+    override var isFlipped: Bool { true }
+    private var selectionObservation: NSKeyValueObservation?
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        observeSelection()
+    }
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        observeSelection()
+    }
+    private func observeSelection() {
+        selectionObservation = nativeRow?.observe(\.isSelected) { [weak self] row, _ in
+            MainActor.assumeIsolated {
+                guard let self, self.drawnSelection != row.isSelected else { return }
+                self.needsDisplay = true
+                row.display()
+                self.layer?.displayIfNeeded()
+            }
+        }
+    }
+    private var nativeRow: NSTableRowView? {
+        var ancestor = superview
+        while let view = ancestor, !(view is NSTableRowView) { ancestor = view.superview }
+        return ancestor as? NSTableRowView
+    }
+    var nativeSelected: Bool { nativeRow?.isSelected ?? selected }
+    override func draw(_ dirtyRect: NSRect) { drawnSelection = nativeSelected }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+private struct HistoryReferenceBadge: NSViewRepresentable {
+    let label: String
+    let tint: NSColor
+    let selected: Bool
+    func makeNSView(context: Context) -> HistoryReferenceBadgeView { HistoryReferenceBadgeView() }
+    func updateNSView(_ view: HistoryReferenceBadgeView, context: Context) {
+        view.label = label; view.tint = tint; view.selected = selected
+        view.needsDisplay = true
+        view.setAccessibilityLabel(label)
+    }
+}
+
+final class HistoryReferenceBadgeView: HistorySelectionView {
+    var label = ""
+    var tint: NSColor = .labelColor
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let badge = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.25, dy: 0.25), xRadius: 4, yRadius: 4)
+        (nativeSelected ? NSColor.white.withAlphaComponent(0.92) : tint.withAlphaComponent(0.13)).setFill()
+        badge.fill()
+        tint.withAlphaComponent(0.4).setStroke(); badge.lineWidth = 0.5; badge.stroke()
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        let font = NSFont.systemFont(ofSize: 10, weight: .medium)
+        let height = ceil(font.ascender - font.descender + font.leading)
+        (label as NSString).draw(in: NSRect(x: 4, y: (bounds.height - height) / 2, width: max(0, bounds.width - 8), height: height),
+            withAttributes: [.font: font, .foregroundColor: tint, .paragraphStyle: paragraph])
+    }
+}
+
+final class CommitGraphView: HistorySelectionView {
     var row: CommitGraph.Row?
     var rowIndex = 0
     var styles: HistoryGraphStylePlan?
-    var selected = false
-    override var isFlipped: Bool { true }
     override init(frame: NSRect) {
         super.init(frame: frame)
         setAccessibilityElement(false)
-        NotificationCenter.default.addObserver(self, selector: #selector(selectionChanged), name: NSTableView.selectionDidChangeNotification, object: nil)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    deinit { NotificationCenter.default.removeObserver(self) }
-    @objc private func selectionChanged() { needsDisplay = true }
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-    var nativeSelected: Bool {
-        var ancestor = superview
-        while let view = ancestor, !(view is NSTableRowView) { ancestor = view.superview }
-        return (ancestor as? NSTableRowView)?.isSelected ?? selected
+    func configure(row: CommitGraph.Row, rowIndex: Int, styles: HistoryGraphStylePlan, selected: Bool) {
+        let changed = self.row != row || self.rowIndex != rowIndex
+            || self.styles?.nodeStyle(for: row.hash) != styles.nodeStyle(for: row.hash)
+            || row.segments.contains { self.styles?.lineStyle(for: $0) != styles.lineStyle(for: $0) }
+        self.row = row; self.rowIndex = rowIndex; self.styles = styles; self.selected = selected
+        if changed || drawnSelection != nativeSelected { needsDisplay = true }
     }
     override func draw(_ dirtyRect: NSRect) {
         guard let row, let styles else { return }
-        HistoryGraphPainter.draw(row: row, styles: styles, rowIndex: rowIndex, height: bounds.height, selected: nativeSelected)
+        let selected = nativeSelected
+        HistoryGraphPainter.draw(row: row, styles: styles, rowIndex: rowIndex, height: bounds.height, selected: selected)
+        super.draw(dirtyRect)
     }
 }
 

@@ -17,24 +17,28 @@ final class ComparisonChromeGeometryTests: XCTestCase {
         let window = try XCTUnwrap(NSApp.windows.first { $0.representedURL == file })
         defer { window.close() }
         let content = try XCTUnwrap(window.contentView)
-        func labels(in view: NSView) -> [NSTextField] {
-            (view as? NSTextField).map { [$0] } ?? view.subviews.flatMap { labels(in: $0) }
+        func texts(in view: NSView) -> [ComparisonTextView] {
+            (view as? ComparisonTextView).map { [$0] } ?? view.subviews.flatMap { texts(in: $0) }
         }
-        for _ in 0..<100 where !labels(in: content).contains(where: { !$0.isHidden && $0.stringValue == compareText("File does not exist in this version") }) {
+        // Missing revisions now remain editable empty copies instead of a message-only pane.
+        for _ in 0..<100 where !texts(in: content).contains(where: { $0.string.isEmpty && $0.isEditable }) {
             try await Task.sleep(for: .milliseconds(10))
         }
-        XCTAssertTrue(labels(in: content).contains { !$0.isHidden && $0.stringValue == compareText("File does not exist in this version") })
+        XCTAssertTrue(texts(in: content).contains { $0.string.contains("fixture") })
+        XCTAssertTrue(texts(in: content).contains { $0.string.isEmpty && $0.isEditable })
         for appearance in [NSAppearance.Name.aqua, .darkAqua] {
             window.appearance = try XCTUnwrap(NSAppearance(named: appearance))
             window.setContentSize(NSSize(width: 1200, height: 720))
             content.layoutSubtreeIfNeeded()
             window.displayIfNeeded()
             try await Task.sleep(for: .milliseconds(50))
-            var expected = NSColor.windowBackgroundColor
-            content.effectiveAppearance.performAsCurrentDrawingAppearance { expected = NSColor.windowBackgroundColor.usingColorSpace(.deviceRGB)! }
             let frame = try XCTUnwrap(content.superview)
             let frameBitmap = try XCTUnwrap(frame.bitmapImageRepForCachingDisplay(in: frame.bounds))
             frame.cacheDisplay(in: frame.bounds, to: frameBitmap)
+            let expected = try XCTUnwrap(frameBitmap.colorAt(x: frameBitmap.pixelsWide / 4, y: 8)?.usingColorSpace(.deviceRGB))
+            XCTAssertEqual(expected.redComponent, expected.greenComponent, accuracy: 0.01)
+            XCTAssertEqual(expected.greenComponent, expected.blueComponent, accuracy: 0.01)
+            XCTAssertEqual(expected.redComponent < 0.5, appearance == .darkAqua)
             for x in [frameBitmap.pixelsWide / 4, frameBitmap.pixelsWide * 3 / 4] {
                 let color = try XCTUnwrap(frameBitmap.colorAt(x: x, y: 8)?.usingColorSpace(.deviceRGB))
                 XCTAssertGreaterThan(color.alphaComponent, 0.99, "The native title bar must hide windows underneath")
@@ -120,12 +124,12 @@ final class ComparisonChromeGeometryTests: XCTestCase {
         XCTAssertEqual(texts.count, 2)
         let left = try XCTUnwrap(texts.first), right = try XCTUnwrap(texts.last)
         XCTAssertEqual(left.string, "head\noriginal\ntail\n")
-        XCTAssertEqual(left.missingLineAnchors[2], .systemRed)
+        XCTAssertEqual(left.missingLineAnchors[2], .systemGreen)
         XCTAssertLessThan(left.missingChangeY(at: 2), right.textContainerInset.height + right.layoutManager!.usedRect(for: right.textContainer!).maxY)
         let rails = split.subviews.last!.subviews.compactMap { $0 as? ComparisonActionRail }
         let button = try XCTUnwrap(rails.flatMap { $0.subviews.compactMap { $0 as? NSButton } }.first)
         XCTAssertEqual(button.title, ""); XCTAssertNotNil(button.image)
-        XCTAssertEqual(button.contentTintColor, .systemRed)
+        XCTAssertEqual(button.contentTintColor, DiffVisualStyle.actionColor)
         button.performClick(nil)
         XCTAssertEqual(right.string, left.string)
         right.editingUndoManager.undo()

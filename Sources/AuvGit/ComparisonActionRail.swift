@@ -13,28 +13,24 @@ final class ComparisonActionRail: NSView {
         let action: () -> Void
     }
     weak var scroll: NSScrollView?
+    weak var oppositeRail: ComparisonActionRail?
     var pointsRight = true
     var color: NSColor = .systemBlue
     private var entries: [Entry] = []
     private var buttons: [NSButton] = []
-    private var connectors: [(NSRect, NSRect, NSColor)] = []
+    private var connectors: [(NSBezierPath, NSColor)] = []
     override var isFlipped: Bool { true }
     func setEntries(_ value: [Entry]) {
         entries = value
         buttons.forEach { $0.removeFromSuperview() }
         buttons = value.enumerated().map { index, entry in
-            let button = NSButton(title: entry.deletesContent ? "" : pointsRight ? "→" : "←", target: self, action: #selector(accept(_:)))
-            if entry.deletesContent { button.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil) }
+            let button = NSButton(title: "", target: self, action: #selector(accept(_:)))
+            let font = entry.sourceText?.font ?? entry.text.font ?? .monospacedSystemFont(ofSize: 12, weight: .regular)
+            button.image = NSImage(systemSymbolName: entry.deletesContent ? "xmark" : pointsRight ? "chevron.right.2" : "chevron.left.2", accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: max(8, font.pointSize - 3), weight: .regular))
             button.tag = index
             button.isBordered = false
-            button.font = .systemFont(ofSize: 13, weight: .semibold)
-            let tint = entry.tint ?? (entry.deletesContent ? NSColor.systemRed : color)
-            button.contentTintColor = tint
-            button.wantsLayer = true
-            button.layer?.cornerRadius = 5
-            button.layer?.borderWidth = 1
-            button.layer?.borderColor = tint.withAlphaComponent(0.25).cgColor
-            button.layer?.backgroundColor = tint.withAlphaComponent(0.09).cgColor
+            button.contentTintColor = DiffVisualStyle.actionColor
             button.toolTip = entry.title
             button.setAccessibilityLabel(entry.title)
             addSubview(button)
@@ -96,30 +92,41 @@ final class ComparisonActionRail: NSView {
                 source = convert(document, from: sourceText)
             }
             let tint = entry.tint ?? (entry.deletesContent ? NSColor.systemRed : color)
-            connectors.append((pointsRight ? source : rect, pointsRight ? rect : source, tint))
-            let anchor = entry.deletesContent ? rect : source
+            // Both editable panes clip the same bridge instead of drawing mirrored curves.
+            let bridge = oppositeRail.flatMap { $0.bounds.width > 0 ? bounds.union(convert($0.bounds, from: $0)) : nil } ?? bounds
+            let path = Self.connectorPath(left: pointsRight ? source : rect, right: pointsRight ? rect : source, width: bridge.width)
+            path.transform(using: AffineTransform(translationByX: bridge.minX, byY: 0))
+            connectors.append((path, tint))
+            var host = self
+            if !entry.deletesContent, let oppositeRail, oppositeRail.bounds.width > 0,
+               entry.range.length > 0 || oppositeRail.bounds.width >= ComparisonEditorMetrics.actionRailWidth { host = oppositeRail }
+            if button.superview !== host { host.addSubview(button) }
+            let anchor = host.convert(entry.deletesContent ? rect : source, from: self)
             let top = anchor.minY
-            let visible = NSRect(x: 0, y: top, width: bounds.width, height: max(1, anchor.height)).intersection(bounds)
+            let visible = NSRect(x: 0, y: top, width: host.bounds.width, height: max(1, anchor.height)).intersection(host.bounds)
             let buttonWidth = ComparisonEditorMetrics.actionButtonWidth
-            let buttonHeight = ComparisonEditorMetrics.actionButtonHeight
+            let font = entry.sourceText?.font ?? entry.text.font ?? .monospacedSystemFont(ofSize: 12, weight: .regular)
+            let buttonHeight = ceil((entry.sourceText ?? entry.text).layoutManager?.defaultLineHeight(for: font) ?? font.boundingRectForFont.height)
             let halfHeight = buttonHeight / 2
-            button.isHidden = visible.isEmpty || bounds.width < buttonWidth
+            button.isHidden = visible.isEmpty || host.bounds.width < buttonWidth
             // Keep a tall block's control usable while only part of it is in view.
-            let center = min(max(anchor.midY, halfHeight), max(halfHeight, bounds.height - halfHeight))
-            let x = pointsRight ? CGFloat(2) : max(0, bounds.width - buttonWidth - 2)
+            let center = min(max(anchor.midY, halfHeight), max(halfHeight, host.bounds.height - halfHeight))
+            let onLeft = entry.deletesContent ? !pointsRight : pointsRight
+            // Two editable copies also offer copying an insertion; keep its arrow beside, not over, ×.
+            let inset = !entry.deletesContent && entry.range.length == 0 && host !== self ? buttonWidth : 0
+            let x = onLeft ? 2 + inset : max(0, host.bounds.width - buttonWidth - 2 - inset)
             button.frame = NSRect(x: x, y: center - halfHeight, width: buttonWidth, height: buttonHeight)
         }
         needsDisplay = true
     }
     override func layout() { super.layout(); refresh() }
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.controlBackgroundColor.setFill()
+        DiffVisualStyle.actionBackgroundColor.setFill()
         dirtyRect.fill()
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
         NSBezierPath(rect: bounds).addClip()
-        for (left, right, tint) in connectors {
-            let path = Self.connectorPath(left: left, right: right, width: bounds.width)
+        for (path, tint) in connectors {
             guard path.bounds.intersects(dirtyRect) else { continue }
             let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             DiffVisualStyle.lineBackground(tint, dark: dark).setFill()

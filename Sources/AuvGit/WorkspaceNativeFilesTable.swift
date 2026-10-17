@@ -296,7 +296,9 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
                 cell.foregroundColor = color(key ?? "none")
                 if code != " " { cell.label.font = .systemFont(ofSize: 10, weight: .medium); cell.badgeColor = cell.foregroundColor }
             }
-            cell.toolTip = cell.label.stringValue
+            cell.toolTip = id.rawValue == "filename" ? value.name
+                : id.rawValue == "directory" ? value.path : cell.label.stringValue
+            cell.label.toolTip = cell.toolTip
             return cell
         }
         private func color(_ key: String) -> NSColor {
@@ -313,8 +315,20 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
             parent.selection = paths(table.selectedRowIndexes)
         }
         func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
-            guard !updating, table === tableView, !tableView.sortDescriptors.isEmpty else { return }
-            let orders: [WorkspaceFilePreparation.Sort] = tableView.sortDescriptors.compactMap { descriptor in
+            guard !updating, table === tableView else { return }
+            // AppKit retains earlier columns as secondary sort keys. Each header here
+            // owns a single default → ascending → descending → default cycle.
+            var descriptors = Array(tableView.sortDescriptors.prefix(1))
+            if let next = descriptors.first, let previous = oldDescriptors.first,
+               next.key == previous.key, !previous.ascending, next.ascending {
+                descriptors = []
+            }
+            if tableView.sortDescriptors != descriptors {
+                updating = true
+                tableView.sortDescriptors = descriptors
+                updating = false
+            }
+            let orders: [WorkspaceFilePreparation.Sort] = descriptors.compactMap { descriptor in
                 guard let column = Self.columns.first(where: { $0.id == descriptor.key }) else { return nil }
                 return .init(column: column.sort, ascending: descriptor.ascending)
             }

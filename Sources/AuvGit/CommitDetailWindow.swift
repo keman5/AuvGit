@@ -77,8 +77,9 @@ private struct CommitDetailView: View {
                         List(files, selection: $selection) { file in
                             HStack(spacing: 8) {
                                 Text(file.status).font(.system(.caption, design: .monospaced))
-                                Text(file.path).font(.system(size: 12)).lineLimit(2).truncationMode(.middle)
-                            }.tag(file.path).help(file.originalPath.map { $0 + " → " + file.path } ?? file.path)
+                                Text(file.logFileName).font(.system(size: 12)).lineLimit(2).truncationMode(.middle)
+                                    .help(file.logFileName)
+                            }.tag(file.path).help(file.logPathHelp)
                         }.listStyle(.plain).scrollContentBackground(.hidden)
                     }
                 }.frame(minWidth: 180, idealWidth: 210, maxWidth: 260)

@@ -35,6 +35,7 @@ extension GitRepository {
     }
     public func renameWorkspaceFile(path: String, destination: String) throws {
         let source = try managedURL(path), target = try managedURL(destination, allowMissing: true)
+        guard path != destination else { return }
         guard !FileManager.default.fileExists(atPath: target.path) else { throw GitError("The destination already exists.") }
         try FileManager.default.moveItem(at: source, to: target)
     }
@@ -135,6 +136,7 @@ extension GitRepository {
         let current = FileManager.default.fileExists(atPath: file.path) ? try Data(contentsOf: file) : nil
         guard current == expected else { throw GitError("The .gitignore file changed. Reload before saving.") }
         guard !text.contains("\0") else { throw GitError("The .gitignore file must use UTF-8.") }
+        guard Data(text.utf8) != (current ?? Data()) else { return }
         try Data(text.utf8).write(to: file, options: .atomic)
     }
 }

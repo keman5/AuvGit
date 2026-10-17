@@ -1,11 +1,15 @@
 #!/bin/zsh
 set -euo pipefail
 cd "${0:A:h:h}"
+if [[ "${1:-}" == --test-file-sorting ]]; then
+  swift test --build-system native -c release --filter 'LogFileSortingTests|WorkspaceFilePreparationTests|WorkspaceNativeFilesTableTests|NativeCompactHistoryTableTests|LogWindowSelectionFocusTests'
+  exit
+fi
 INSTALL_APP=true
 case "${1:-}" in
   "") ;;
   --no-install) INSTALL_APP=false ;;
-  *) print -u2 "Usage: $0 [--no-install]"; exit 1 ;;
+  *) print -u2 "Usage: $0 [--no-install|--test-file-sorting]"; exit 1 ;;
 esac
 # Compile the native icon so macOS 26+ does not wrap the legacy icns in a gray tile.
 ICON_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/auvgit-app-icon.XXXXXX")"

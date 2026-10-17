@@ -31,7 +31,7 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
     @State private var filterFocusRequest: UUID?
 
     @AppStorage("workspace.columns.v1") private var columnCustomization = TableColumnCustomization<Row>()
-    @State private var sortOrder = [WorkspaceFilePreparation.Sort(column: .path, ascending: true)]
+    @State private var sortOrder: [WorkspaceFilePreparation.Sort] = []
     @State private var category = WorkspaceStatusFilter.all
     @AppStorage("workspace.showHiddenFiles") private var showHidden = true
     @State private var showIgnored = false

@@ -12,7 +12,7 @@ public struct CommitGraph: Sendable {
         /// The child owning the edge; its publication state controls the stroke.
         public let sourceHash: String
     }
-    public struct Row: Sendable {
+    public struct Row: Equatable, Sendable {
         public let hash: String
         public let nodeLane: Int
         public let laneCount: Int

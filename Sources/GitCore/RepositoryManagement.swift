@@ -209,6 +209,7 @@ public extension GitRepository {
         guard index < lines.count else { throw GitError("Unknown stash reference") }
         let position = lines.count - 1 - index
         guard let tab = lines[position].firstIndex(of: "\t") else { throw GitError("Invalid stash reflog") }
+        guard String(lines[position][lines[position].index(after: tab)...]) != message else { return "" }
         lines[position] = String(lines[position][...tab]) + message
         // Only a reflog message changes: OIDs, order, identity and timestamps stay intact.
         // Holding refs/stash.lock prevents Git reference writers during atomic replacement.

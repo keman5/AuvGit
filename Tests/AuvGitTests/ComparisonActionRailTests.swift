@@ -4,6 +4,142 @@ import AppKit
 
 @MainActor
 final class ComparisonActionRailTests: XCTestCase {
+    func testEditablePanesShareOneContinuousBridgeForAddAndDelete() async throws {
+        _ = NSApplication.shared
+        let short = "head\ntail\n"
+        let long = "head\ninserted one\ninserted two\ninserted three\ntail\n"
+        for (source, target, addition) in [(short, long, true), (long, short, false)] {
+            let editor = ComparisonEditor(columns: [
+                .init(id: "copy", title: "Copy", text: source, isEditable: true, message: nil, preservesUndo: true),
+                .init(id: "worktree", title: "Worktree", text: target, isEditable: true, message: nil, preservesUndo: true)
+            ], wrapLines: false, showLineNumbers: true, synchronizeScroll: true, search: "", navigation: 0,
+                changeNavigation: 0, onEdit: { _, _ in })
+            let split = ComparisonSplitView(frame: NSRect(x: 0, y: 0, width: 1000, height: 300)); split.isVertical = true
+            let coordinator = ComparisonEditor.Coordinator(editor); coordinator.split = split; coordinator.update(editor)
+            let window = NSWindow(contentRect: split.frame, styleMask: [.titled], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false; window.contentView = split; window.appearance = NSAppearance(named: .aqua)
+            defer { window.close() }
+            split.resetDistribution()
+            for _ in 0..<5 { split.layoutSubtreeIfNeeded(); coordinator.alignDisplay(); try await Task.sleep(for: .milliseconds(1)) }
+            let rails = split.subviews.flatMap { $0.subviews.compactMap { $0 as? ComparisonActionRail } }.filter { $0.bounds.width > 0 }
+            XCTAssertEqual(rails.count, 2)
+            let left = try XCTUnwrap(rails.first), right = try XCTUnwrap(rails.last)
+            XCTAssertTrue(left.oppositeRail === right); XCTAssertTrue(right.oppositeRail === left)
+            XCTAssertEqual(left.bounds.width + right.bounds.width, ComparisonEditorMetrics.actionRailWidth, accuracy: 0.01)
+            let controls = rails.flatMap { $0.subviews.compactMap { $0 as? NSButton } }
+            XCTAssertEqual(controls.count, 2)
+            if controls.count == 2 {
+                let frames = controls.map { split.convert($0.bounds, from: $0) }
+                XCTAssertTrue(frames[0].intersection(frames[1]).isEmpty, "Copy insertion and delete must have separate hit areas")
+                for button in controls {
+                    let point = split.superview!.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), from: button)
+                    let hit = split.hitTest(point)
+                    XCTAssertTrue(hit === button, "Hit \(String(describing: hit)); control \(button.frame), hidden \(button.isHiddenOrHasHiddenAncestor), split \(split.frame)")
+                }
+            }
+            for rail in rails {
+                for button in rail.subviews.compactMap({ $0 as? NSButton }) {
+                    XCTAssertEqual(button.contentTintColor, DiffVisualStyle.actionColor,
+                        "Copy and delete controls remain neutral regardless of the change color")
+                    button.isHidden = true
+                }
+            }
+            let bitmap = try XCTUnwrap(split.bitmapImageRepForCachingDisplay(in: split.bounds))
+            split.cacheDisplay(in: split.bounds, to: bitmap)
+            let scale = CGFloat(bitmap.pixelsWide) / split.bounds.width
+            let leftX = Int((split.convert(left.bounds, from: left).maxX - 2) * scale)
+            let rightX = Int((split.convert(right.bounds, from: right).minX + 2) * scale)
+            var joinedRows = 0
+            // The curved border crosses these sample columns at different rows. Compare its interior.
+            let margin = Int(4 * scale)
+            for y in margin..<(bitmap.pixelsHigh - margin) {
+                let a = try XCTUnwrap(bitmap.colorAt(x: leftX, y: y)?.usingColorSpace(.deviceRGB))
+                let b = try XCTUnwrap(bitmap.colorAt(x: rightX, y: y)?.usingColorSpace(.deviceRGB))
+                let aTint = addition ? a.greenComponent - a.redComponent : a.redComponent - a.greenComponent
+                let bTint = addition ? b.greenComponent - b.redComponent : b.redComponent - b.greenComponent
+                let interior = [leftX, rightX].allSatisfy { x in
+                    [-margin, margin].allSatisfy { dy in
+                        guard let color = bitmap.colorAt(x: x, y: y + dy)?.usingColorSpace(.deviceRGB) else { return false }
+                        return (addition ? color.greenComponent - color.redComponent : color.redComponent - color.greenComponent) > 0.015
+                    }
+                }
+                if aTint > 0.015 && bTint > 0.015 && interior {
+                    joinedRows += 1
+                    XCTAssertEqual(a.redComponent, b.redComponent, accuracy: 0.04)
+                    XCTAssertEqual(a.greenComponent, b.greenComponent, accuracy: 0.04)
+                }
+            }
+            XCTAssertGreaterThan(joinedRows, 5, "The same colored band must meet at both sides of the divider")
+        }
+    }
+    func testThreeColumnGapsShareOnlyTwoButtonWidths() async throws {
+        _ = NSApplication.shared
+        for conflicts in [false, true] {
+            let editor = ComparisonEditor(columns: [
+                .init(id: "ours", title: "Left", text: "left\n", isEditable: true, message: nil, preservesUndo: true),
+                .init(id: "worktree", title: "Result", text: "<<<<<<< HEAD\nleft\n=======\nright\n>>>>>>> topic\n", isEditable: true, message: nil, preservesUndo: true),
+                .init(id: "theirs", title: "Right", text: "right\n", isEditable: true, message: nil, preservesUndo: true)
+            ], wrapLines: false, showLineNumbers: true, synchronizeScroll: true, search: "", navigation: 0,
+                changeNavigation: 0, onEdit: { _, _ in }, resolver: conflicts ? ComparisonResolverState() : nil)
+            let split = ComparisonSplitView(frame: NSRect(x: 0, y: 0, width: 1200, height: 300)); split.isVertical = true
+            let coordinator = ComparisonEditor.Coordinator(editor); coordinator.split = split; coordinator.update(editor)
+            let window = NSWindow(contentRect: split.frame, styleMask: [.titled], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false; window.contentView = split
+            defer { window.close() }
+            split.resetDistribution()
+            for _ in 0..<5 { split.layoutSubtreeIfNeeded(); coordinator.alignDisplay(); try await Task.sleep(for: .milliseconds(1)) }
+            for position in 0..<2 {
+                let left = try XCTUnwrap(split.subviews[position].subviews.compactMap { $0 as? ComparisonActionRail }.last)
+                let right = try XCTUnwrap(split.subviews[position + 1].subviews.compactMap { $0 as? ComparisonActionRail }.first)
+                XCTAssertEqual(left.bounds.width + right.bounds.width, 2 * ComparisonEditorMetrics.actionButtonWidth + 4, accuracy: 0.01)
+                for rail in [left, right] {
+                    for button in rail.subviews.compactMap({ $0 as? NSButton }) where !button.isHidden {
+                        XCTAssertTrue(rail.bounds.contains(button.frame), "Compact rails must retain the whole hit area")
+                    }
+                }
+            }
+        }
+    }
+
+    func testWholeActionRailUsesNeutralGrayBackgroundInBothAppearances() throws {
+        let rail = ComparisonActionRail(frame: NSRect(x: 0, y: 0, width: ComparisonEditorMetrics.actionRailWidth, height: 100))
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            rail.appearance = try XCTUnwrap(NSAppearance(named: appearance))
+            var expected = DiffVisualStyle.actionBackgroundColor
+            rail.effectiveAppearance.performAsCurrentDrawingAppearance { expected = DiffVisualStyle.actionBackgroundColor.usingColorSpace(.deviceRGB)! }
+            XCTAssertEqual(expected.redComponent, appearance == .aqua ? 0.93 : 0.16, accuracy: 0.01)
+            let bitmap = try XCTUnwrap(rail.bitmapImageRepForCachingDisplay(in: rail.bounds))
+            rail.cacheDisplay(in: rail.bounds, to: bitmap)
+            for y in [1, bitmap.pixelsHigh / 2, bitmap.pixelsHigh - 2] {
+                let color = try XCTUnwrap(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: y)?.usingColorSpace(.deviceRGB))
+                XCTAssertEqual(color.redComponent, expected.redComponent, accuracy: 0.01)
+                XCTAssertEqual(color.greenComponent, expected.greenComponent, accuracy: 0.01)
+                XCTAssertEqual(color.blueComponent, expected.blueComponent, accuracy: 0.01)
+                XCTAssertGreaterThan(color.alphaComponent, 0.99)
+            }
+        }
+    }
+    func testReplacementBackgroundKeepsModificationColorInTwoAndThreeColumns() throws {
+        _ = NSApplication.shared
+        for three in [false, true] {
+            var columns = [ComparisonEditorColumn(id: "head", title: "HEAD", text: "old value\ntail\n", isEditable: true, message: nil)]
+            if three { columns.append(.init(id: "index", title: "Index", text: "old value\ntail\n", isEditable: true, message: nil)) }
+            columns.append(.init(id: "worktree", title: "Result", text: "new value\ntail\n", isEditable: true, message: nil))
+            let editor = ComparisonEditor(columns: columns, wrapLines: true, showLineNumbers: true, synchronizeScroll: true,
+                search: "", navigation: 0, changeNavigation: 0, onEdit: { _, _ in })
+            let split = ComparisonSplitView(frame: NSRect(x: 0, y: 0, width: 900, height: 300)); split.isVertical = true
+            let coordinator = ComparisonEditor.Coordinator(editor); coordinator.split = split; coordinator.update(editor)
+            let texts = split.subviews.flatMap { $0.subviews.compactMap { ($0 as? NSScrollView)?.documentView as? ComparisonTextView } }
+            XCTAssertEqual(texts.count, columns.count)
+            let modification = EditorPreferences.color(UserDefaults.standard.string(forKey: "editor.modificationColor") ?? "", fallback: .systemOrange)
+            for text in texts {
+                XCTAssertEqual(text.lineBackgrounds[0], DiffVisualStyle.lineBackground(modification, dark: false),
+                    "Replacement rows use the same modification color as their connector, independent of +/- signs")
+                XCTAssertNil(text.lineBackgrounds[10], "Unchanged lines remain neutral")
+            }
+        }
+    }
+
     func testConnectorExcludesAlignmentPlaceholderSpacing() throws {
         let text = NSTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 600))
         text.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
@@ -87,6 +223,49 @@ final class ComparisonActionRailTests: XCTestCase {
         }
     }
 
+    func testCopyAndDeleteUseSourceAndTargetEdgesInBothDirections() throws {
+        let root = FlippedRoot(frame: NSRect(x: 0, y: 0, width: 800, height: 400))
+        let source = NSTextView(frame: NSRect(x: 0, y: 50, width: 250, height: 300))
+        let target = NSTextView(frame: NSRect(x: 500, y: 50, width: 250, height: 300))
+        source.string = "source\n"; target.string = "first\nsecond\nthird\n"
+        let rail = ComparisonActionRail(frame: NSRect(x: 330, y: 0, width: 56, height: 400))
+        let opposite = ComparisonActionRail(frame: NSRect(x: 273, y: 0, width: 56, height: 400))
+        for view in [source, target, rail, opposite] { root.addSubview(view) }
+        for text in [source, target] { text.layoutManager!.ensureLayout(for: text.textContainer!) }
+        var clicks = 0
+        for paired in [false, true] {
+            rail.oppositeRail = paired ? opposite : nil
+            for right in [true, false] {
+                rail.pointsRight = right
+                opposite.frame.origin.x = right ? 273 : 387
+                for deletes in [false, true] {
+                    rail.setEntries([.init(text: target, range: NSRange(location: 0, length: target.string.utf16.count),
+                        sourceText: source, sourceRange: NSRange(location: 0, length: source.string.utf16.count),
+                        title: "Apply", deletesContent: deletes, action: { clicks += 1 })])
+                    let host = paired && !deletes ? opposite : rail
+                    let button = try XCTUnwrap(host.subviews.first as? NSButton)
+                    XCTAssertEqual(button.frame.minX, (deletes ? !right : right) ? 2 : 34)
+                    let anchorText = deletes ? target : source
+                    let anchor = host.convert(try XCTUnwrap(ComparisonActionRail.documentRect(NSRange(location: 0, length: anchorText.string.utf16.count), in: anchorText)), from: anchorText)
+                    XCTAssertEqual(button.frame.midY, anchor.midY, accuracy: 0.01)
+                    XCTAssertFalse(button.isBordered)
+                    XCTAssertNil(button.layer?.backgroundColor)
+                    button.performClick(nil)
+                }
+            }
+        }
+        XCTAssertEqual(clicks, 8)
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            try XCTUnwrap(NSAppearance(named: appearance)).performAsCurrentDrawingAppearance {
+                let color = DiffVisualStyle.actionColor.usingColorSpace(.deviceRGB)!
+                XCTAssertEqual(color.redComponent, color.greenComponent, accuracy: 0.001)
+                XCTAssertEqual(color.greenComponent, color.blueComponent, accuracy: 0.001)
+                XCTAssertGreaterThan(color.redComponent, 0.3)
+                XCTAssertLessThan(color.redComponent, 0.8)
+            }
+        }
+    }
+
     func testGutterSignsRenderForEveryEditorFontSizeWithoutTextFallback() throws {
         for size in 9...32 {
             let font = NSFont.monospacedSystemFont(ofSize: CGFloat(size), weight: .regular)
@@ -156,9 +335,17 @@ final class ComparisonActionRailTests: XCTestCase {
         gutter.cacheDisplay(in: gutter.bounds, to: image)
         let scale = CGFloat(image.pixelsHigh) / gutter.bounds.height
         let normal = try XCTUnwrap(image.colorAt(x: 3, y: Int((row.maxY + 8) * scale))?.usingColorSpace(.deviceRGB))
-        XCTAssertLessThan(abs(normal.redComponent - normal.greenComponent), 0.03, "Alignment padding must retain its neutral background")
-        XCTAssertLessThan(abs(normal.blueComponent - normal.greenComponent), 0.03)
+        XCTAssertLessThan(abs(normal.redComponent - normal.greenComponent), 0.01, "Alignment padding must retain its neutral background")
+        XCTAssertLessThan(abs(normal.blueComponent - normal.greenComponent), 0.01)
         let line = try XCTUnwrap(image.colorAt(x: 3, y: Int((row.minY + 2) * scale))?.usingColorSpace(.deviceRGB))
-        XCTAssertGreaterThan(line.redComponent - line.greenComponent, 0.03, "The real deleted row stays highlighted")
+        XCTAssertGreaterThan(line.redComponent - line.greenComponent, 0.015, "The real deleted row stays highlighted")
+        text.highlightCurrentLine = false
+        let textImage = try XCTUnwrap(text.bitmapImageRepForCachingDisplay(in: text.bounds))
+        text.cacheDisplay(in: text.bounds, to: textImage)
+        let textScale = CGFloat(textImage.pixelsHigh) / text.bounds.height
+        let empty = try XCTUnwrap(textImage.colorAt(x: textImage.pixelsWide - 8, y: Int((row.maxY + 8) * textScale))?.usingColorSpace(.deviceRGB))
+        XCTAssertEqual(empty.redComponent, empty.greenComponent, accuracy: 0.01)
+        let filled = try XCTUnwrap(textImage.colorAt(x: textImage.pixelsWide - 8, y: Int(row.midY * textScale))?.usingColorSpace(.deviceRGB))
+        XCTAssertGreaterThan(filled.redComponent - filled.greenComponent, 0.015, "Change backgrounds extend across the whole real row")
     }
 }

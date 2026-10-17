@@ -83,6 +83,12 @@ struct RepositoryContextEditor: View {
     }
     private func save() {
         let expected = expectedIgnore, text = ignoreText, remote = selectedRemote, index = fetchIndex, fetch = fetchURL, push: String? = editPush ? pushURL : nil
+        if target.editor == .ignore {
+            if Data(text.utf8) == (expected ?? Data()) { dismiss(); return }
+        } else if let remote, remote.fetchURLs.indices.contains(index), remote.fetchURLs[index] == fetch,
+                  push == nil || (push == "" ? remote.pushURLs.isEmpty : push == remote.pushURLs.first) {
+            dismiss(); return
+        }
         Task {
             let success = await store.performRepositoryContextOperation(repositoryContextText(target.editor == .ignore ? "Edit Ignore File" : "Edit Remote URL"), path: target.path) { repository in
                 if target.editor == .ignore { try await repository.saveGitignore(text: text, expected: expected) }

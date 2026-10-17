@@ -5,6 +5,27 @@ import AuvGitLocalization
 
 final class OperationProgressTests: XCTestCase {
     @MainActor
+    func testFooterShowsOnlyTheCurrentPhaseForEveryOperation() throws {
+        let store = RepositoryStore(persistsSession: false)
+        let repository = GitRepository(url: URL(fileURLWithPath: "/tmp/footer-progress-repository"))
+        store.repository = repository; store.repositoryURL = repository.url; store.isBusy = true
+        defer { store.closeTransientSession() }
+        for command in ["pull", "fetch", "push", "add", "commit", "stash", "checkout"] {
+            store.beginUserOperation(command)
+            let id = store.currentUserOperationID
+            _ = store.progressHandler(for: repository, operationID: id)
+            let event = try XCTUnwrap(GitProgressParser.parse("git " + command))
+            store.receiveProgress(event, repository: repository, operationID: id)
+            XCTAssertEqual(store.footerStatus, RepositoryStore.progressDetail(event.message))
+            XCTAssertFalse(store.footerStatus.contains(" · "))
+            let detail = try XCTUnwrap(GitProgressParser.parse("Receiving objects: 45% (9/20)"))
+            store.receiveProgress(detail, repository: repository, operationID: id)
+            XCTAssertEqual(store.footerStatus, RepositoryStore.progressDetail(detail.message))
+            store.finishUserOperation(command, repository: repository)
+            XCTAssertEqual(store.footerStatus, store.displayStatus)
+        }
+    }
+    @MainActor
     func testProgressPhaseLocalizationPreservesCountsAndRate() {
         let suffix = ": 50% (1/2), 1.00 MiB | 2.00 MiB/s"
         XCTAssertEqual(RepositoryStore.progressDetail("Counting objects" + suffix), L10n.text("Counting objects", table: "OperationLog") + suffix)

@@ -16,7 +16,7 @@ Selected 01 direction:
 
 `AppIcon.png` preserves the selected red branch artwork while removing disconnected and low-alpha pixels outside the icon body. The cleanup keeps the original pixels inside the retained body mask and clears exterior RGB and alpha together, preventing Finder thumbnails from rendering a gray background or colored fringe.
 
-macOS `sips` generates the 10 standard 16–1024 pixel iconset representations from the cleaned master, preserving alpha; `iconutil` creates `AppIcon.icns`. `scripts/build-app.sh` embeds it and sets `CFBundleIconFile` to `AppIcon`.
+macOS `sips` generates the 10 standard 16–1024 pixel iconset representations from the cleaned master, preserving alpha; `iconutil` creates `AppIcon.icns`. `scripts/build.sh` embeds it and sets `CFBundleIconFile` to `AppIcon`.
 
 macOS 26 and later can shrink a legacy `.icns` onto a gray compatibility tile in Finder, even when its exterior pixels are transparent. `AppIcon.icon` supplies the native icon instead: `Assets/artwork.png` is an unchanged copy of the existing 1024-pixel iconset image, enlarged by 1.18 within the native canvas to remove the legacy transparent margin. A matching coral fill covers the exterior and the system supplies the final rounded mask. The original red tile and white branch artwork are retained.
 

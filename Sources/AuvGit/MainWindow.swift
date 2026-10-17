@@ -1029,7 +1029,7 @@ extension MainWindow {
         case .rename:
             guard !store.isBusy, ordered.count == 1, let path = ordered.first else { return }
             askName(fileContextText("rename"), initial: path) { destination in
-                guard store.repositoryURL == root, !store.isBusy else { return }
+                guard store.repositoryURL == root, !store.isBusy, destination != path else { return }
                 store.operation(fileContextText("rename")) { repo in
                     guard repo.url == root else { return }
                     try await repo.renameWorkspaceFile(path: path, destination: destination)
@@ -1126,7 +1126,11 @@ extension MainWindow {
             trackingRepository = store.repository
             selectedUpstream = store.branches.first(where: \.isRemote).map { "refs/remotes/" + $0.name } ?? ""
             trackingBranch = value
-        case .rename: askName(interactionText("Rename Branch…"), initial: value) { name in store.operation(interactionText("Rename Branch…")) { try await $0.renameBranch(oldName: value, newName: name) } }
+        case .rename:
+            askName(interactionText("Rename Branch…"), initial: value) { name in
+                guard name != value else { return }
+                store.operation(interactionText("Rename Branch…")) { try await $0.renameBranch(oldName: value, newName: name) }
+            }
         case .delete:
             let repository = store.repository
             confirm(interactionText("Delete Branch…"), interactionText("Delete Branch Message", value)) {
@@ -1199,7 +1203,7 @@ private struct NamePromptSheet: View {
         }.padding(20).frame(width: 360)
     }
     private func submit() {
-        let name = value.trimmingCharacters(in: .whitespaces)
+        let name = value == prompt.initial ? value : value.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
         onSubmit(name)
     }

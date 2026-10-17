@@ -228,6 +228,7 @@ public actor GitRepository {
         if !ordinary.isEmpty { _ = try await run(["restore", "--worktree", "--"] + ordinary) }
     }
     public func renameBranch(oldName: String, newName: String) async throws {
+        guard oldName != newName else { return }
         try await validateBranch(oldName); try await validateBranch(newName)
         _ = try await run(["branch", "-m", "--", oldName, newName])
     }
