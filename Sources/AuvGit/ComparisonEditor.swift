@@ -190,6 +190,7 @@ struct ComparisonEditor: NSViewRepresentable {
         var updating = false
         var didScrollToInitialChange = false
         var searchIndices: [String: Int] = [:]
+        var searchTotals: [String: Int] = [:]
         var navigationTexts: [String] = []
         var navigationBaseline = -1
         var navigationBands: [[Range<Int>]] = []
@@ -373,7 +374,7 @@ struct ComparisonEditor: NSViewRepresentable {
         private func scheduleSearchStatus() {
             DispatchQueue.main.async { [weak self] in
                 guard let self, let pane = self.historyTarget() ?? self.panes.first(where: { $0.id == "worktree" }) ?? self.panes.first else { return }
-                let total = (try? ComparisonSearch.matches(in: pane.text.string, options: self.model.effectiveSearch).get().count) ?? 0
+                let total = self.searchTotals[pane.id] ?? 0
                 let current = self.searchIndices[pane.id].map { min($0 + 1, total) } ?? 0
                 self.model.editingCommands?.updateSearch(current: current, total: total)
             }
@@ -497,6 +498,7 @@ struct ComparisonEditor: NSViewRepresentable {
                                     }
                                     return ComparisonActionRail.Entry(text: pane.text, range: block.range,
                                         sourceText: source.text, sourceRange: band.map { characterRange($0[neighbor], in: source) },
+                                        sourceInsertionLine: band.flatMap { $0[neighbor].isEmpty ? $0[neighbor].lowerBound : nil },
                                         title: resolverText(side == .ours ? "Use Ours" : "Use Theirs") + " — " + resolverText("Apply to the current conflict only"),
                                         action: { [weak self] in self?.acceptConflict(side, index: index) })
                                 }
@@ -508,6 +510,8 @@ struct ComparisonEditor: NSViewRepresentable {
                                 let rightLines = pointsRight ? block.targetLines : block.sourceLines
                                 return ComparisonActionRail.Entry(text: pane.text, range: characterRange(block.targetLines, in: pane),
                                     sourceText: source.text, sourceRange: characterRange(block.sourceLines, in: source),
+                                    insertionLine: block.targetLines.isEmpty ? block.targetLines.lowerBound : nil,
+                                    sourceInsertionLine: block.sourceLines.isEmpty ? block.sourceLines.lowerBound : nil,
                                     tint: leftLines.isEmpty ? EditorPreferences.color(model.additionColor, fallback: .systemGreen)
                                         : rightLines.isEmpty ? EditorPreferences.color(model.deletionColor, fallback: .systemRed) : nil,
                                     title: block.sourceLines.isEmpty ? L10n.text("Delete change", table: "AdvancedDiff") : L10n.text("acceptBlock", table: "AdvancedDiff", arguments: [source.title.stringValue]),
@@ -782,6 +786,8 @@ struct ComparisonEditor: NSViewRepresentable {
         }
         func decorate() {
             guard let baseline = panes.first else { return }
+            searchTotals = [:]
+            defer { scheduleSearchStatus() }
             panes.forEach { $0.text.missingLineAnchors = [:] }
             lineDiffs = [:]
             var lineChanges: [String: Set<Int>] = [:]
@@ -924,16 +930,15 @@ struct ComparisonEditor: NSViewRepresentable {
                 }
                 changedRanges[pane.id] = changes.sorted { $0.location < $1.location }
                 if case .success(let matches) = ComparisonSearch.matches(in: pane.text.string, options: model.effectiveSearch) {
+                    searchTotals[pane.id] = matches.count
                     for match in matches {
                         if match.length > 0 { layout.addTemporaryAttribute(.backgroundColor, value: NSColor.systemYellow.withAlphaComponent(0.45), forCharacterRange: match) }
-                        for (line, start) in pane.gutter.starts.enumerated() {
-                            let end = line + 1 < pane.gutter.starts.count ? pane.gutter.starts[line + 1] : content.length + 1
-                            if (start..<end).contains(match.location) || (match.length > 0 && NSIntersectionRange(NSRange(location: start, length: end - start), match).length > 0) {
-                                pane.gutter.lineBackgrounds[line] = NSColor.systemYellow.withAlphaComponent(0.45)
-                            }
-                        }
+                    }
+                    for line in ComparisonSearch.matchingLines(matches: matches, starts: pane.gutter.starts, length: content.length) {
+                        pane.gutter.lineBackgrounds[line] = NSColor.systemYellow.withAlphaComponent(0.45)
                     }
                 }
+                pane.scroll.invalidateChangeBackgrounds()
             }
         }
         var focusedText: NSTextView? {
@@ -1173,6 +1178,10 @@ final class ComparisonTextView: UndoableComparisonTextView {
     }
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
+        drawChangeBackgrounds(in: rect, width: bounds.width)
+        drawInteractionBackgrounds(in: rect)
+    }
+    func drawChangeBackgrounds(in rect: NSRect, width: CGFloat) {
         if let layoutManager, let textContainer, !lineBackgrounds.isEmpty {
             let content = string as NSString
             let glyphs = layoutManager.glyphRange(forBoundingRect: rect.offsetBy(dx: -textContainerInset.width, dy: -textContainerInset.height), in: textContainer)
@@ -1180,25 +1189,35 @@ final class ComparisonTextView: UndoableComparisonTextView {
                 let start = content.lineRange(for: NSRange(location: layoutManager.characterIndexForGlyph(at: range.location), length: 0)).location
                 guard let color = self.lineBackgrounds[start] else { return }
                 color.setFill()
-                NSRect(x: 0, y: fragment.minY + self.textContainerInset.height, width: self.bounds.width, height: used.height).intersection(rect).fill()
+                NSRect(x: 0, y: fragment.minY + self.textContainerInset.height, width: width, height: used.height).intersection(rect).fill()
             }
         }
         for (line, color) in missingLineAnchors {
             color.setFill()
-            NSRect(x: 0, y: missingChangeY(at: line), width: bounds.width, height: 1).intersection(rect).fill()
+            NSRect(x: 0, y: missingChangeY(at: line), width: width, height: 1).intersection(rect).fill()
         }
         if let layoutManager {
             for (index, block) in conflictBlocks.enumerated() {
-                guard let blockRect = ConflictVisualStyle.rect(block.range, in: self, layout: layoutManager), blockRect.intersects(rect) else { continue }
+                guard var blockRect = ConflictVisualStyle.rect(block.range, in: self, layout: layoutManager), blockRect.intersects(rect) else { continue }
+                blockRect.size.width = width
                 let selected = index == selectedConflict
                 ConflictVisualStyle.fill(.systemOrange, emphasis: selected ? 0.20 : 0.11).setFill()
                 blockRect.intersection(rect).fill()
                 // The marker and content offsets are real UTF-16 positions; drawing never changes the draft.
                 for section in ConflictVisualStyle.sections(block, in: string) {
-                    guard let sectionRect = ConflictVisualStyle.rect(section.0, in: self, layout: layoutManager) else { continue }
+                    guard var sectionRect = ConflictVisualStyle.rect(section.0, in: self, layout: layoutManager) else { continue }
+                    sectionRect.size.width = width
                     ConflictVisualStyle.fill(section.1, emphasis: selected ? 0.22 : 0.15).setFill()
                     sectionRect.intersection(rect).fill()
                 }
+            }
+        }
+    }
+    private func drawInteractionBackgrounds(in rect: NSRect) {
+        if let layoutManager {
+            for (index, block) in conflictBlocks.enumerated() {
+                guard let blockRect = ConflictVisualStyle.rect(block.range, in: self, layout: layoutManager), blockRect.intersects(rect) else { continue }
+                let selected = index == selectedConflict
                 NSColor.systemOrange.withAlphaComponent(selected ? 0.95 : 0.50).setFill()
                 NSRect(x: visibleRect.minX, y: blockRect.minY, width: selected ? 4 : 2, height: blockRect.height).intersection(rect).fill()
                 if selected {

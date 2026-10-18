@@ -48,7 +48,7 @@ final class NativeFocusBridgeTests: XCTestCase {
                 }
         }
     }
-    func testRealSwiftUISearchPopoverWaitsForTab() throws {
+    func testRealSwiftUISearchPopoverFocusesQueryOnPresentation() throws {
         let app = NSApplication.shared
         var failure: Error?
         Task { @MainActor in
@@ -90,9 +90,6 @@ final class NativeFocusBridgeTests: XCTestCase {
         }
         let field = try XCTUnwrap(query), popup = try XCTUnwrap(field.window)
         XCTAssertTrue(popup.isKeyWindow)
-        XCTAssertFalse(ownsFocus(field, popup))
-        XCTAssertFalse(NativeFocusAppearance.isVisible(in: popup))
-        NSApplication.shared.sendEvent(tabEvent(in: popup))
         XCTAssertTrue(ownsFocus(field, popup))
         XCTAssertTrue(NativeFocusAppearance.isVisible(in: popup))
     }
@@ -247,8 +244,6 @@ final class NativeFocusBridgeTests: XCTestCase {
         defer { window.close() }
         drain(host)
         let query = try XCTUnwrap(fields(host).first { $0.accessibilityLabel() == comparisonSearchText("Find") })
-        XCTAssertFalse(ownsFocus(query, window))
-        window.sendEvent(tabEvent(in: window))
         XCTAssertTrue(ownsFocus(query, window))
     }
     func testComparisonPopoverDoesNotRebindParentScope() throws {
@@ -274,14 +269,94 @@ final class NativeFocusBridgeTests: XCTestCase {
             (view as? NativeFocusBridge.RootView).map { [$0] } ?? view.subviews.flatMap(roots)
         }
         XCTAssertTrue(roots(host).contains { $0.scope !== scope }, "Interactive popover must own a scope instead of inheriting the parent")
-        XCTAssertFalse(ownsFocus(query, popupWindow))
-        NSApplication.shared.sendEvent(tabEvent(in: popupWindow))
         XCTAssertTrue(ownsFocus(query, popupWindow))
         popover.close(); drain(parentHost)
         let parentField = try XCTUnwrap(fields(parentHost).first)
         parent.makeFirstResponder(parent)
         NSApplication.shared.sendEvent(tabEvent(in: parent))
         XCTAssertTrue(ownsFocus(parentField, parent), "Closing search must leave the parent's coordinator attached to its own window")
+    }
+    private final class SearchInputModel: ObservableObject {
+        @Published var options = ComparisonSearchOptions(query: "🙂existing")
+        @Published var replacement = "replacement"
+    }
+    private struct SearchInputFixture: View {
+        @ObservedObject var model: SearchInputModel
+        @State private var presented = false
+        var body: some View {
+            KeyViewProxy(label: "Search") { presented = true }
+                .popover(isPresented: $presented) {
+                    ComparisonSearchPopover(options: $model.options, replacement: $model.replacement,
+                        matchCount: 0, onNavigate: { _ in })
+                }
+                .background(ComparisonKeyboardRegion(standalone: true) { _ in false })
+                .nativeFocusRoot()
+        }
+    }
+    func testSearchRefocusSelectsAllFromEitherFieldAndDebouncesTyping() throws {
+        try runApplicationFixture { try await self.verifySearchTyping() }
+    }
+    private func verifySearchTyping() async throws {
+        let app = NSApplication.shared, policy = NSApplication.shared.activationPolicy()
+        app.setActivationPolicy(.regular)
+        defer { app.setActivationPolicy(policy) }
+        let model = SearchInputModel()
+        let host = NSHostingView(rootView: SearchInputFixture(model: model))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 260), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentView = host; window.makeKeyAndOrderFront(nil)
+        defer { window.close() }
+        drain(host)
+        NSRunningApplication.current.activate(options: [.activateAllWindows])
+        app.activate(ignoringOtherApps: true)
+        let activationDeadline = ContinuousClock.now + .seconds(2)
+        while !app.isActive && ContinuousClock.now < activationDeadline {
+            NSRunningApplication.current.activate(options: [.activateAllWindows])
+            app.activate(ignoringOtherApps: true)
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(app.isActive)
+        func buttons(_ view: NSView) -> [NSButton] { (view as? NSButton).map { [$0] } ?? view.subviews.flatMap(buttons) }
+        try XCTUnwrap(buttons(host).first { $0.title == "Search" }).performClick(nil)
+        try await Task.sleep(for: .milliseconds(250))
+        let popupHost = try XCTUnwrap(app.windows.filter { $0 !== window && $0.isVisible }.compactMap(\.contentView)
+            .first { fields($0).contains { $0.accessibilityLabel() == comparisonSearchText("Find") } })
+        let popup = try XCTUnwrap(popupHost.window)
+        let query = try XCTUnwrap(fields(popupHost).first { $0.accessibilityLabel() == comparisonSearchText("Find") })
+        let replacement = try XCTUnwrap(fields(popupHost).first { $0.accessibilityLabel() == comparisonSearchText("Replace with") })
+        XCTAssertTrue(ownsFocus(query, popup), "key=\(popup.isKeyWindow) visible=\(popup.isVisible) responder=\(String(describing: popup.firstResponder)) fieldWindowMatches=\(query.window === popup)")
+        XCTAssertEqual(query.currentEditor()?.selectedRange, NSRange(location: 0, length: model.options.query.utf16.count))
+        popup.makeFirstResponder(popup)
+        NotificationCenter.default.post(name: NSWindow.didUpdateNotification, object: popup)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertTrue(ownsFocus(query, popup), "Restore search after SwiftUI resets the presentation responder")
+        popup.makeFirstResponder(replacement)
+        NotificationCenter.default.post(name: NSWindow.didUpdateNotification, object: popup)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertTrue(ownsFocus(replacement, popup), "Ordinary updates must preserve the user's chosen input field")
+        for field in [query, replacement] {
+            popup.makeFirstResponder(field)
+            let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .control, timestamp: 0, windowNumber: window.windowNumber, context: nil, characters: "f", charactersIgnoringModifiers: "f", isARepeat: false, keyCode: 3))
+            NSApplication.shared.sendEvent(event)
+            drain(host)
+            try await Task.sleep(for: .milliseconds(30))
+            XCTAssertTrue(ownsFocus(query, popup))
+            XCTAssertEqual(query.currentEditor()?.selectedRange, NSRange(location: 0, length: query.stringValue.utf16.count))
+        }
+        let editor = try XCTUnwrap(query.currentEditor() as? NSTextView)
+        editor.insertText("new", replacementRange: editor.selectedRange())
+        XCTAssertEqual(query.stringValue, "new")
+        XCTAssertEqual(model.options.query, "🙂existing", "Native input must not synchronously rebuild comparison highlights")
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertEqual(model.options.query, "new")
+        XCTAssertTrue(ownsFocus(query, popup))
+        XCTAssertEqual(editor.selectedRange(), NSRange(location: 3, length: 0))
+        popup.makeFirstResponder(replacement)
+        let replacementEditor = try XCTUnwrap(replacement.currentEditor() as? NSTextView)
+        replacementEditor.selectAll(nil)
+        replacementEditor.insertText("updated", replacementRange: replacementEditor.selectedRange())
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertTrue(ownsFocus(replacement, popup))
+        XCTAssertEqual(replacementEditor.selectedRange(), NSRange(location: 7, length: 0))
     }
     private struct SearchFixture: View {
         @ObservedObject var model: Model

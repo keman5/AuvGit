@@ -18,6 +18,24 @@ enum ComparisonSearch {
             return .success(expression.matches(in: text, range: NSRange(location: 0, length: text.utf16.count)).map(\.range))
         } catch { return .failure(error) }
     }
+    // Scan ordered matches and line starts together instead of scanning the whole document per match.
+    static func matchingLines(matches: [NSRange], starts: [Int], length: Int) -> Set<Int> {
+        var lines: Set<Int> = []
+        var line = 0
+        for match in matches {
+            while line + 1 < starts.count && starts[line + 1] <= match.location { line += 1 }
+            var endLine = line
+            while endLine < starts.count {
+                let start = starts[endLine]
+                let end = endLine + 1 < starts.count ? starts[endLine + 1] : length + 1
+                guard start < NSMaxRange(match) || (start..<end).contains(match.location) else { break }
+                lines.insert(endLine)
+                endLine += 1
+            }
+            line = max(line, endLine - 1)
+        }
+        return lines
+    }
     static func replacing(in text: String, options: ComparisonSearchOptions, replacement: String, all: Bool, selected: NSRange? = nil) -> Result<String, Error> {
         do {
             guard !options.query.isEmpty else { return .success(text) }
@@ -51,16 +69,23 @@ struct ComparisonSearchPopover: View {
     var error: String? = nil
     var onCancelSearch: (() -> Void)? = nil
     var onClose: (() -> Void)? = nil
-    private func close() { onClose?(); dismiss() }
+    @State private var query: String?
+    private var pendingQuery: String { query ?? options.query }
+    private func applyQuery() { options.query = pendingQuery }
+    private func navigate(_ forward: Bool) {
+        applyQuery()
+        DispatchQueue.main.async { onNavigate(forward) }
+    }
+    private func close() { applyQuery(); onClose?(); dismiss() }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(comparisonSearchText("Search and replace")).fontWeight(.semibold)
             HStack {
-                ComparisonSearchField(text: $options.query, placeholder: comparisonSearchText("Find"), initialFocus: true,
-                    onNavigate: onNavigate, onEscape: close).frame(height: 24)
+                ComparisonSearchField(text: Binding(get: { pendingQuery }, set: { query = $0 }), placeholder: comparisonSearchText("Find"), initialFocus: true,
+                    onNavigate: navigate, onEscape: close).frame(height: 24)
                 HStack(spacing: 2) {
-                    Button { onNavigate(false) } label: { ComparisonToolbarIcon(name: "chevron.up") }.buttonStyle(ComparisonToolbarButtonStyle()).configuredShortcut(.compareFindPrevious, using: shortcuts).help(comparisonSearchText("Previous match"))
-                    Button { onNavigate(true) } label: { ComparisonToolbarIcon(name: "chevron.down") }.buttonStyle(ComparisonToolbarButtonStyle()).configuredShortcut(.compareFindNext, using: shortcuts).help(comparisonSearchText("Next match"))
+                    Button { navigate(false) } label: { ComparisonToolbarIcon(name: "chevron.up") }.buttonStyle(ComparisonToolbarButtonStyle()).configuredShortcut(.compareFindPrevious, using: shortcuts).help(comparisonSearchText("Previous match"))
+                    Button { navigate(true) } label: { ComparisonToolbarIcon(name: "chevron.down") }.buttonStyle(ComparisonToolbarButtonStyle()).configuredShortcut(.compareFindNext, using: shortcuts).help(comparisonSearchText("Next match"))
                 }
             }
             HStack {
@@ -72,7 +97,7 @@ struct ComparisonSearchPopover: View {
             if let error { Text(error).font(.caption).foregroundStyle(.orange).textSelection(.enabled) }
             Divider()
             ComparisonSearchField(text: $replacement, placeholder: comparisonSearchText("Replace with"),
-                onNavigate: onNavigate, onEscape: close).frame(height: 24)
+                onNavigate: navigate, onEscape: close).frame(height: 24)
             HStack {
                 if canReplace {
                     Button(comparisonSearchText("Replace")) { onReplace(false) }
@@ -81,8 +106,17 @@ struct ComparisonSearchPopover: View {
                     Button(comparisonSearchText("Open editor to replace"), action: onOpenEditor)
                 }
                 Spacer()
-            }.disabled(error != nil || (canReplace && (options.query.isEmpty || matchCount == 0)))
+            }.disabled(pendingQuery != options.query || error != nil || (canReplace && (options.query.isEmpty || matchCount == 0)))
             Text(comparisonSearchText(canReplace ? "Replacements change the draft only. Use Undo to revert." : "This preview is read-only.")).font(.caption).foregroundStyle(.secondary)
-        }.controlSize(.small).padding(14).frame(width: 400).onExitCommand(perform: close).nativeFocusRoot()
+        }.controlSize(.small).padding(14).frame(width: 400).onExitCommand(perform: close).background(ComparisonKeyboardRegion(standalone: true, commands: [.compareFind]) { _ in
+            return true
+        })
+        .nativeFocusRoot(focusesOnPresentation: true)
+        .task(id: query) {
+            guard let query else { return }
+            do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+            options.query = query
+        }
+        .onDisappear { applyQuery() }
     }
 }

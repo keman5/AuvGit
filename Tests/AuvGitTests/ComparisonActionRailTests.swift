@@ -200,6 +200,49 @@ final class ComparisonActionRailTests: XCTestCase {
         }
     }
 
+    func testEOFInsertionConnectsAtThePaintedLogicalLineInEveryPane() async throws {
+        _ = NSApplication.shared
+        for wrap in [false, true] {
+            for count in [2, 3] {
+                for afterEmptyLine in [false, true] {
+                    let source = String(repeating: "wrapped 🙂 content ", count: 20) + "\n"
+                    let target = source + (afterEmptyLine ? "\n" : "") + "added\nsecond\n"
+                    let editor = ComparisonEditor(columns: (0..<count).map { index in
+                        .init(id: "pane\(index)", title: "Pane \(index)", text: index == 1 ? target : source,
+                              isEditable: true, message: nil, preservesUndo: true)
+                    }, wrapLines: wrap, showLineNumbers: true, synchronizeScroll: true, search: "", navigation: 0,
+                        changeNavigation: 0, onEdit: { _, _ in })
+                    let split = ComparisonSplitView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800)); split.isVertical = true
+                    let coordinator = ComparisonEditor.Coordinator(editor); coordinator.split = split; coordinator.update(editor)
+                    let window = NSWindow(contentRect: split.frame, styleMask: [.titled], backing: .buffered, defer: false)
+                    window.isReleasedWhenClosed = false; window.contentView = split
+                    defer { window.close() }
+                    split.resetDistribution()
+                    for _ in 0..<5 { split.layoutSubtreeIfNeeded(); coordinator.alignDisplay(); try await Task.sleep(for: .milliseconds(1)) }
+                    let texts = split.subviews.compactMap { $0.subviews.compactMap { ($0 as? NSScrollView)?.documentView as? ComparisonTextView }.first }
+                    let insertionLine = afterEmptyLine ? 2 : 1
+                    for index in texts.indices where index != 1 {
+                        let text = texts[index]
+                        let anchor = try XCTUnwrap(ComparisonActionRail.documentRect(NSRange(location: source.utf16.count, length: 0), in: text, insertionLine: insertionLine))
+                        XCTAssertEqual(anchor.minY, text.missingChangeY(at: insertionLine), accuracy: 0.01)
+                        let rails = split.subviews[index].subviews.compactMap { $0 as? ComparisonActionRail }
+                        let rail = try XCTUnwrap(rails.first { $0.bounds.width > 0 })
+                        let point = rail.convert(NSPoint(x: 0, y: anchor.minY), from: text)
+                        let bitmap = try XCTUnwrap(rail.bitmapImageRepForCachingDisplay(in: rail.bounds))
+                        rail.cacheDisplay(in: rail.bounds, to: bitmap)
+                        let scale = CGFloat(bitmap.pixelsWide) / rail.bounds.width
+                        let x = index == 0 ? 1 : rail.bounds.width - 1
+                        let colors = (-1...1).compactMap { dy in
+                            bitmap.colorAt(x: Int(x * scale), y: Int(point.y * scale) + dy)?.usingColorSpace(.deviceRGB)
+                        }
+                        XCTAssertTrue(colors.contains { abs($0.greenComponent - $0.redComponent) > 0.05 },
+                            "The rendered connector must meet the insertion marker, wrap=\(wrap), panes=\(count), afterEmpty=\(afterEmptyLine), pane=\(index)")
+                    }
+                }
+            }
+        }
+    }
+
     private final class FlippedRoot: NSView { override var isFlipped: Bool { true } }
     func testArrowStaysBesideSourceBlockInsteadOfMiddleOfResult() throws {
         let root = FlippedRoot(frame: NSRect(x: 0, y: 0, width: 800, height: 400))

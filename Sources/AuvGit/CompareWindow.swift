@@ -550,10 +550,9 @@ private struct FileCompareContent: View {
         return revisions.allSatisfy { ($0.data?.count ?? 0) <= 2 * 1024 * 1024 }
     }
     private var showsCompact: Bool { compact && layout != "patch" && supportsNativeComparison }
-    private var searchMatches: [NSRange] { (try? ComparisonSearch.matches(in: session.text(in: session.activePaneID), options: searchOptions).get()) ?? [] }
     private var searchError: String? {
         if let replacementError { return replacementError }
-        if case .failure(let error) = ComparisonSearch.matches(in: session.draft, options: searchOptions) { return comparisonSearchText("Invalid regular expression") + ": " + error.localizedDescription }
+        if case .failure(let error) = ComparisonSearch.matches(in: "", options: searchOptions) { return comparisonSearchText("Invalid regular expression") + ": " + error.localizedDescription }
         return nil
     }
     private var controls: some View {
@@ -629,7 +628,7 @@ private struct FileCompareContent: View {
             Button { showSearch.toggle() } label: { ComparisonToolbarIcon(name: "magnifyingglass") }.buttonStyle(ComparisonToolbarButtonStyle())
                 .help(comparisonSearchText("Search and replace")).accessibilityLabel(comparisonSearchText("Search and replace"))
                 .popover(isPresented: Binding(get: { showSearch && supportsNativeComparison }, set: { showSearch = $0 }), arrowEdge: .bottom) {
-                    ComparisonSearchPopover(options: $searchOptions, replacement: $replacement, matchCount: searchMatches.count, matchIndex: editingCommands.searchCurrent,
+                    ComparisonSearchPopover(options: $searchOptions, replacement: $replacement, matchCount: editingCommands.searchTotal, matchIndex: editingCommands.searchCurrent,
                         canReplace: session.canEdit(session.activePaneID) && !session.isBusy && layout != "patch", onNavigate: { forward in
                             compact = false
                             if session.activePaneID == "base" { baseNavigation += forward ? 1 : -1 }

@@ -25,12 +25,16 @@ struct ComparisonKeyboardRegion: NSViewRepresentable {
         deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
         func handle(_ event: NSEvent) -> NSEvent? {
             guard let window, event.window === window, window.attachedSheet == nil, !isHiddenOrHasHiddenAncestor else { return event }
+            let controlFind = event.charactersIgnoringModifiers?.lowercased() == "f" && event.modifierFlags.intersection([.command, .control, .option, .shift]) == .control
+            let command = controlFind && (commands?.contains(.compareFind) ?? true) ? ShortcutCommand.compareFind : ShortcutCommand.allCases.first(where: { $0.scopes.contains(.comparison) && (commands?.contains($0) ?? true) && shortcuts.binding($0).matches(event) })
+            guard let command else { return event }
+            // A popover can receive keys addressed to its comparison parent window.
+            if command == .compareFind, ComparisonSearchField.focusQuery(in: window) { return nil }
             if !standalone {
                 guard let responder = window.firstResponder as? NSView, responder is ReadOnlyDiffTextView || responder is ComparisonTextView else { return event }
                 let center = NSPoint(x: responder.visibleRect.midX, y: responder.visibleRect.midY)
                 guard bounds.contains(responder.convert(center, to: self)) else { return event }
             }
-            guard let command = ShortcutCommand.allCases.first(where: { $0.scopes.contains(.comparison) && (commands?.contains($0) ?? true) && shortcuts.binding($0).matches(event) }) else { return event }
             let editingField = (window.firstResponder as? NSTextView)?.isFieldEditor == true || window.firstResponder is NSTextField
             if editingField, ![.compareFind, .compareFindNext, .compareFindPrevious].contains(command) { return event }
             _ = action(command)

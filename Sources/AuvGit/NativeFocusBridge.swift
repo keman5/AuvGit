@@ -70,7 +70,8 @@ final class NativeFocusCoordinator: ObservableObject {
             presentationObserver = NotificationCenter.default.addObserver(forName: NSWindow.didUpdateNotification,
                 object: window, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    guard let self, self.focusesOnPresentation, !self.presentationFocused,
+                    guard let self, self.focusesOnPresentation,
+                          !self.presentationFocused || self.window?.firstResponder === self.window,
                           self.window?.isVisible == true else { return }
                     self.schedule()
                 }
@@ -170,7 +171,7 @@ final class NativeFocusCoordinator: ObservableObject {
         if shouldRecalculateLoop { window.recalculateKeyViewLoop(); shouldRecalculateLoop = false }
         appearance?.scheduleApply()
         targets = targets.filter { $0.value.view != nil }
-        if focusesOnPresentation, !presentationFocused, window.isVisible, window.attachedSheet == nil {
+        if focusesOnPresentation, (!presentationFocused || window.firstResponder === window), window.isVisible, window.attachedSheet == nil {
             if window.isVisible && window.canBecomeKey { window.makeKey() }
             DialogAppearance.configureDefaultButton(in: window)
             let initial = targets.values.first { $0.initial && $0.view.map { isAvailable($0, in: window) } == true }?.view
@@ -187,8 +188,8 @@ final class NativeFocusCoordinator: ObservableObject {
                 appearance?.beginNavigation()
                 window.initialFirstResponder = view
                 if window.makeFirstResponder(view) {
+                    if !presentationFocused, let field = view as? NSTextField { field.selectText(nil) }
                     presentationFocused = true
-                    if let field = view as? NSTextField { field.selectText(nil) }
                 }
             }
         }

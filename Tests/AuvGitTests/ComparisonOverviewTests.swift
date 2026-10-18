@@ -4,6 +4,75 @@ import AppKit
 
 @MainActor
 final class ComparisonOverviewTests: XCTestCase {
+    func testOversizedTrackDirtyRectCannotEraseNeighboringCode() throws {
+        let scroll = ComparisonOverviewScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 100))
+        scroll.documentView = ComparisonTextView(frame: NSRect(x: 0, y: 0, width: 250, height: 100), textContainer: nil)
+        scroll.tile()
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 300, pixelsHigh: 100,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: bitmap))
+        NSColor.systemPurple.setFill(); NSRect(x: 0, y: 0, width: 300, height: 100).fill()
+        NSGraphicsContext.current!.cgContext.translateBy(x: 270, y: 0)
+        scroll.drawChangeBackground(in: scroll.overview, rect: NSRect(x: -270, y: 0, width: 300, height: 100))
+        NSGraphicsContext.restoreGraphicsState()
+        let neighbor = try XCTUnwrap(bitmap.colorAt(x: 100, y: 50)?.usingColorSpace(.deviceRGB))
+        let untouched = try XCTUnwrap(bitmap.colorAt(x: 290, y: 50)?.usingColorSpace(.deviceRGB))
+        XCTAssertLessThan(neighbor.greenComponent, 0.8, "The purple code sentinel must not be painted white")
+        XCTAssertEqual(neighbor.redComponent, untouched.redComponent, accuracy: 0.01)
+        XCTAssertEqual(neighbor.greenComponent, untouched.greenComponent, accuracy: 0.01)
+        XCTAssertEqual(neighbor.blueComponent, untouched.blueComponent, accuracy: 0.01)
+    }
+    func testChangeBandsAndInsertionAnchorsContinueThroughOverviewAndNativeTrack() throws {
+        _ = NSApplication.shared
+        let scroll = ComparisonOverviewScrollView(frame: NSRect(x: 0, y: 0, width: 420, height: 380))
+        let text = ComparisonTextView(frame: NSRect(x: 0, y: 0, width: 350, height: 2500), textContainer: nil)
+        text.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        text.highlightCurrentLine = false
+        text.string = (0..<120).map { "line \($0)\n" }.joined()
+        scroll.documentView = text
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = true
+        scroll.overview.usesLocalViewport = false
+        let window = NSWindow(contentRect: scroll.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentView = scroll
+        defer { window.close() }
+        let source = text.string as NSString
+        let offset = source.range(of: "line 10\n").location
+        text.layoutManager!.ensureLayout(for: text.textContainer!)
+        func pixel(_ view: NSView, x: CGFloat, documentY: CGFloat) throws -> NSColor {
+            let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            let point = view.convert(NSPoint(x: 0, y: documentY), from: text)
+            let y = view.isFlipped ? point.y : view.bounds.maxY - point.y
+            let scale = CGFloat(bitmap.pixelsWide) / view.bounds.width
+            return try XCTUnwrap(bitmap.colorAt(x: Int(x * scale), y: Int(y * scale))?.usingColorSpace(.deviceRGB))
+        }
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            window.appearance = try XCTUnwrap(NSAppearance(named: appearance))
+            text.lineBackgrounds = [offset: DiffVisualStyle.lineBackground(.systemGreen, dark: appearance == .darkAqua)]
+            text.missingLineAnchors = [20: .systemRed]
+            for scrollY in [CGFloat(0), 100] {
+                scroll.tile()
+                scroll.contentView.scroll(to: NSPoint(x: 0, y: scrollY))
+                scroll.reflectScrolledClipView(scroll.contentView)
+                let changed = try XCTUnwrap(ComparisonActionRail.documentRect(NSRange(location: offset, length: 8), in: text))
+                for y in [changed.minY + 3, text.missingChangeY(at: 20) + 0.25] {
+                    let expected = try pixel(text, x: 2, documentY: y)
+                    for view in [scroll.overview, try XCTUnwrap(scroll.verticalScroller)] {
+                        for x in [CGFloat(0.25), view.bounds.width - 0.25] {
+                            let actual = try pixel(view, x: x, documentY: y)
+                            let sample = "\(type(of: view)) \(appearance) scroll=\(scrollY) x=\(x) documentY=\(y)"
+                            XCTAssertEqual(actual.redComponent, expected.redComponent, accuracy: 0.015, sample)
+                            XCTAssertEqual(actual.greenComponent, expected.greenComponent, accuracy: 0.015, sample)
+                            XCTAssertEqual(actual.blueComponent, expected.blueComponent, accuracy: 0.015, sample)
+                        }
+                    }
+                }
+            }
+        }
+    }
     private func configure(_ scroll: NSScrollView, autohides: Bool, documentSize: NSSize) {
         scroll.borderType = .noBorder
         scroll.scrollerStyle = .legacy

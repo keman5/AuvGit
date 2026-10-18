@@ -7,6 +7,8 @@ final class ComparisonActionRail: NSView {
         let range: NSRange
         var sourceText: NSTextView? = nil
         var sourceRange: NSRange? = nil
+        var insertionLine: Int? = nil
+        var sourceInsertionLine: Int? = nil
         var tint: NSColor? = nil
         let title: String
         var deletesContent = false
@@ -43,10 +45,15 @@ final class ComparisonActionRail: NSView {
         entries[button.tag].action()
     }
     /// Read existing TextKit geometry; drawing must not lay out an offscreen document.
-    static func documentRect(_ range: NSRange, in text: NSTextView) -> NSRect? {
+    static func documentRect(_ range: NSRange, in text: NSTextView, insertionLine: Int? = nil) -> NSRect? {
         guard let layout = text.layoutManager else { return nil }
         let length = (text.string as NSString).length
         let location = min(range.location, length)
+        // UTF-16 EOF alone cannot distinguish insertion before or after the final empty line.
+        if range.length == 0, location == length, let insertionLine, let text = text as? ComparisonTextView {
+            guard location == 0 || location - 1 < layout.firstUnlaidCharacterIndex() else { return nil }
+            return NSRect(x: 0, y: text.missingChangeY(at: insertionLine), width: 1, height: 0)
+        }
         let inset = text.textContainerInset.height
         if range.length == 0 || location == length {
             guard location > 0 else {
@@ -84,11 +91,11 @@ final class ComparisonActionRail: NSView {
     func refresh() {
         connectors.removeAll(keepingCapacity: true)
         for (entry, button) in zip(entries, buttons) {
-            guard let document = Self.documentRect(entry.range, in: entry.text) else { button.isHidden = true; continue }
+            guard let document = Self.documentRect(entry.range, in: entry.text, insertionLine: entry.insertionLine) else { button.isHidden = true; continue }
             let rect = convert(document, from: entry.text)
             var source = rect
             if let sourceText = entry.sourceText, let sourceRange = entry.sourceRange {
-                guard let document = Self.documentRect(sourceRange, in: sourceText) else { button.isHidden = true; continue }
+                guard let document = Self.documentRect(sourceRange, in: sourceText, insertionLine: entry.sourceInsertionLine) else { button.isHidden = true; continue }
                 source = convert(document, from: sourceText)
             }
             let tint = entry.tint ?? (entry.deletesContent ? NSColor.systemRed : color)

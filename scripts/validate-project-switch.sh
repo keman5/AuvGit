@@ -3,8 +3,11 @@ set -euo pipefail
 cd "${0:A:h:h}"
 TEST_FLAGS=()
 case "${1:-all}" in
+  comparison-search)
+    TEST_FILTER='ComparisonSearchTests|ComparisonKeyboardShortcutsTests|NativeFocusBridgeTests.testComparisonPopoverDoesNotRebindParentScope|NativeFocusBridgeTests.testComparisonSearchFocusesQueryAfterAttachingToWindow|NativeFocusBridgeTests.testRealSwiftUISearchPopoverFocusesQueryOnPresentation|NativeFocusBridgeTests.testSearchRefocusSelectsAllFromEitherFieldAndDebouncesTyping|ComparisonInitialNavigationTests|ComparisonDocumentGeometryTests'
+    ;;
   comparison-background)
-    TEST_FILTER='OperationProgressTests|ComparisonActionRailTests|ComparisonChromeGeometryTests|ComparisonDocumentGeometryTests|ComparisonAlignmentTests|ComparisonBandNavigationTests|ComparisonInitialNavigationTests|ComparisonSearchTests|ComparisonUndoTests|ConflictPreviewPerformanceTests|ConflictVisualTests'
+    TEST_FILTER='OperationProgressTests|ComparisonOverviewTests|ComparisonActionRailTests|ComparisonChromeGeometryTests|ComparisonDocumentGeometryTests|ComparisonAlignmentTests|ComparisonBandNavigationTests|ComparisonInitialNavigationTests|ComparisonSearchTests|ComparisonUndoTests|ConflictPreviewPerformanceTests|ConflictVisualTests'
     ;;
   unchanged-edits)
     TEST_FILTER='FileManagementTests|GitCommandLogTests|GitInteractionTests|RepositoryContextTests|RepositoryWorkflowTests|StashTimestampTests|RepositoryContextTargetingTests'
@@ -109,6 +112,6 @@ $PWD"
     TEST_FILTER='DialogAppearanceTests|DialogButtonWidthTests'
     TEST_FLAGS=(--skip-build)
     ;;
-  *) print -u2 "Usage: $0 [all|comparison-background|unchanged-edits|comparison-crash|log-selection-focus|conflict-interactions|conflict-ui-stability|repository-workflow|switch-responsive|switch-real|conflict-resolution|conflict-resolution-workflows|revision-edit|pull-merge|performance|cold-text|branches|branch-icons|branch-save|branch-save-core|sidebar-polish|dialog-focus|dialog-presentation|dimming|conflict-recovery|real|mutations|preview-ui|preview-core|layout-scroll|comparison-polish|preview-html|dialogs]"; exit 1 ;;
+  *) print -u2 "Usage: $0 [all|comparison-search|comparison-background|unchanged-edits|comparison-crash|log-selection-focus|conflict-interactions|conflict-ui-stability|repository-workflow|switch-responsive|switch-real|conflict-resolution|conflict-resolution-workflows|revision-edit|pull-merge|performance|cold-text|branches|branch-icons|branch-save|branch-save-core|sidebar-polish|dialog-focus|dialog-presentation|dimming|conflict-recovery|real|mutations|preview-ui|preview-core|layout-scroll|comparison-polish|preview-html|dialogs]"; exit 1 ;;
 esac
 swift test --build-system native -c release "${TEST_FLAGS[@]}" --filter "$TEST_FILTER"

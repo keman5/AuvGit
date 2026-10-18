@@ -31,6 +31,7 @@ final class ComparisonOverviewScrollView: NSScrollView {
         verticalScrollElasticity = .none
         horizontalScrollElasticity = .none
         autohidesScrollers = false
+        verticalScroller = ComparisonChangeScroller()
         addSubview(overview)
         overview.scroll = self
     }
@@ -55,7 +56,34 @@ final class ComparisonOverviewScrollView: NSScrollView {
         overview.needsDisplay = true
     }
     override func reflectScrolledClipView(_ clipView: NSClipView) {
-        super.reflectScrolledClipView(clipView); overview.needsDisplay = true
+        super.reflectScrolledClipView(clipView); invalidateChangeBackgrounds()
+    }
+    func invalidateChangeBackgrounds() {
+        overview.needsDisplay = true
+        verticalScroller?.needsDisplay = true
+    }
+    func drawChangeBackground(in view: NSView, rect: NSRect) {
+        guard let text = documentView as? ComparisonTextView, let context = NSGraphicsContext.current?.cgContext else { return }
+        context.saveGState()
+        defer { context.restoreGState() }
+        // AppKit may supply a dirty rect extending beyond an unclipped sibling.
+        context.clip(to: view.bounds)
+        text.backgroundColor.setFill(); rect.intersection(view.bounds).fill()
+        let documentRect = text.convert(rect.intersection(view.bounds), from: view)
+        let origin = view.convert(NSPoint.zero, from: text)
+        context.translateBy(x: 0, y: origin.y)
+        context.scaleBy(x: 1, y: view.isFlipped == text.isFlipped ? 1 : -1)
+        text.drawChangeBackgrounds(in: NSRect(x: 0, y: documentRect.minY, width: view.bounds.width, height: documentRect.height), width: view.bounds.width)
+    }
+}
+private final class ComparisonChangeScroller: NSScroller {
+    override func draw(_ dirtyRect: NSRect) {
+        guard let scroll = superview as? ComparisonOverviewScrollView, scroll.documentView is ComparisonTextView else {
+            super.draw(dirtyRect); return
+        }
+        // Keep the native thumb and hit testing, without an opaque track severing the change band.
+        scroll.drawChangeBackground(in: self, rect: dirtyRect)
+        if isEnabled { drawKnob() }
     }
 }
 final class ComparisonOverviewView: NSView {
@@ -70,6 +98,7 @@ final class ComparisonOverviewView: NSView {
     override var isFlipped: Bool { true }
     override func draw(_ dirtyRect: NSRect) {
         NSColor.controlBackgroundColor.setFill(); bounds.fill()
+        (scroll as? ComparisonOverviewScrollView)?.drawChangeBackground(in: self, rect: dirtyRect)
         for marker in markers {
             marker.color.withAlphaComponent(0.85).setFill()
             NSRect(x: 2, y: bounds.height * marker.lower, width: max(1, bounds.width - 4), height: max(3, bounds.height * (marker.upper - marker.lower))).intersection(bounds).fill()

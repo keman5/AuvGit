@@ -26,9 +26,23 @@ struct ComparisonSearchField: NSViewRepresentable {
             return false
         }
     }
+    static func focusQuery(in window: NSWindow) -> Bool {
+        guard window.attachedSheet == nil else { return false }
+        for child in window.childWindows ?? [] where child.isVisible {
+            if focusQuery(in: child) { return true }
+        }
+        func query(in view: NSView) -> ClickableSearchTextField? {
+            guard !view.isHiddenOrHasHiddenAncestor else { return nil }
+            if let field = view as? ClickableSearchTextField, field.isQuery { return field }
+            return view.subviews.lazy.compactMap { query(in: $0) }.first
+        }
+        guard let field = window.contentView.flatMap({ query(in: $0) }) else { return false }
+        return field.focusAndSelect()
+    }
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSTextField {
         let field = ClickableSearchTextField()
+        field.isQuery = initialFocus
         field.cell = StableSingleLineCell(textCell: "")
         field.isEditable = true; field.isSelectable = true
         field.isBezeled = true; field.bezelStyle = .roundedBezel
@@ -51,6 +65,15 @@ struct ComparisonSearchField: NSViewRepresentable {
     }
 }
 private final class ClickableSearchTextField: NSTextField {
+    var isQuery = false
+    func focusAndSelect() -> Bool {
+        guard let window, !isHiddenOrHasHiddenAncestor, isEnabled else { return false }
+        NativeFocusAppearance.forWindow(window).beginNavigation()
+        guard window.makeFirstResponder(self) else { return false }
+        window.makeKey()
+        selectText(nil)
+        return true
+    }
     override func accessibilityPerformPress() -> Bool {
         guard window?.makeFirstResponder(self) == true else { return false }
         return true

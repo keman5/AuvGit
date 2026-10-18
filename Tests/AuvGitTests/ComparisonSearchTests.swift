@@ -22,6 +22,44 @@ final class ComparisonSearchTests: XCTestCase {
         XCTAssertEqual(try ComparisonSearch.replacing(in: "aa", options: options, replacement: "-", all: true).get(), "-a-a")
         if case .success = ComparisonSearch.replacing(in: "unchanged", options: ComparisonSearchOptions(query: "[", regularExpression: true), replacement: "oops", all: true) { XCTFail("Invalid regex must not produce a replacement") }
     }
+    func testMatchingLinesIncludesMultilineAndZeroWidthMatches() throws {
+        let text = "🙂ab\ncd\nef\n"
+        let starts = [0, 5, 8, 11]
+        for options in [ComparisonSearchOptions(query: "b\nc"), .init(query: "(?=c)|$", regularExpression: true), .init(query: "\n"), .init(query: "🙂ab\ncd\nef\n")] {
+            let matches = try ComparisonSearch.matches(in: text, options: options).get()
+            let expected = Set(starts.indices.filter { line in
+                let end = line + 1 < starts.count ? starts[line + 1] : text.utf16.count + 1
+                return matches.contains { (starts[line]..<end).contains($0.location) || NSIntersectionRange(NSRange(location: starts[line], length: end - starts[line]), $0).length > 0 }
+            })
+            XCTAssertEqual(ComparisonSearch.matchingLines(matches: matches, starts: starts, length: text.utf16.count), expected)
+        }
+    }
+    func testCommonQueryHighlightsAllLinesInLargeDocument() throws {
+        let count = 20_000
+        let text = String(repeating: "aaaa\n", count: count)
+        let matches = try ComparisonSearch.matches(in: text, options: .init(query: "a")).get()
+        let starts = Array(stride(from: 0, through: text.utf16.count, by: 5))
+        XCTAssertEqual(matches.count, count * 4)
+        XCTAssertEqual(ComparisonSearch.matchingLines(matches: matches, starts: starts, length: text.utf16.count), Set(0..<count))
+    }
+    func testSearchCountUsesInitialAndUpdatedDocument() async {
+        let commands = ComparisonEditingCommands()
+        func model(_ text: String, query: String = "one") -> ComparisonEditor {
+            ComparisonEditor(columns: [.init(id: "worktree", title: "Result", text: text, isEditable: true, message: nil)],
+                wrapLines: false, showLineNumbers: true, synchronizeScroll: true, search: query, navigation: 0,
+                changeNavigation: 0, onEdit: { _, _ in }, editingCommands: commands)
+        }
+        let split = ComparisonSplitView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        let coordinator = ComparisonEditor.Coordinator(model("one one")); coordinator.split = split; coordinator.update(model("one one"))
+        try? await Task.sleep(for: .milliseconds(20))
+        XCTAssertEqual(commands.searchTotal, 2)
+        coordinator.update(model("one"))
+        try? await Task.sleep(for: .milliseconds(20))
+        XCTAssertEqual(commands.searchTotal, 1)
+        coordinator.update(model("one", query: "absent"))
+        try? await Task.sleep(for: .milliseconds(20))
+        XCTAssertEqual(commands.searchTotal, 0)
+    }
     func testReplaceAllUsesOneNativeUndoGroupAndInvalidExpressionNeverEdits() async {
         _ = NSApplication.shared
         let original = "🙂one one\nOne\n"
