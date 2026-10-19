@@ -278,8 +278,9 @@ final class GitRepositoryTests: XCTestCase {
         let remoteTip = try await GitProcess.run(at: peer, arguments: ["rev-parse", "HEAD"]).text.trimmingCharacters(in: .newlines)
         try await repo.pull()
         let head = try await repo.log(limit: 1, ref: "HEAD")
-        XCTAssertEqual(head.first?.parents, [localTip, remoteTip])
-        XCTAssertTrue(head.first?.subject.contains("Merge") == true)
+        XCTAssertEqual(head.first?.parents, [remoteTip])
+        XCTAssertNotEqual(head.first?.hash, localTip)
+        XCTAssertEqual(head.first?.subject, "Local divergence")
         XCTAssertEqual(try String(contentsOf: url.appendingPathComponent("fork.txt"), encoding: .utf8), "local fork\n")
         XCTAssertEqual(try String(contentsOf: url.appendingPathComponent("peer-fork.txt"), encoding: .utf8), "peer fork\n")
         let configuredFF = try await GitProcess.run(at: url, arguments: ["config", "pull.ff"]).text
@@ -298,7 +299,8 @@ final class GitRepositoryTests: XCTestCase {
         let savedContents = try await repo.workflowRead(["show", savedDraft + ":shared.txt"])
         XCTAssertEqual(savedContents, "unsaved draft\n")
         let afterRecovery = try await repo.log(limit: 1, ref: "HEAD")
-        XCTAssertEqual(afterRecovery.first?.parents, [try XCTUnwrap(head.first?.hash), incomingTip])
+        XCTAssertEqual(afterRecovery.first?.parents, [incomingTip])
+        XCTAssertEqual(afterRecovery.first?.subject, "Local divergence")
         let restoredConflict = try String(contentsOf: shared, encoding: .utf8)
         XCTAssertTrue(restoredConflict.contains("<<<<<<<")); XCTAssertTrue(restoredConflict.contains("unsaved draft")); XCTAssertTrue(restoredConflict.contains("remote edit"))
         let configuredAutoStash = try await repo.workflowRead(["config", "merge.autostash"])
@@ -311,15 +313,12 @@ final class GitRepositoryTests: XCTestCase {
         try "another remote edit\n".write(to: peer.appendingPathComponent("shared.txt"), atomically: true, encoding: .utf8)
         try await peerRepo.stage(paths: ["shared.txt"]); try await peerRepo.commit(message: "Another conflicting remote edit")
         try await peerRepo.push()
-        let beforeConflict = try await repo.log(limit: 1, ref: "HEAD")
         let conflicted = try await repo.runNetwork(.pull, progress: { _ in })
         XCTAssertEqual(conflicted.pullOutcome?.conflicts, ["shared.txt"])
         XCTAssertNil(conflicted.pullOutcome?.stashHash)
-        let afterConflict = try await repo.log(limit: 1, ref: "HEAD")
-        XCTAssertEqual(afterConflict.first?.hash, beforeConflict.first?.hash)
         let files = try await repo.status()
         XCTAssertTrue(files.contains { $0.path == "shared.txt" && $0.isConflict })
-        let mergedRemote = try await GitProcess.run(at: url, arguments: ["rev-parse", "MERGE_HEAD"]).text
+        let mergedRemote = try await GitProcess.run(at: url, arguments: ["rev-parse", "HEAD~1"]).text
         let conflictingRemote = try await GitProcess.run(at: peer, arguments: ["rev-parse", "HEAD"]).text
         XCTAssertEqual(mergedRemote, conflictingRemote)
         let conflict = try String(contentsOf: shared, encoding: .utf8)

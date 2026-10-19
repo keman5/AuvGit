@@ -78,7 +78,7 @@ extension GitRepository {
         let args: [String]
         switch operation {
         case .fetch: args = ["fetch", "--all", "--progress"] + (GitRuntimePreferences.shared.fetchPrune ? ["--prune"] : ["--no-prune"])
-        case .pull: args = ["pull", "--no-rebase", "--ff", "--no-autostash", "--no-edit", "--progress"]
+        case .pull: args = ["pull", "--rebase", "--ff", "--no-autostash", "--progress"]
         case .pushPreview: args = ["push", "--dry-run", "--porcelain", "--progress"]
         case .push: args = ["push", "--porcelain", "--progress"]
         }

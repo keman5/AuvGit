@@ -30,17 +30,23 @@ final class PullRecoveryTests: XCTestCase {
             _ = try await GitProcess.run(at: repo.url, arguments: ["config"] + pair)
         }
     }
-    func testDivergedHistoryAutomaticallyMergesEvenWithFastForwardOnlyConfiguration() async throws {
+    func testDivergedHistoryRebasesEvenWithFastForwardOnlyConfiguration() async throws {
         let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
+        _ = try await f.local.workflowRead(["config", "pull.rebase", "false"])
         try write("local", "local", in: f.local); try await commit(f.local, "local")
         try write("remote", "remote", in: f.peer); try await commit(f.peer, "remote"); try await f.peer.push()
         let result = try await f.local.runNetwork(.pull, progress: { _ in })
         XCTAssertNil(result.pullOutcome)
         let parents = try await f.local.workflowRead(["rev-list", "--parents", "-1", "HEAD"])
-        XCTAssertEqual(parents.split(whereSeparator: \.isWhitespace).count, 3)
+        XCTAssertEqual(parents.split(whereSeparator: \.isWhitespace).count, 2)
+        let localParent = try await f.local.workflowRevision("HEAD^")
+        let remoteHead = try await f.peer.workflowRevision("HEAD")
+        XCTAssertEqual(localParent, remoteHead)
+        let subject = try await f.local.workflowRead(["log", "-1", "--format=%s"])
+        XCTAssertEqual(subject, "local\n")
         XCTAssertEqual(try String(contentsOf: f.local.url.appendingPathComponent("remote"), encoding: .utf8), "remote")
     }
-    func testCommittedMergeConflictRemainsInLocalIndexInsteadOfThrowing() async throws {
+    func testCommittedRebaseConflictRemainsInLocalIndexInsteadOfThrowing() async throws {
         let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
         try write("local\n", in: f.local); try await commit(f.local, "local")
         try write("remote\n", in: f.peer); try await commit(f.peer, "remote"); try await f.peer.push()
@@ -113,7 +119,7 @@ final class PullRecoveryTests: XCTestCase {
         XCTAssertEqual(saved, "local notes")
     }
 
-    func testExistingMergeConflictIsNotAbortedOrStashedByAnotherPull() async throws {
+    func testExistingRebaseConflictIsNotAbortedOrStashedByAnotherPull() async throws {
         let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
         try write("local\n", in: f.local); try await commit(f.local, "local")
         try write("remote\n", in: f.peer); try await commit(f.peer, "remote"); try await f.peer.push()
@@ -135,7 +141,7 @@ final class PullRecoveryTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: f.local.url.appendingPathComponent("shared"), encoding: .utf8), "working")
     }
 
-    func testCommittedConflictAfterStashKeepsSavedWorkSeparateUntilMergeIsResolved() async throws {
+    func testCommittedConflictAfterStashKeepsSavedWorkSeparateUntilRebaseIsResolved() async throws {
         let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
         try write("local committed\n", in: f.local); try await commit(f.local, "local")
         try write("local working\n", in: f.local)

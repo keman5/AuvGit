@@ -15,8 +15,8 @@ public struct PullRecoveryFailure: LocalizedError, Sendable {
 }
 
 extension GitRepository {
-    /// Try Git's normal merge first. Only an overwrite refusal permits saving the
-    /// worktree and retrying. Never abort a real merge conflict or delete its stash.
+    /// Rebase first, saving the worktree only when Git refuses dirty input.
+    /// Never abort an unresolved rebase or delete its recovery stash.
     func pullWithRecovery(arguments: [String], environment: [String: String],
                           progress: @escaping @Sendable (String) -> Void) async throws -> NetworkOperationResult {
         try await requirePullReady()
@@ -31,9 +31,17 @@ extension GitRepository {
                     pullOutcome: PullOperationOutcome(conflicts: conflicts, stashHash: nil, changesRestored: false, restorationError: nil))
             }
             let message = error.localizedDescription.lowercased()
-            guard message.contains("would be overwritten by merge") || message.contains("would be overwritten by checkout") else { throw error }
+            let dirtyRebase = message.contains("cannot pull with rebase") &&
+                (message.contains("unstaged changes") || message.contains("index contains uncommitted changes"))
+            guard dirtyRebase || message.contains("would be overwritten by merge") || message.contains("would be overwritten by checkout") else { throw error }
             try await requirePullReady()
             guard !(try await status()).isEmpty else { throw error }
+            if dirtyRebase, let pullIndex = arguments.firstIndex(of: "pull") {
+                // Git rejects dirty rebase input before contacting the remote.
+                // Verify access before moving the user's changes into a stash.
+                _ = try await GitProcess.run(at: url, arguments: Array(arguments[..<pullIndex]) + ["fetch", "--progress"],
+                    progress: progress, environmentOverrides: environment)
+            }
         }
 
         let previous = try? await workflowRevision("refs/stash")
@@ -49,7 +57,7 @@ extension GitRepository {
                 if error is CancellationError { throw error }
                 let conflicts = try await status().filter(\.isConflict).map(\.path)
                 guard !conflicts.isEmpty else { throw error }
-                // Do not apply saved work on top of an unresolved committed merge.
+                // Do not apply saved work on top of an unresolved rebase.
                 return NetworkOperationResult(output: GitProgressParser.redact(error.localizedDescription),
                     pullOutcome: PullOperationOutcome(conflicts: conflicts, stashHash: saved, changesRestored: false, restorationError: nil))
             }

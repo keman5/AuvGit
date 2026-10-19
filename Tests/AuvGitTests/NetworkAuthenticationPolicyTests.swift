@@ -45,6 +45,48 @@ final class NetworkAuthenticationPolicyTests: XCTestCase {
         XCTAssertEqual(accountPassword, "password")
     }
 
+    func testGitHubRejectsGitLabTokenWithoutSendingIt() throws {
+        let endpoint = try XCTUnwrap(RemoteEndpoint.parse("https://github.com/keman5/Rayon.git"))
+        var draft = RemoteAuthenticationDraft(endpoint: endpoint, preferredUsername: "keman5")
+        draft.token = "glpat-fixture-not-a-real-token"
+        XCTAssertNil(draft.submission)
+        draft.token = "github_pat_fixture"
+        XCTAssertNotNil(draft.submission)
+    }
+
+    func testTokenIssuerCheckDoesNotGuessCustomHostsOrUnknownTokenFormats() throws {
+        for url in ["https://gitlab.example.com/group/project.git", "https://github.example.com/group/project.git"] {
+            let endpoint = try XCTUnwrap(RemoteEndpoint.parse(url))
+            var draft = RemoteAuthenticationDraft(endpoint: endpoint, preferredUsername: "alice")
+            for token in ["glpat-fixture", "github_pat_fixture", "custom-app-password"] {
+                draft.token = token
+                XCTAssertNotNil(draft.submission)
+            }
+        }
+    }
+
+    @MainActor
+    func testRejectedCredentialKeepsUsernameAndExplainsFailureOnRetry() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        _ = try await GitProcess.run(at: root, arguments: ["init", "-b", "main"])
+        _ = try await GitProcess.run(at: root, arguments: ["remote", "add", "origin", "https://github.com/example/fixture.git"])
+        let coordinator = RemoteAuthenticationCoordinator()
+        let repository = GitRepository(url: root)
+        let missing = GitError("fatal: could not read Username: terminal prompts disabled")
+        let presented = await coordinator.presentIfNeeded(error: missing, repository: repository, operation: .pull) { _ in }
+        XCTAssertTrue(presented)
+        coordinator.submit(.init(credential: .https(username: "retry-user", password: "fixture-token"), sshPort: nil))
+        let rejected = GitError("remote: Invalid username or token.\nfatal: Authentication failed for 'https://github.com/example/fixture.git/'")
+        let retried = await coordinator.presentIfNeeded(error: rejected, repository: repository, operation: .pull) { _ in }
+        XCTAssertTrue(retried)
+        XCTAssertEqual(coordinator.request?.preferredUsername, "retry-user")
+        XCTAssertNotNil(coordinator.submissionError)
+        XCTAssertFalse(coordinator.submissionError?.contains("fixture-token") ?? true)
+        coordinator.cancel()
+    }
+
     func testSSHDraftRequiresExistingPrivateKey() throws {
         let endpoint = try XCTUnwrap(RemoteEndpoint.parse("git@gitlab.example.com:group/project.git"))
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

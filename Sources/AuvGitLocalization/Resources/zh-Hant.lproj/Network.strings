@@ -24,8 +24,11 @@
 "knownStateTitle" = "已知遠端狀態";
 "verifyRemote" = "核實遠端並繼續";
 "knownPushBehind" = "上次取得的 %@/%@ 中有 %d 個本機尚未包含的提交，一般推送可能遭拒。繼續連線核實最新狀態？強制推送仍需另行確認。";
-"knownPullDiverged" = "上次取得的狀態顯示分支已分岔：本機獨有 %d 個提交，遠端獨有 %d 個提交。拉取會取得最新遠端提交並嘗試合併至目前分支，無法解決的衝突保留在本機並顯示提示。取得只更新遠端記錄。";
+"knownPullDiverged" = "上次取得的狀態顯示分支已分岔：本機獨有 %d 個提交，遠端獨有 %d 個提交。拉取會取得最新遠端提交，並將本機提交重定基底至遠端歷史之上，無法解決的衝突保留在本機並顯示提示。取得只更新遠端記錄。";
 "authenticationRequired" = "需要驗證";
+"gitLabTokenForGitHub" = "這是 GitLab 權杖（glpat-），但目前遠端儲存庫位於 GitHub。請使用有權存取此儲存庫的 GitHub 存取權杖，或檢查遠端網址。";
+"gitHubTokenForGitLab" = "這是 GitHub 權杖，但目前遠端儲存庫位於 GitLab。請使用有權存取此儲存庫的 GitLab 存取權杖，或檢查遠端網址。";
+"httpsCredentialRejected" = "遠端伺服器拒絕了使用者名稱或權杖。請確認權杖屬於該伺服器、未過期且有權存取此儲存庫；組織啟用 SSO 時還需授權。請重新輸入後重試，被拒絕的憑證不會儲存。";
 "authenticationMethod" = "驗證方式";
 "accessTokenOrAppPassword" = "存取權杖 / App Password";
 "accountPassword" = "帳號密碼";
@@ -44,7 +47,7 @@
 "sshMigrationScope" = "AuvGit 會先使用對應 SSH URL 驗證此金鑰。驗證成功後才永久將該 remote 改為 SSH，儲存金鑰並重試操作。";
 "retry" = "重試";
 "pullRecoveryTitle" = "拉取結果與本機更改";
-"pullConflicts" = "已嘗試自動合併，仍有 %d 個檔案需要手動解決。衝突已保留在本機，請在衝突清單處理後完成合併。";
+"pullConflicts" = "拉取後仍有 %d 個檔案需要手動解決。衝突已保留在本機，請在衝突清單處理；若重定基底尚未完成，請繼續重定基底。";
 "pullSavedChanges" = "工作區更改已自動儲存至貯藏 %@（包含已暫存、未暫存和未追蹤檔案）。貯藏記錄已保留。";
 "pullChangesRestored" = "已儲存的更改已自動還原至更新後的工作區。";
 "pullChangesRetained" = "尚未完整還原已儲存的更改。請先解決本機衝突，再從貯藏記錄檢查並還原剩餘更改；不要覆蓋遠端同名檔案。";

@@ -63,6 +63,18 @@ final class CloneCredentialSecurityTests: XCTestCase {
         XCTAssertEqual(try invoke(lease, "erase", "protocol=https\nhost=example.invalid\n\n"), "")
     }
 
+    func testRealHelperAcceptsGitMultivalueCapabilitiesAndChallenges() throws {
+        let lease = try HTTPSCredentialLease(source: URL(string: "https://github.com/keman5/Rayon.git")!, credential: credential)
+        defer { lease.remove() }
+        // Git's HTTP transport sends these repeated array fields, unlike credential fill.
+        let capabilities = "capability[]=authtype\ncapability[]=state\n"
+        let challenges = "wwwauth[]=Basic realm=GitHub\nwwwauth[]=Bearer realm=GitHub\nstate[]=first\nstate[]=second\n"
+        let request = capabilities + "protocol=https\nhost=github.com\n" + challenges + "\n"
+        XCTAssertEqual(try invoke(lease, "get", request), "username=fixture-user\npassword=fixture-secret\n\n")
+        XCTAssertEqual(try invoke(lease, "get", request.replacingOccurrences(of: "host=github.com\n", with: "host=github.com\nhost=elsewhere.invalid\n")), "")
+        XCTAssertEqual(try invoke(lease, "get", request.replacingOccurrences(of: "host=github.com", with: "host=elsewhere.invalid")), "")
+    }
+
     func testNondefaultPortRemainsScopedAndCleanupIsIdempotent() throws {
         let lease = try HTTPSCredentialLease(source: URL(string: "https://example.invalid:8443/repo")!, credential: credential)
         XCTAssertFalse(lease.gitArguments.joined().contains(credential.password))

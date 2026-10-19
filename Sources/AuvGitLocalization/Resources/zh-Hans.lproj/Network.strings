@@ -24,8 +24,11 @@
 "knownStateTitle" = "已知远端状态";
 "verifyRemote" = "核实远端并继续";
 "knownPushBehind" = "上次获取的 %@/%@ 中有 %d 个本地尚未包含的提交，普通推送可能被拒绝。继续联网核实最新状态？强制推送仍需单独确认。";
-"knownPullDiverged" = "上次获取的状态显示分支已分叉：本地独有 %d 个提交，远端独有 %d 个提交。拉取会获取最新远程提交并尝试合并到当前分支，无法解决的冲突保留在本地并弹窗提示。获取只更新远程记录。";
+"knownPullDiverged" = "上次获取的状态显示分支已分叉：本地独有 %d 个提交，远端独有 %d 个提交。拉取会获取最新远程提交，并将本地提交变基到远程历史之上，无法解决的冲突保留在本地并弹窗提示。获取只更新远程记录。";
 "authenticationRequired" = "需要认证";
+"gitLabTokenForGitHub" = "这是 GitLab 令牌（glpat-），但当前远程仓库位于 GitHub。请使用有权访问此仓库的 GitHub 访问令牌，或检查远程地址。";
+"gitHubTokenForGitLab" = "这是 GitHub 令牌，但当前远程仓库位于 GitLab。请使用有权访问此仓库的 GitLab 访问令牌，或检查远程地址。";
+"httpsCredentialRejected" = "远程服务器拒绝了用户名或令牌。请确认令牌属于该服务器、未过期且有权访问此仓库；组织启用 SSO 时还需授权。请重新输入后重试，被拒绝的凭据不会保存。";
 "authenticationMethod" = "认证方式";
 "accessTokenOrAppPassword" = "访问令牌 / App Password";
 "accountPassword" = "账号密码";
@@ -44,7 +47,7 @@
 "sshMigrationScope" = "AuvGit 会先使用对应 SSH 地址验证此密钥。认证成功后才永久将该 remote 改为 SSH，保存密钥并重试操作。";
 "retry" = "重试";
 "pullRecoveryTitle" = "拉取结果与本地改动";
-"pullConflicts" = "已尝试自动合并，仍有 %d 个文件需要手动解决。冲突已保留在本地，请在冲突列表中处理后完成合并。";
+"pullConflicts" = "拉取后仍有 %d 个文件需要手动解决。冲突已保留在本地，请在冲突列表中处理；若变基尚未完成，请继续变基。";
 "pullSavedChanges" = "工作区改动已自动保存到贮藏 %@（包含已暂存、未暂存和未跟踪文件）。该贮藏记录已保留。";
 "pullChangesRestored" = "保存的改动已自动恢复到更新后的工作区。";
 "pullChangesRetained" = "尚未完整恢复保存的改动。请先解决本地冲突，再从贮藏记录检查并恢复剩余改动；不要覆盖远程同名文件。";

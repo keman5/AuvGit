@@ -6,6 +6,39 @@ enum RemoteAuthenticationMethod: String, CaseIterable {
     case accessToken, accountPassword, sshPrivateKey
 }
 
+struct RemoteAuthenticationMethodPicker: NSViewRepresentable {
+    @Binding var selection: RemoteAuthenticationMethod
+    var isEnabled: Bool
+    @Environment(\.nativeFocusScope) private var scope
+
+    func makeCoordinator() -> Coordinator { Coordinator(selection: $selection) }
+    func makeNSView(context: Context) -> NSSegmentedControl {
+        let control = NSSegmentedControl(labels: [networkText("accessTokenOrAppPassword"),
+            networkText("accountPassword"), networkText("sshPrivateKey")], trackingMode: .selectOne,
+            target: context.coordinator, action: #selector(Coordinator.changed(_:)))
+        control.segmentDistribution = .fillEqually
+        NativeFocusAppearance.rememberOriginalRing(for: control)
+        return control
+    }
+    func updateNSView(_ control: NSSegmentedControl, context: Context) {
+        context.coordinator.selection = $selection
+        control.selectedSegment = RemoteAuthenticationMethod.allCases.firstIndex(of: selection) ?? 0
+        control.isEnabled = isEnabled
+        scope?.register(control)
+    }
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSSegmentedControl, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 576, height: 28)
+    }
+    final class Coordinator: NSObject {
+        var selection: Binding<RemoteAuthenticationMethod>
+        init(selection: Binding<RemoteAuthenticationMethod>) { self.selection = selection }
+        @objc func changed(_ control: NSSegmentedControl) {
+            guard RemoteAuthenticationMethod.allCases.indices.contains(control.selectedSegment) else { return }
+            selection.wrappedValue = RemoteAuthenticationMethod.allCases[control.selectedSegment]
+        }
+    }
+}
+
 struct RemoteAuthenticationSubmission {
     let credential: NetworkCredential
     let sshPort: Int?
@@ -41,7 +74,13 @@ struct RemoteAuthenticationDraft {
         self.privateKey = privateKey
     }
 
+    var validationMessageKey: String? {
+        guard method == .accessToken else { return nil }
+        return NetworkAuthenticationPolicy.tokenValidationMessageKey(token, endpoint: endpoint)
+    }
+
     var submission: RemoteAuthenticationSubmission? {
+        guard validationMessageKey == nil else { return nil }
         let name = (method == .sshPrivateKey ? sshUsername : httpsUsername).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, !name.contains("\n"), !name.contains("\r"), !name.contains("\0") else { return nil }
         switch method {
@@ -78,6 +117,8 @@ final class RemoteAuthenticationCoordinator: ObservableObject {
     @Published private(set) var submissionError: String?
     @Published private(set) var isSubmitting = false
     private let credentials: RemoteCredentialStore
+    // Retain only the account name between retries, never the rejected secret.
+    private var lastHTTPSAttempt: (repository: URL, endpoint: RemoteEndpoint, username: String)?
 
     init(credentials: RemoteCredentialStore = .shared) { self.credentials = credentials }
 
@@ -93,7 +134,10 @@ final class RemoteAuthenticationCoordinator: ObservableObject {
                          retry: @escaping @MainActor (RemoteAuthenticationRetryContext) -> Void) async -> Bool {
         guard let target = try? await repository.remoteAuthenticationTarget(for: operation, remoteName: remoteName),
               NetworkAuthenticationPolicy.prompt(for: error, endpoint: target.endpoint) != nil else { return false }
-        let preferred = credentials.preferredUsername(for: target.endpoint) ?? target.endpoint.username
+        let attempted = lastHTTPSAttempt.flatMap {
+            $0.repository == repository.url && $0.endpoint == target.endpoint ? $0.username : nil
+        }
+        let preferred = attempted ?? credentials.preferredUsername(for: target.endpoint) ?? target.endpoint.username
         var privateKey: URL?
         var preferredSSHUsername: String?
         if target.endpoint.transport == .ssh {
@@ -104,7 +148,8 @@ final class RemoteAuthenticationCoordinator: ObservableObject {
             if let preferredSSHUsername,
                case let .ssh(_, key, _)? = try? credentials.load(for: candidate, username: preferredSSHUsername) { privateKey = key }
         }
-        submissionError = nil
+        submissionError = target.endpoint.transport == .https && NetworkAuthenticationPolicy.credentialWasRejected(error)
+            ? networkText("httpsCredentialRejected") : nil
         request = RemoteAuthenticationRequest(repository: repository, operation: operation, remoteName: remoteName, endpoint: target.endpoint,
                                               preferredUsername: preferred, preferredSSHUsername: preferredSSHUsername,
                                               privateKey: privateKey, retry: retry)
@@ -113,6 +158,13 @@ final class RemoteAuthenticationCoordinator: ObservableObject {
 
     func submit(_ submission: RemoteAuthenticationSubmission) {
         guard let request, !isSubmitting else { return }
+        if case let .https(username, password) = submission.credential {
+            if let key = NetworkAuthenticationPolicy.tokenValidationMessageKey(password, endpoint: request.endpoint) {
+                submissionError = networkText(key)
+                return
+            }
+            lastHTTPSAttempt = (request.repository.url, request.endpoint, username)
+        }
         if request.endpoint.transport == .https,
            case let .ssh(username, key, _) = submission.credential,
            let port = submission.sshPort {
@@ -143,6 +195,7 @@ final class RemoteAuthenticationCoordinator: ObservableObject {
 
     func cancel() {
         guard !isSubmitting else { return }
+        lastHTTPSAttempt = nil
         if request != nil { request = nil }
         if submissionError != nil { submissionError = nil }
     }
@@ -186,14 +239,13 @@ struct RemoteAuthenticationSheet: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(networkText("authenticationRequired")).font(.headline)
                     Text(request.endpoint.host + ":" + String(request.endpoint.port)).font(.caption).foregroundStyle(.secondary)
+                    Text(request.repository.url.lastPathComponent).font(.caption)
+                        .foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
                 }
             }
             Divider()
-            Picker(networkText("authenticationMethod"), selection: $draft.method) {
-                Text(networkText("accessTokenOrAppPassword")).tag(RemoteAuthenticationMethod.accessToken)
-                Text(networkText("accountPassword")).tag(RemoteAuthenticationMethod.accountPassword)
-                Text(networkText("sshPrivateKey")).tag(RemoteAuthenticationMethod.sshPrivateKey)
-            }.pickerStyle(.segmented).disabled(isSubmitting)
+            RemoteAuthenticationMethodPicker(selection: $draft.method, isEnabled: !isSubmitting)
+                .frame(height: 28).accessibilityLabel(networkText("authenticationMethod"))
             VStack(alignment: .leading, spacing: 8) {
                 Text(networkText("username")).font(.caption).foregroundStyle(.secondary)
                 StableTextField(networkText("username"), text: draft.method == .sshPrivateKey ? $draft.sshUsername : $draft.httpsUsername)
@@ -232,19 +284,30 @@ struct RemoteAuthenticationSheet: View {
                              ? (request.endpoint.transport == .https ? "sshMigrationScope" : "sshCredentialScope")
                              : "httpsCredentialScope"))
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            if let error, !error.isEmpty {
-                Text(error).font(.caption).foregroundStyle(.orange).textSelection(.enabled)
-            }
+            // Reserve feedback space so typing and validation never resize the footer.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    if let key = draft.validationMessageKey {
+                        Text(networkText(key)).font(.caption).foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let error, !error.isEmpty {
+                        Text(error).font(.caption).foregroundStyle(.orange).textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }.frame(height: 60)
             Divider()
             HStack {
-                if isSubmitting { ProgressView().controlSize(.small) }
-                DialogButton(networkText("cancel"), role: .cancel, action: cancel).disabled(isSubmitting)
+                ProgressView().controlSize(.small).frame(width: 16, height: 16).opacity(isSubmitting ? 1 : 0)
+                    .accessibilityHidden(!isSubmitting)
+                DialogButton(networkText("cancel"), role: .cancel, action: cancel).disabled(isSubmitting).fixedSize()
                 DialogButton(networkText("retry"), prominent: true) {
                     guard let submission = draft.submission else { return }
                     submit(submission)
-                }.disabled(draft.submission == nil || isSubmitting)
-            }.buttonStyle(AuvGitDialogButtonStyle()).frame(maxWidth: .infinity)
-        }.padding(22).frame(width: 620)
+                }.disabled(draft.submission == nil || isSubmitting).fixedSize()
+            }.buttonStyle(AuvGitDialogButtonStyle()).frame(maxWidth: .infinity).frame(height: 32)
+        }.padding(22).frame(width: 620).fixedSize(horizontal: false, vertical: true)
             .interactiveDismissDisabled()
             .onDisappear { draft.token = ""; draft.password = ""; draft.passphrase = "" }
     }

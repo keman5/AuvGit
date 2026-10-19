@@ -55,8 +55,15 @@ final class HTTPSCredentialLease {
               case "$line" in *=*) ;; *) malformed=1; continue ;; esac
               key=${line%%=*}
               value=${line#*=}
-              case "$seen" in *"|$key|"*) malformed=1 ;; esac
-              seen="$seen$key|"
+              # Git allows repeated array fields (capability[], wwwauth[], state[]).
+              # Scalar identity fields must still be unique.
+              case "$key" in
+                *'[]') ;;
+                *)
+                  case "$seen" in *"|$key|"*) malformed=1 ;; esac
+                  seen="$seen$key|"
+                  ;;
+              esac
               case "$key" in
                 protocol) protocol=$value ;;
                 host) host=$value ;;
