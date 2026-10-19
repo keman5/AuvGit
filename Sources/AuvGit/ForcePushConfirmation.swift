@@ -40,15 +40,18 @@ struct PullResultNotice: Identifiable {
             parts.append(L10n.text("pullSavedChanges", table: "Network", arguments: [String(stash.prefix(12))]))
             parts.append(networkText(outcome.changesRestored ? "pullChangesRestored" : "pullChangesRetained"))
         }
-        if let error = outcome.restorationError { parts.append(error) }
+        if let error = outcome.restorationError { parts.append(Self.localizedFailure(error)) }
         message = parts.joined(separator: "\n\n")
     }
     init(error: Error) {
         if let recovery = error as? PullRecoveryFailure {
-            message = GitCommandLog.redact(recovery.message) + "\n\n" +
+            message = Self.localizedFailure(recovery.message) + "\n\n" +
                 L10n.text("pullSavedChanges", table: "Network", arguments: [String(recovery.stashHash.prefix(12))]) +
                 "\n\n" + networkText("pullChangesRetained")
-        } else { message = GitCommandLog.redact(error.localizedDescription) }
+        } else { message = Self.localizedFailure(error.localizedDescription) }
+    }
+    private static func localizedFailure(_ message: String) -> String {
+        GitFailureSummary.message(for: message, localize: { L10n.text($0, table: "OperationLog") }) ?? GitCommandLog.redact(message)
     }
 }
 

@@ -163,10 +163,10 @@ public enum GitFailureSummary {
         if text.contains("permission denied (publickey)") { return "SSH authentication failed" }
         if text.contains("no upstream branch") || text.contains("no tracking information") { return "No upstream branch configured" }
         if text.contains("non-fast-forward") || text.contains("fetch first") || text.contains("not possible to fast-forward") { return "Remote and local branches have diverged" }
+        if text.contains("timed out") { return "Git operation timed out" }
         if text.contains("could not resolve host") || text.contains("unable to access") || text.contains("connection refused") { return "Cannot connect to remote" }
         if text.contains("would be overwritten") { return "Local changes would be overwritten" }
         if text.contains("index.lock") { return "Repository is locked by another Git operation" }
-        if text.contains("timed out") { return "Git operation timed out" }
         if text.contains("repository not found") { return "Remote repository unavailable" }
         if text.contains("unknown revision") || text.contains("bad revision") || text.contains("not a valid object") || text.contains("needed a single revision") || text.contains("pathspec") { return "Revision or path not found" }
         if text.contains("unable to auto-detect email") || text.contains("author identity unknown") || text.contains("empty ident") { return "Git author identity is not configured" }

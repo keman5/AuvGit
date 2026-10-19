@@ -78,6 +78,14 @@ final class GitCommandLogTests: XCTestCase {
         let safe = GitCommandLog.redact("https://user:private@host/repo token=private Authorization: Bearer private gho_private")
         XCTAssertFalse(safe.contains("private"))
     }
+    func testReceiveTimeoutTakesPriorityOverGenericUnableToAccess() {
+        for message in ["fatal: unable to access '[remote] Recv failure: Operation timed out",
+                        "fatal: unable to access 'https://example.test/repo': Connection timed out after 30000 milliseconds",
+                        "Git operation timed out after 120 seconds."] {
+            XCTAssertEqual(GitFailureSummary.key(for: message), "Git operation timed out")
+        }
+        XCTAssertEqual(GitFailureSummary.key(for: "fatal: unable to access '[remote] Could not resolve host"), "Cannot connect to remote")
+    }
     func testRealCommandCaptureAndSensitiveConfigurationOmission() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
