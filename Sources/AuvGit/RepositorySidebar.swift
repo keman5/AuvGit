@@ -87,7 +87,7 @@ struct RepositorySidebar: View {
     }
     private var repositoryPane: some View {
         VStack(spacing: 0) {
-                HStack { Text(interactionText("Repositories")).font(.system(size: 13, weight: .semibold)); Spacer(); Button { store.chooseRepository() } label: { Image(systemName: "plus").font(.system(size: 11, weight: .medium)).frame(width: 18, height: 18).contentShape(Rectangle()) }.buttonStyle(.plain).disabled(store.isBusy) }.padding(.horizontal, 10).frame(height: 32)
+                HStack { Text(interactionText("Repositories")).font(.system(size: 13, weight: .semibold)); Spacer(); Button { store.chooseRepository() } label: { Image(systemName: "plus").font(.system(size: 11, weight: .medium)).frame(width: 18, height: 18).contentShape(Rectangle()) }.buttonStyle(.plain).disabled(!store.canOpenRepository) }.padding(.horizontal, 10).frame(height: 32)
                 ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 2) {
@@ -162,6 +162,9 @@ struct RepositorySidebar: View {
                 Text(URL(fileURLWithPath: path).lastPathComponent).font(.system(size: 12))
                     .lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 0)
+                if store.workspaceProjects?.isBusy(path: path) == true {
+                    ProgressView().controlSize(.mini)
+                }
                 if let count = store.repositoryChangeCounts[path], count > 0 {
                     Text(String(count)).font(.system(size: 10, weight: .medium))
                         .padding(.horizontal, 5).padding(.vertical, 1)

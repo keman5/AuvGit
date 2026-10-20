@@ -125,12 +125,19 @@ struct MainWindow: View {
         else { nativeToolbarContent }
     }
     private func makeShellContent(_ model: BorderlessToolbarModel) -> NSView {
-        NSHostingView(rootView: MainWindow(store: store, usesBorderlessToolbar: true, shellToolbarModel: model).nativeFocusRoot())
+        if let projects = store.workspaceProjects {
+            return NSHostingView(rootView: WorkspaceProjectsView(projects: projects, usesBorderlessToolbar: true, shellToolbarModel: model).nativeFocusRoot())
+        }
+        return NSHostingView(rootView: MainWindow(store: store, usesBorderlessToolbar: true, shellToolbarModel: model).nativeFocusRoot())
     }
     private var installedContent: some View {
         // Recreate localized descendants without recreating MainWindow's session owner.
         windowContent.id(languageCode)
-            .background(TitlebarToolbarSupport(shellContent: makeShellContent, hidesNativeToolbar: usesBorderlessToolbar, shellWindowTitle: usesBorderlessToolbar ? (store.highlightedRepositoryPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "AuvGit") : nil).frame(width: 0, height: 0))
+            .background {
+                if store.workspaceProjects == nil || store.workspaceProjects?.active === store {
+                    TitlebarToolbarSupport(shellContent: makeShellContent, hidesNativeToolbar: usesBorderlessToolbar, shellWindowTitle: usesBorderlessToolbar ? (store.highlightedRepositoryPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "AuvGit") : nil).frame(width: 0, height: 0)
+                }
+            }
             .modifier(ToolbarWindowTitleRemoval())
     }
     private var nativeToolbarContent: some View {
@@ -352,7 +359,7 @@ struct MainWindow: View {
     private var toolbarCanStage: Bool { toolbarReady && WorkspaceFileActionTargets.hasEligibleTarget(for: .stage, files: store.files, selection: toolbarSelection) }
     private var toolbarCanUnstage: Bool { toolbarReady && WorkspaceFileActionTargets.hasEligibleTarget(for: .unstage, files: store.files, selection: toolbarSelection) }
     private var toolbarCanDiscard: Bool { toolbarReady && WorkspaceFileActionTargets.hasEligibleTarget(for: .discard, files: store.files, selection: toolbarSelection) }
-    private var handlesStoreEvents: Bool { usesBorderlessToolbar || !EightPointWindowShell.usesBorderlessMode }
+    private var handlesStoreEvents: Bool { (usesBorderlessToolbar || !EightPointWindowShell.usesBorderlessMode) && (store.workspaceProjects == nil || store.workspaceProjects?.active === store) }
 
     private var observedContent: some View {
         toolbarContent.onReceive(NotificationCenter.default.publisher(for: .auvGitWorktreeChanged)) { event in
@@ -423,7 +430,7 @@ struct MainWindow: View {
                 AuvGitAlertButton(mainText("continue")) { confirmation = nil; action.action() }
             ])
         }
-        .auvGitSheet(item: $authentication.request) { request in
+        .auvGitSheet(item: Binding(get: { handlesStoreEvents ? authentication.request : nil }, set: { if handlesStoreEvents { authentication.request = $0 } })) { request in
             RemoteAuthenticationSheet(request: request, error: authentication.submissionError, isSubmitting: authentication.isSubmitting, submit: { submission in
                 authentication.submit(submission)
             }, cancel: { authentication.cancel() })
@@ -443,7 +450,10 @@ struct MainWindow: View {
             }
         }
         .auvGitSheet(item: $firstPushPrompt, focusesOnPresentation: false) { prompt in
-            FirstBranchPushSheet(store: store, prompt: prompt) { firstPushPrompt = nil }
+            FirstBranchPushSheet(store: store, prompt: prompt, close: { firstPushPrompt = nil }, submit: { remote, branch in
+                firstPushPrompt = nil
+                runFirstBranchPush(prompt, remote: remote, branch: branch)
+            })
         }
         .auvGitSheet(isPresented: Binding(get: { trackingBranch != nil }, set: { if !$0 { trackingBranch = nil; trackingRepository = nil } }), onDismiss: { trackingRepository = nil }) {
             VStack(alignment: .leading, spacing: 16) {
@@ -481,9 +491,31 @@ struct MainWindow: View {
             }
         }
         .auvGitSheet(isPresented: $showTags) { TagManagementView(store: store) }
-        .auvGitSheet(isPresented: $showNetwork) { NetworkOperationsView(store: store) }
+        .auvGitSheet(isPresented: $showNetwork) {
+            NetworkOperationsView(store: store, submit: { operation in
+                showNetwork = false
+                if operation == .push { prepareToolbarPush() }
+                else if operation == .pull {
+                    store.checkNetworkPreflight(.pull) { hint in
+                        if let hint, let repository = store.repository { pullPrompt = PullOperationPrompt(repository: repository, hint: hint) }
+                        else { runToolbarNetwork(.pull) }
+                    }
+                }
+                else { runToolbarNetwork(operation) }
+            }, submitFirstPush: { prompt, remote, branch in
+                showNetwork = false
+                runFirstBranchPush(prompt, remote: remote, branch: branch)
+            }, submitForcePush: { prompt in
+                showNetwork = false
+                runToolbarForcePush(prompt)
+            })
+        }
         .auvGitSheet(isPresented: $showTools) { RepositoryTools(store: store) }
         .auvGitSheet(isPresented: $showCreate) { CreateRepositorySheet(store: store, initialClone: createClone) }
+        .onReceive(store.creationOperation.$isPresented) { presented in showCreate = presented }
+        .onChange(of: showCreate) { _, presented in
+            if !presented { store.creationOperation.isPresented = false }
+        }
         .auvGitSheet(isPresented: Binding(get: { blamePath != nil }, set: { if !$0 { blamePath = nil } })) {
             if let repository = store.repository, let path = blamePath {
                 VStack { StructuredHistoryView(repository: repository, blamePath: path, revision: "HEAD"); DialogButton(workflowText("Close"), prominent: true, role: .cancel) { blamePath = nil }.buttonStyle(AuvGitDialogButtonStyle()) }.padding().frame(width: 1000, height: 700)
@@ -553,6 +585,33 @@ struct MainWindow: View {
                     else { try await active.fetch(credential: credential) }
                 }
                 await saveToolbarCredentialAfterSuccess(credential, requested: saveCredential, repository: active, operation: operation)
+            }
+        }
+    }
+    private func runFirstBranchPush(_ prompt: FirstBranchPushPrompt, remote: String, branch: String,
+                                    credential supplied: NetworkCredential? = nil, save: Bool = false) {
+        let repository = prompt.repository
+        guard store.repository === repository, !store.isBusy else { return }
+        Task { @MainActor in
+            let credential: NetworkCredential?
+            if let supplied { credential = supplied }
+            else { credential = await authentication.savedCredential(for: repository, operation: .push, remoteName: remote) }
+            guard store.repository === repository, !store.isBusy else { return }
+            store.operation("Push", onFailure: { failure in
+                Task { @MainActor in
+                    guard store.repository === repository else { return }
+                    _ = await authentication.presentIfNeeded(error: failure, repository: repository, operation: .push, remoteName: remote) { retry in
+                        runFirstBranchPush(prompt, remote: remote, branch: branch, credential: retry.credential, save: retry.saveCredential)
+                    }
+                }
+            }) { active in
+                try await authentication.perform(with: credential) {
+                    try await active.pushFirstBranch(prompt.request, remote: remote, remoteBranch: branch, credential: credential)
+                }
+                if save, let credential {
+                    do { try await authentication.save(credential, for: active, operation: .push, remoteName: remote) }
+                    catch { store.report(error) }
+                }
             }
         }
     }
@@ -881,6 +940,7 @@ extension MainWindow {
     }
     private func copyText(_ text: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
     @discardableResult private func workspaceShortcut(_ command: ShortcutCommand, fromMenu: Bool = false) -> Bool {
+        guard store.workspaceProjects == nil || store.workspaceProjects?.active === store else { return false }
         guard handlesStoreEvents else { return false }
         if fromMenu, command == .stage || command == .unstage {
             performToolbarCommand(command.rawValue); return true

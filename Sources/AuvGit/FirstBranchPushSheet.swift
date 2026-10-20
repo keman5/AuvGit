@@ -11,13 +11,15 @@ struct FirstBranchPushSheet: View {
     @ObservedObject var store: RepositoryStore
     let prompt: FirstBranchPushPrompt
     let close: () -> Void
+    var submit: ((String, String) -> Void)? = nil
     @StateObject private var authentication = RemoteAuthenticationCoordinator()
     @State private var remote: String
     @State private var branch: String
     @State private var error = ""
 
-    init(store: RepositoryStore, prompt: FirstBranchPushPrompt, close: @escaping () -> Void) {
+    init(store: RepositoryStore, prompt: FirstBranchPushPrompt, close: @escaping () -> Void, submit: ((String, String) -> Void)? = nil) {
         self.store = store; self.prompt = prompt; self.close = close
+        self.submit = submit
         _remote = State(initialValue: prompt.request.remotes.contains("origin") ? "origin" : prompt.request.remotes.first ?? "")
         _branch = State(initialValue: prompt.request.branch)
     }
@@ -65,6 +67,7 @@ struct FirstBranchPushSheet: View {
         let repository = prompt.repository, selectedRemote = remote
         let selectedBranch = branch.trimmingCharacters(in: .whitespacesAndNewlines)
         guard store.repository === repository, !store.isBusy else { return }
+        if let submit { submit(selectedRemote, selectedBranch); return }
         Task { @MainActor in
             let credential: NetworkCredential?
             if let supplied { credential = supplied }

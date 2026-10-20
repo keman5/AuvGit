@@ -172,19 +172,18 @@ struct TagManagementView: View {
         do { let newTags = try await repo.managedTags(); let newRemotes = try await repo.workflowRead(["remote"]).split(separator: "\n").map(String.init); let types = try await repo.workflowRead(["for-each-ref", "--format=%(refname:short)%00%(objecttype)", "refs/tags"]); guard reloadID == token, store.repositoryURL == repo.url else { return }; tags = newTags; tagTypes = Dictionary(uniqueKeysWithValues: types.split(separator: "\n").compactMap { line in let fields = line.split(separator: "\0").map(String.init); return fields.count == 2 ? (fields[0], fields[1]) : nil }); remotes = newRemotes; if let selection, !tags.contains(where: { $0.name == selection }) { self.selection = nil }; if !remotes.contains(remote) { remote = remotes.first ?? "" } } catch { output = OperationFailure.message(error, repository: store.repositoryURL) }
     }
     private func create() {
-        guard let repo = store.repository, !store.isBusy else { return }
+        guard store.repository != nil, !store.isBusy else { return }
         let tag = name, ref = revision, message = tagKind == "lightweight" ? "" : annotation, sign = tagKind == "signed"
-        store.isBusy = true
-        Task {
-            await store.cancelBackgroundRepositorySync()
-            do { try await repo.createManagedTag(name: tag, revision: ref, message: message, signed: sign); output = workflowText("Completed"); showCreate = false; name = ""; annotation = "" } catch { output = OperationFailure.message(error, repository: store.repositoryURL) }; store.isBusy = false; await reload(); await store.refresh() }
+        showCreate = false
+        store.operation("Create tag") { active in
+            try await active.createManagedTag(name: tag, revision: ref, message: message, signed: sign)
+        }
+        dismiss()
     }
     private func fetch() {
-        guard let repo = store.repository, !store.isBusy else { return }; let target = remote
-        store.isBusy = true
-        Task {
-            await store.cancelBackgroundRepositorySync()
-            do { output = try await repo.fetchTags(remote: target) } catch { output = OperationFailure.message(error, repository: store.repositoryURL) }; store.isBusy = false; await reload(); await store.refresh() }
+        guard store.repository != nil, !store.isBusy else { return }; let target = remote
+        store.operation("Fetch") { active in _ = try await active.fetchTags(remote: target) }
+        dismiss()
     }
     private func preview(delete: Bool) {
         guard let repo = store.repository, let selected = selection, !store.isBusy else { return }
@@ -196,9 +195,11 @@ struct TagManagementView: View {
     }
     private func publish(_ request: TagRequest) {
         guard store.repositoryURL == request.repo.url, !store.isBusy else { return }
-        store.isBusy = true
-        Task {
-            await store.cancelBackgroundRepositorySync()
-            do { if request.local { output = try await request.repo.advancedOperation(.tagDelete, first: request.name, second: "") } else { output = try await request.repo.synchronizeTag(name: request.name, remote: request.remote, delete: request.delete, preview: false) } } catch { output = OperationFailure.message(error, repository: store.repositoryURL) }; store.isBusy = false; await reload(); await store.refresh() }
+        pending = nil
+        store.operation(request.delete ? "Delete tag" : "Push") { active in
+            if request.local { _ = try await active.advancedOperation(.tagDelete, first: request.name, second: "") }
+            else { _ = try await active.synchronizeTag(name: request.name, remote: request.remote, delete: request.delete, preview: false) }
+        }
+        dismiss()
     }
 }

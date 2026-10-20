@@ -7,6 +7,9 @@ func networkText(_ key: String) -> String { L10n.text(key, table: "Network") }
 struct NetworkOperationsView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: RepositoryStore
+    var submit: ((NetworkOperation) -> Void)? = nil
+    var submitFirstPush: ((FirstBranchPushPrompt, String, String) -> Void)? = nil
+    var submitForcePush: ((ForcePushPrompt) -> Void)? = nil
     @StateObject private var authentication = RemoteAuthenticationCoordinator()
     @State private var operation = NetworkOperation.fetch
     @State private var events: [NetworkProgress] = []
@@ -203,10 +206,10 @@ struct NetworkOperationsView: View {
             }
         }
         .auvGitSheet(item: $firstPushPrompt, focusesOnPresentation: false) { prompt in
-            FirstBranchPushSheet(store: store, prompt: prompt) {
+            FirstBranchPushSheet(store: store, prompt: prompt, close: {
                 firstPushPrompt = nil
                 Task { await loadRepositoryContext() }
-            }
+            }, submit: submitFirstPush.map { submit in { remote, branch in firstPushPrompt = nil; submit(prompt, remote, branch) } })
         }
         .auvGitAlert(networkText("configureKeychain"), isPresented: $keychainConfirm) {
             AuvGitAlertButton(networkText("cancel"), role: .cancel) {}
@@ -254,6 +257,7 @@ struct NetworkOperationsView: View {
     }
     private func run(_ operation: NetworkOperation) {
         guard let repository = store.repository, !store.isBusy, task == nil else { return }
+        if operation != .pushPreview, let submit { submit(operation); return }
         if operation == .fetch { runVerified(operation); return }
         if operation == .push || operation == .pushPreview {
             Task { @MainActor in
@@ -350,6 +354,7 @@ struct NetworkOperationsView: View {
     }
     private func runForcePush(_ prompt: ForcePushPrompt, credential suppliedCredential: NetworkCredential? = nil, saveCredential: Bool = false) {
         guard store.repository === prompt.repository, !store.isBusy, task == nil else { return }
+        if let submitForcePush { submitForcePush(prompt); return }
         let name = forcePushText("action")
         store.beginUserOperation(name)
         let operationID = store.currentUserOperationID
@@ -396,12 +401,7 @@ struct NetworkOperationsView: View {
     }
     private func configureKeychain() {
         guard let repository = store.repository, !store.isBusy else { return }
-        store.isBusy = true
-        task = Task { @MainActor in
-            await store.cancelBackgroundRepositorySync()
-            do { try await repository.configureKeychainHelper(); await loadCredentials() }
-            catch { output = OperationFailure.message(error, repository: store.repositoryURL) }
-            store.isBusy = false; task = nil
-        }
+        store.operation(networkText("configureKeychain")) { active in try await active.configureKeychainHelper() }
+        dismiss()
     }
 }

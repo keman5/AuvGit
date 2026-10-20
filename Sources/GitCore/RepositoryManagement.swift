@@ -146,7 +146,7 @@ public extension GitRepository {
         defer { sshLease?.remove() }
         let authentication = sshLease?.gitArguments ?? lease?.gitArguments ?? NetworkAuthentication.arguments
         _ = try await GitCommandLog.$privateCredentials.withValue((credential.map { [$0.password] } ?? []) + (sshLease?.privateValues ?? [])) {
-            try await GitProcess.run(at: destination.deletingLastPathComponent(), arguments: authentication + ["clone", "--", source, destination.path], environmentOverrides: sshLease?.environment ?? [:])
+            try await GitProcess.run(at: destination.deletingLastPathComponent(), arguments: authentication + ["clone", "--progress", "--", source, destination.path], environmentOverrides: sshLease?.environment ?? [:])
         }
         return try await open(destination)
     }

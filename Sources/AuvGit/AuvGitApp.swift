@@ -15,7 +15,8 @@ final class RepositoryCommandRecords: ObservableObject {
 struct AuvGitApp: App {
     private let brandMigration: Void = AppBrandMigration.migrate()
     @NSApplicationDelegateAdaptor(AuvGitApplicationDelegate.self) private var appDelegate
-    @StateObject private var store = RepositoryStore()
+    @StateObject private var projects = WorkspaceProjects()
+    private var store: RepositoryStore { projects.active }
     @AppStorage(L10n.preferenceKey) private var languageCode = AppLanguage.system.rawValue
     @StateObject private var shortcuts = KeyboardShortcuts.shared
     private var workspaceActive: Bool {
@@ -32,7 +33,7 @@ struct AuvGitApp: App {
     }
     var body: some Scene {
         WindowGroup {
-            MainWindow(store: store)
+            WorkspaceProjectsView(projects: projects)
                 .nativeFocusRoot()
                 .environment(\.locale, L10n.locale)
                 .frame(minWidth: 1000)
@@ -85,6 +86,30 @@ struct AuvGitApp: App {
 
 @MainActor
 final class RepositoryStore: ObservableObject {
+    let sessionIdentity = UUID()
+    weak var workspaceProjects: WorkspaceProjects?
+    var persistsWorkspaceSession: Bool { persistsSession }
+    func makeWorkspaceProjectStore() -> RepositoryStore {
+        let store = RepositoryStore(persistsSession: false, followsCurrentBranch: true, presentationCache: .shared)
+        let owner = workspaceProjects?.sessions.first ?? self
+        store.session = owner.session
+        store.historyMemoryCache = owner.historyMemoryCache
+        store.recentPaths = recentPaths
+        store.openRepositories = openRepositories
+        store.repositoryGroups = repositoryGroups
+        return store
+    }
+    lazy var creationOperation = RepositoryCreationOperation(store: self)
+
+    func creationProgressHandler(operationID: UUID) -> @Sendable (NetworkProgress) -> Void {
+        progressOperationID = operationID; progressRepository = repositoryURL
+        return { [weak self] event in
+            Task { @MainActor in
+                guard let self, self.currentUserOperationID == operationID, self.isBusy else { return }
+                self.liveProgress = event
+            }
+        }
+    }
     private struct HistoryMemorySnapshot {
         let files: [GitFile]
         let filesGeneration: UUID
@@ -208,8 +233,24 @@ final class RepositoryStore: ObservableObject {
         return value
     }
     func flushSession() {
+        if !persistsSession, let owner = workspaceProjects?.sessions.first, owner !== self {
+            owner.flushSession()
+            return
+        }
         guard persistsSession, !isRestoringViewState, repositoryURL != nil || AuvGitPreferences.restoreRepositories else { return }
         if let path = repositoryURL?.path { session.repositories[path] = captureViewState() }
+        if let workspaceProjects {
+            for store in workspaceProjects.sessions where !store.isRestoringViewState {
+                if let path = store.repositoryURL?.path { session.repositories[path] = store.captureViewState() }
+            }
+            session.openRepositories = Array(Set(workspaceProjects.sessions.flatMap(\.openRepositories))).sorted()
+            session.activeRepository = workspaceProjects.active.repositoryURL?.path
+            if let data = try? session.encoded(), data != lastSavedSession {
+                if let previous = lastSavedSession { UserDefaults.standard.set(previous, forKey: sessionKey + ".backup") }
+                UserDefaults.standard.set(data, forKey: sessionKey); lastSavedSession = data
+            }
+            return
+        }
         session.openRepositories = openRepositories; session.activeRepository = repositoryURL?.path ?? (openRepositories.isEmpty ? nil : session.activeRepository)
         if let data = try? session.encoded(), data != lastSavedSession { if let previous = lastSavedSession { UserDefaults.standard.set(previous, forKey: sessionKey + ".backup") }; UserDefaults.standard.set(data, forKey: sessionKey); lastSavedSession = data }
     }
@@ -433,7 +474,7 @@ final class RepositoryStore: ObservableObject {
     var highlightedRepositoryPath: String? { pendingRepositoryPath ?? repositoryURL?.path }
     private var openingVersion = UUID()
     private var openingTask: Task<Void, Never>?
-    var canOpenRepository: Bool { !isBusy || openingRepositoryPath != nil }
+    var canOpenRepository: Bool { workspaceProjects != nil || !isBusy || openingRepositoryPath != nil }
     private var recentSyncTask: Task<Void, Never>?
     private var recentSyncDate = Date.distantPast
     var nextRemoteSync: [String: Date] = [:]
@@ -471,7 +512,7 @@ final class RepositoryStore: ObservableObject {
     private func defaultViewState() -> RepositoryViewState {
         var value = RepositoryViewState(); value.mode = persistsSession || followsCurrentBranch ? "workspace" : "history"; return value
     }
-    func clearRecentRepositories() { recentPaths = []; UserDefaults.standard.removeObject(forKey: "recentRepositories") }
+    func clearRecentRepositories() { recentPaths = []; UserDefaults.standard.removeObject(forKey: "recentRepositories"); workspaceProjects?.synchronizeProjectList(from: self) }
     private func registerRepositoryPaths(_ paths: [String]) {
         for path in paths {
             let url = URL(fileURLWithPath: path)
@@ -479,6 +520,7 @@ final class RepositoryStore: ObservableObject {
             if !recentPaths.contains(where: { Self.sameRepositoryLocation(URL(fileURLWithPath: $0), url) }) { recentPaths.append(path) }
         }
         if persistsSession { UserDefaults.standard.set(recentPaths, forKey: "recentRepositories") }
+        workspaceProjects?.synchronizeProjectList(from: self)
     }
     func clearSessionDrafts() {
         session.repositories = [:]; commitMessage = ""; amend = false
@@ -492,6 +534,13 @@ final class RepositoryStore: ObservableObject {
     }
     @discardableResult
     func requestOpen(_ url: URL, promptsIfUnavailable: Bool = true) -> Task<Void, Never>? {
+        if let workspaceProjects {
+            return workspaceProjects.open(url, from: self, promptsIfUnavailable: promptsIfUnavailable)
+        }
+        return requestOpenInSession(url, promptsIfUnavailable: promptsIfUnavailable)
+    }
+    @discardableResult
+    func requestOpenInSession(_ url: URL, promptsIfUnavailable: Bool = true) -> Task<Void, Never>? {
         guard canOpenRepository else { return nil }
         openingTask?.cancel()
         let version = UUID(); openingVersion = version
@@ -1041,6 +1090,7 @@ final class RepositoryStore: ObservableObject {
         guard !isBusy else { return }
         recentPaths.removeAll { $0 == path }
         if persistsSession { UserDefaults.standard.set(recentPaths, forKey: "recentRepositories") }
+        workspaceProjects?.synchronizeProjectList(from: self)
         unavailableRepository = nil
         closeRepositoryTab(path)
         if let presentationCache { Task { try? await presentationCache.remove(repository: URL(fileURLWithPath: path)) } }

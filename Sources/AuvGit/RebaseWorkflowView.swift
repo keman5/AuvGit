@@ -288,9 +288,10 @@ struct RebaseWorkflowView: View {
         }
     }
     private func run(_ request: PendingRebase) {
-        guard store.repositoryURL == request.repository.url, !store.isBusy else { return }; store.isBusy = true
-        Task {
-            await store.cancelBackgroundRepositorySync()
-            do { output = try await request.repository.executeRebase(plan: request.plan, editedTodo: request.todo, messages: request.messages, allowExec: true); if output.isEmpty { output = sessionText("Rebase completed or paused") } } catch { output = OperationFailure.message(error, repository: store.repositoryURL) }; store.isBusy = false; await store.refresh() }
+        guard store.repositoryURL == request.repository.url, !store.isBusy else { return }
+        store.operation("Rebase") { active in
+            _ = try await active.executeRebase(plan: request.plan, editedTodo: request.todo, messages: request.messages, allowExec: true)
+        }
+        onClose?()
     }
 }
