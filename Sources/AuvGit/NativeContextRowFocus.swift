@@ -60,9 +60,11 @@ final class NativeContextRowFocus {
             }
             return nil
         }
-        if let marker = marker(in: content), let host = marker.superview {
+        if let marker = marker(in: content), let overlayHost = content.superview {
             target = marker
-            host.addSubview(highlight, positioned: .above, relativeTo: nil)
+            // A sibling of the background marker can remain behind SwiftUI's
+            // opaque row. Draw above the hosting content instead.
+            overlayHost.addSubview(highlight, positioned: .above, relativeTo: content)
             apply()
         }
     }
@@ -74,7 +76,8 @@ final class NativeContextRowFocus {
             guard row < table.numberOfRows else { clear(); return }
             if highlight.superview !== table { table.addSubview(highlight, positioned: .above, relativeTo: nil) }
             frame = table.rect(ofRow: row)
-        } else if let host = target.superview {
+        } else if let host = target.window?.contentView?.superview {
+            if highlight.superview !== host { host.addSubview(highlight, positioned: .above, relativeTo: nil) }
             frame = host.convert(target.bounds, from: target)
         } else { clear(); return }
         if highlight.frame != frame {

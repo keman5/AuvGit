@@ -32,7 +32,7 @@ struct AICommitScopeSheet: View {
             }.pickerStyle(.radioGroup).labelsHidden()
             Text(aiCommitText("Workspace scope includes staged, unstaged, and untracked changes. Unchanged and ignored files are excluded. No files are staged or committed."))
                 .font(.caption).foregroundStyle(.secondary)
-            Toggle(aiCommitText("Remember my choice"), isOn: $remember)
+            KeyViewProxy(label: aiCommitText("Remember my choice"), checked: remember) { remember.toggle() }
             HStack {
                 DialogButton(aiCommitText("Cancel"), role: .cancel) { dismiss() }
                 DialogButton(aiCommitText("Generate"), prominent: true) {

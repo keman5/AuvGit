@@ -45,6 +45,10 @@ struct AuvGitApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
                     RepositoryStore.setApplicationActiveForAllStores(false)
                 }
+                .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
+                    RepositoryStore.setApplicationActiveForAllStores(false)
+                    RepositoryStore.setApplicationActiveForAllStores(NSApp.isActive)
+                }
                 .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
                     RepositoryStore.checkRemoteUpdatesForActivePanel()
                 }
@@ -97,6 +101,8 @@ final class RepositoryStore: ObservableObject {
         store.recentPaths = recentPaths
         store.openRepositories = openRepositories
         store.repositoryGroups = repositoryGroups
+        store.repositoryChangeCounts = owner.repositoryChangeCounts
+        store.repositorySyncStates = owner.repositorySyncStates
         return store
     }
     lazy var creationOperation = RepositoryCreationOperation(store: self)
@@ -214,6 +220,7 @@ final class RepositoryStore: ObservableObject {
     func closeTransientSession() {
         guard !persistsSession else { return }
         projectPreparationTask?.cancel(); projectPreparationTask = nil
+        recentSyncTask?.cancel(); recentSyncTask = nil
         activationTask?.cancel(); activationTask = nil
         openingTask?.cancel(); openingTask = nil; openingVersion = UUID()
         fileObserver = nil
@@ -282,6 +289,13 @@ final class RepositoryStore: ObservableObject {
     @Published var repositoryChangeCounts: [String: Int] = [:]
     struct RepositorySyncState: Equatable { let ahead: Int?; let behind: Int?; let conflicts: Int }
     @Published var repositorySyncStates: [String: RepositorySyncState] = [:]
+    private func publishRepositorySyncState(_ state: RepositorySyncState, path: String) {
+        var targets = workspaceProjects?.sessions ?? [self]
+        if !targets.contains(where: { $0 === self }) { targets.append(self) }
+        for target in targets where target.repositorySyncStates[path] != state {
+            target.repositorySyncStates[path] = state
+        }
+    }
     let commandRecords = RepositoryCommandRecords()
     private var commandLog: [GitCommandRecord] {
         get { commandRecords.reads }
@@ -477,6 +491,7 @@ final class RepositoryStore: ObservableObject {
     var canOpenRepository: Bool { workspaceProjects != nil || !isBusy || openingRepositoryPath != nil }
     private var recentSyncTask: Task<Void, Never>?
     private var recentSyncDate = Date.distantPast
+    private var immediateRemoteSyncPaths: [String] = []
     var nextRemoteSync: [String: Date] = [:]
     private static let stores = NSHashTable<RepositoryStore>.weakObjects()
     private var refreshingRepository: URL?
@@ -514,13 +529,21 @@ final class RepositoryStore: ObservableObject {
     }
     func clearRecentRepositories() { recentPaths = []; UserDefaults.standard.removeObject(forKey: "recentRepositories"); workspaceProjects?.synchronizeProjectList(from: self) }
     private func registerRepositoryPaths(_ paths: [String]) {
+        var added: [String] = []
         for path in paths {
             let url = URL(fileURLWithPath: path)
             if !openRepositories.contains(where: { Self.sameRepositoryLocation(URL(fileURLWithPath: $0), url) }) { openRepositories.append(path) }
-            if !recentPaths.contains(where: { Self.sameRepositoryLocation(URL(fileURLWithPath: $0), url) }) { recentPaths.append(path) }
+            if !recentPaths.contains(where: { Self.sameRepositoryLocation(URL(fileURLWithPath: $0), url) }) {
+                recentPaths.append(path)
+                added.append(path)
+            }
         }
         if persistsSession { UserDefaults.standard.set(recentPaths, forKey: "recentRepositories") }
         workspaceProjects?.synchronizeProjectList(from: self)
+        if !added.isEmpty {
+            let owner = workspaceProjects?.sessions.first(where: { $0.persistsSession }) ?? self
+            owner.refreshRecentRepositoryStates(addedPaths: added)
+        }
     }
     func clearSessionDrafts() {
         session.repositories = [:]; commitMessage = ""; amend = false
@@ -937,7 +960,7 @@ final class RepositoryStore: ObservableObject {
         stores.allObjects.forEach { $0.setApplicationActive(active) }
     }
     static func checkRemoteUpdatesForActivePanel() {
-        stores.allObjects.first(where: { $0.persistsSession })?.refreshRecentRepositoryStates()
+        for store in stores.allObjects where store.persistsSession { store.refreshRecentRepositoryStates() }
     }
     func setApplicationActive(_ active: Bool) {
         guard applicationActive != active else { return }
@@ -953,6 +976,7 @@ final class RepositoryStore: ObservableObject {
             defer { if activationVersion == version { activationTask = nil } }
             guard !Task.isCancelled, applicationActive, AuvGitPreferences.backgroundRefresh else { return }
             lastPoll = Date(); lastAutomaticRefresh = Date()
+            recentSyncDate = .distantPast
             await refreshIfChanged()
             guard !Task.isCancelled, applicationActive else { return }
             refreshRecentRepositoryStates()
@@ -1046,7 +1070,7 @@ final class RepositoryStore: ObservableObject {
             let syncCounts = syncText?.split(whereSeparator: { $0.isWhitespace }).compactMap { Int($0) } ?? []
             guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
             let syncState = RepositorySyncState(ahead: syncCounts.count == 2 ? syncCounts[0] : nil, behind: syncCounts.count == 2 ? syncCounts[1] : nil, conflicts: result.0.filter(\.isConflict).count)
-            if repositorySyncStates[repository.url.path] != syncState { repositorySyncStates[repository.url.path] = syncState }
+            publishRepositorySyncState(syncState, path: repository.url.path)
             await workspaceDiff
             workspaceStatusFailure = nil
         } catch {
@@ -1129,7 +1153,7 @@ final class RepositoryStore: ObservableObject {
             if repositoryChangeCounts[repository.url.path] != newFiles.count { repositoryChangeCounts[repository.url.path] = newFiles.count }
             let previous = repositorySyncStates[repository.url.path]
             let sync = RepositorySyncState(ahead: previous?.ahead, behind: previous?.behind, conflicts: newFiles.filter(\.isConflict).count)
-            if previous != sync { repositorySyncStates[repository.url.path] = sync }
+            publishRepositorySyncState(sync, path: repository.url.path)
             setStatus("Refreshed · %@ changes · %@ staged", arguments: [String(files.count), String(stagedCount)])
             if state != lastObservedState { await loadDiff() }
             if version == repoVersion, refreshReadVersion == refreshVersion, state.history == lastHistoryState { lastObservedState = state }
@@ -1147,19 +1171,28 @@ final class RepositoryStore: ObservableObject {
         tasks.forEach { $0.cancel() }
         for task in tasks { await task.value }
     }
-    func refreshRecentRepositoryStates(now: Date = Date()) {
-        guard applicationActive, persistsSession, AuvGitPreferences.backgroundRefresh, recentSyncTask == nil,
-              !Self.stores.allObjects.contains(where: { $0.isBusy }), now.timeIntervalSince(recentSyncDate) >= 30 else { return }
+    func refreshRecentRepositoryStates(now: Date = Date(), addedPaths: [String] = []) {
+        for path in addedPaths where !immediateRemoteSyncPaths.contains(path) { immediateRemoteSyncPaths.append(path) }
+        let immediate = !immediateRemoteSyncPaths.isEmpty
+        guard applicationActive, immediate || (persistsSession && AuvGitPreferences.backgroundRefresh), recentSyncTask == nil,
+              !Self.stores.allObjects.contains(where: { $0.isBusy && $0.repositoryURL == nil }),
+              immediate || now.timeIntervalSince(recentSyncDate) >= 30 else { return }
         recentSyncDate = now
         var seen = Set<String>()
-        let paths = ([repositoryURL?.path].compactMap { $0 } + openRepositories + recentPaths).filter { seen.insert($0).inserted }
+        let paths = ([workspaceProjects?.active.repositoryURL?.path, repositoryURL?.path].compactMap { $0 } + openRepositories + recentPaths).filter { seen.insert($0).inserted }
         nextRemoteSync = nextRemoteSync.filter { paths.contains($0.key) }
         recentSyncTask = Task {
-            for path in paths {
-                guard applicationActive, !Task.isCancelled, AuvGitPreferences.backgroundRefresh, !Self.stores.allObjects.contains(where: { $0.isBusy }) else { break }
+            var remaining = immediate ? [] : paths
+            while !immediateRemoteSyncPaths.isEmpty || !remaining.isEmpty {
+                let isImmediate = !immediateRemoteSyncPaths.isEmpty
+                let path = isImmediate ? immediateRemoteSyncPaths.removeFirst() : remaining.removeFirst()
+                remaining.removeAll { $0 == path }
+                guard applicationActive, !Task.isCancelled, isImmediate || AuvGitPreferences.backgroundRefresh else { break }
+                // A write blocks its repository, not unrelated projects in the sidebar.
+                guard !Self.stores.allObjects.contains(where: { $0.isBusy && ($0.repositoryURL == nil || $0.repositoryURL?.path == path) }) else { continue }
                 guard (recentPaths + openRepositories + [repositoryURL?.path].compactMap { $0 }).contains(path) else { continue }
                 let repo = GitRepository(url: URL(fileURLWithPath: path))
-                if now >= (nextRemoteSync[path] ?? .distantPast) {
+                if isImmediate || now >= (nextRemoteSync[path] ?? .distantPast) {
                     do {
                         let authentication = RemoteAuthenticationCoordinator()
                         let remotes = (try await repo.workflowRead(["remote"])).split(separator: "\n").map(String.init)
@@ -1179,12 +1212,15 @@ final class RepositoryStore: ObservableObject {
                 }
                 guard !Task.isCancelled, let files = try? await GitCommandLog.$suppressRoutineReads.withValue(true, operation: { try await repo.status() }) else { continue }
                 let text = try? await GitCommandLog.$suppressRoutineReads.withValue(true) { try await repo.workflowRead(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"]) }
-                guard applicationActive, !Task.isCancelled, AuvGitPreferences.backgroundRefresh,
+                guard applicationActive, !Task.isCancelled, isImmediate || AuvGitPreferences.backgroundRefresh,
                       (recentPaths + openRepositories + [repositoryURL?.path].compactMap { $0 }).contains(path) else { continue }
                 let counts = text?.split(whereSeparator: { $0.isWhitespace }).compactMap { Int($0) } ?? []
                 if repositoryChangeCounts[path] != files.count { repositoryChangeCounts[path] = files.count }
                 let state = RepositorySyncState(ahead: counts.count == 2 ? counts[0] : nil, behind: counts.count == 2 ? counts[1] : nil, conflicts: files.filter(\.isConflict).count)
-                if repositorySyncStates[path] != state { repositorySyncStates[path] = state }
+                publishRepositorySyncState(state, path: path)
+                for session in workspaceProjects?.sessions ?? [] where session !== self {
+                    if session.repositoryChangeCounts[path] != files.count { session.repositoryChangeCounts[path] = files.count }
+                }
             }
             recentSyncTask = nil
         }
@@ -1539,7 +1575,7 @@ final class RepositoryStore: ObservableObject {
         let text = try? await target.workflowRead(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
         let counts = text?.split(whereSeparator: { $0.isWhitespace }).compactMap { Int($0) } ?? []
         repositoryChangeCounts[path] = files.count
-        repositorySyncStates[path] = RepositorySyncState(ahead: counts.count == 2 ? counts[0] : nil, behind: counts.count == 2 ? counts[1] : nil, conflicts: files.filter(\.isConflict).count)
+        publishRepositorySyncState(RepositorySyncState(ahead: counts.count == 2 ? counts[0] : nil, behind: counts.count == 2 ? counts[1] : nil, conflicts: files.filter(\.isConflict).count), path: path)
     }
     var canStageSelection: Bool { repository != nil && !isBusy && !WorkspaceFileActionTargets.paths(for: .stage, files: files, selection: selectedPaths).isEmpty }
     var canUnstageSelection: Bool { repository != nil && !isBusy && !WorkspaceFileActionTargets.paths(for: .unstage, files: files, selection: selectedPaths).isEmpty }

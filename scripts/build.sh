@@ -1,6 +1,23 @@
 #!/bin/zsh
 set -euo pipefail
 cd "${0:A:h:h}"
+if command -v go >/dev/null 2>&1; then go clean -cache; fi
+if [[ "${1:-}" == --test-checkbox-focus ]]; then
+  swift test --build-system native --filter "${AUVGIT_CHECKBOX_TEST_FILTER:-NativeFocusBridgeTests|NativeFocusAppearanceTests|WorkspaceCommitTests}"
+  exit
+fi
+if [[ "${1:-}" == --test-terminal ]]; then
+  swift test --build-system native --filter TerminalAppearanceTests
+  exit
+fi
+if [[ "${1:-}" == --test-context-focus ]]; then
+  swift test --build-system native --filter NativeFocusAppearanceTests
+  exit
+fi
+if [[ "${1:-}" == --test-refresh ]]; then
+  swift test --build-system native --filter "${AUVGIT_REFRESH_TEST_FILTER:-ForegroundRefreshTests|RepositoryRemoteSyncTests|WorkspaceProjectsTests}"
+  exit
+fi
 if [[ "${1:-}" == --test-file-sorting ]]; then
   swift test --build-system native -c release --filter 'LogFileSortingTests|WorkspaceFilePreparationTests|WorkspaceNativeFilesTableTests|NativeCompactHistoryTableTests|LogWindowSelectionFocusTests'
   exit
@@ -9,7 +26,7 @@ INSTALL_APP=true
 case "${1:-}" in
   "") ;;
   --no-install) INSTALL_APP=false ;;
-  *) print -u2 "Usage: $0 [--no-install|--test-file-sorting]"; exit 1 ;;
+  *) print -u2 "Usage: $0 [--no-install|--test-file-sorting|--test-refresh]"; exit 1 ;;
 esac
 # Compile the native icon so macOS 26+ does not wrap the legacy icns in a gray tile.
 ICON_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/auvgit-app-icon.XXXXXX")"
@@ -102,10 +119,14 @@ SWIFT
   cmp "$APP/Contents/MacOS/AuvGit" "$LOCAL_APP/Contents/MacOS/AuvGit"
   swift - <<'SWIFT'
 import AppKit
-let legacy = URL(fileURLWithPath: "/Applications/RayGit.app")
-if FileManager.default.fileExists(atPath: legacy.path), Bundle(url: legacy)?.bundleIdentifier == "dev.raygit.mac" {
-    try FileManager.default.trashItem(at: legacy, resultingItemURL: nil)
+let legacyApps = [URL(fileURLWithPath: "/Applications/RayGit.app"),
+    URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(".artifacts/RayGit.app")]
+for legacy in legacyApps {
+    if FileManager.default.fileExists(atPath: legacy.path), Bundle(url: legacy)?.bundleIdentifier == "dev.raygit.mac" {
+        try FileManager.default.trashItem(at: legacy, resultingItemURL: nil)
+    }
 }
 SWIFT
   print "Installed $LOCAL_APP"
+  swift package clean
 fi

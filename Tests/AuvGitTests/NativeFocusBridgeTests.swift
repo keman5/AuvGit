@@ -1,10 +1,37 @@
 import AppKit
 import SwiftUI
 import XCTest
+import GitCore
 @testable import AuvGit
 
 @MainActor
 final class NativeFocusBridgeTests: XCTestCase {
+    func testWorkspaceUntrackedCheckboxSupportsTabAndSpace() throws {
+        _ = NSApplication.shared
+        let request = WorkspaceCommitRequest(repository: GitRepository(url: URL(fileURLWithPath: "/tmp")), message: "unused", hasTrackedChanges: false)
+        let host = NSHostingView(rootView: WorkspaceCommitSheet(store: RepositoryStore(persistsSession: false), request: request).nativeFocusRoot())
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 240), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentView = host
+        defer { window.close() }
+        drain(host)
+        func buttons(_ view: NSView) -> [NSButton] { (view as? NSButton).map { [$0] } ?? view.subviews.flatMap(buttons) }
+        let checkbox = try XCTUnwrap(buttons(host).first { $0.title == workflowText("Include untracked files") })
+        XCTAssertTrue(checkbox.canBecomeKeyView)
+        XCTAssertFalse(window.firstResponder === checkbox, "Presentation must not focus the checkbox")
+        window.recalculateKeyViewLoop()
+        window.makeFirstResponder(window)
+        for _ in 0..<6 {
+            window.sendEvent(tabEvent(in: window))
+            if window.firstResponder === checkbox { break }
+        }
+        XCTAssertTrue(window.firstResponder === checkbox)
+        let space = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: window.windowNumber, context: nil, characters: " ", charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49))
+        checkbox.keyDown(with: space); drain(host)
+        XCTAssertEqual(checkbox.state, .on)
+        checkbox.keyDown(with: space); drain(host)
+        XCTAssertEqual(checkbox.state, .off)
+    }
     private final class ScopeRecorder: @unchecked Sendable {
         private let lock = NSLock()
         private var values: [Bool] = []

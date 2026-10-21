@@ -4,6 +4,34 @@ import XCTest
 
 @MainActor
 final class RepositoryRemoteSyncTests: XCTestCase {
+    func testNewProjectFetchesImmediatelyWithBackgroundRefreshDisabled() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let key = "preferences.backgroundRefresh", previous = UserDefaults.standard.object(forKey: key)
+        UserDefaults.standard.set(false, forKey: key)
+        defer { if let previous { UserDefaults.standard.set(previous, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) } }
+        let remote = root.appendingPathComponent("remote.git"), producer = root.appendingPathComponent("producer"), local = root.appendingPathComponent("local")
+        _ = try await GitProcess.run(at: root, arguments: ["init", "--bare", remote.path])
+        _ = try await GitProcess.run(at: root, arguments: ["clone", remote.path, producer.path])
+        for args in [["config", "user.name", "Test"], ["config", "user.email", "test@example.invalid"], ["commit", "--allow-empty", "-m", "base"], ["push", "origin", "HEAD"]] {
+            _ = try await GitProcess.run(at: producer, arguments: args)
+        }
+        _ = try await GitProcess.run(at: root, arguments: ["clone", remote.path, local.path])
+        _ = try await GitProcess.run(at: producer, arguments: ["commit", "--allow-empty", "-m", "incoming"])
+        _ = try await GitProcess.run(at: producer, arguments: ["push", "origin", "HEAD"])
+        let store = RepositoryStore(persistsSession: false, followsCurrentBranch: true)
+        defer { store.closeTransientSession() }
+        await store.open(local)
+        for _ in 0..<300 {
+            if store.repositorySyncStates[local.path]?.behind == 1 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        await store.cancelBackgroundRepositorySync()
+        XCTAssertEqual(store.repositorySyncStates[local.path]?.behind, 1)
+        XCTAssertEqual(store.commits.first?.subject, "incoming")
+    }
+
     func testIncomingHistoryStaysAboveNewerLocalCommitsAcrossPages() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -73,15 +101,24 @@ final class RepositoryRemoteSyncTests: XCTestCase {
         let store = RepositoryStore()
         store.recentPaths = paths.map(\.path); store.openRepositories = [paths[0].path]
         store.repository = GitRepository(url: paths[0]); store.repositoryURL = store.repository?.url
-        store.refreshRecentRepositoryStates()
+        let projects = WorkspaceProjects(initial: store)
+        defer { withExtendedLifetime(projects) {} }
+        await store.open(paths[1])
+        let selected = projects.active
+        defer { selected.closeTransientSession() }
+        await store.cancelBackgroundRepositorySync()
+        store.nextRemoteSync = [:]
+        store.refreshRecentRepositoryStates(now: Date().addingTimeInterval(30))
         for _ in 0..<500 {
-            if paths.allSatisfy({ store.repositorySyncStates[$0.path]?.behind == 1 }) { break }
+            if paths.allSatisfy({ store.repositorySyncStates[$0.path]?.behind == 1 && selected.repositorySyncStates[$0.path]?.behind == 1 }) { break }
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         await store.cancelBackgroundRepositorySync()
         for path in paths {
             XCTAssertEqual(store.repositorySyncStates[path.path]?.behind, 1)
             XCTAssertEqual(store.repositoryChangeCounts[path.path], 1)
+            XCTAssertEqual(selected.repositorySyncStates[path.path]?.behind, 1, "Every project sidebar must receive fetched state")
+            XCTAssertEqual(selected.repositoryChangeCounts[path.path], 1)
             XCTAssertEqual(try String(contentsOf: path.appendingPathComponent("file.txt"), encoding: .utf8), "dirty\n")
             XCTAssertNotNil(store.nextRemoteSync[path.path])
         }
@@ -90,11 +127,24 @@ final class RepositoryRemoteSyncTests: XCTestCase {
         XCTAssertFalse(store.isBusy)
         XCTAssertEqual(store.commits.first?.subject, "remote change", "A successful background fetch must put incoming commits at the top of active history")
         XCTAssertTrue(store.commits.contains { $0.subject == "base" })
-        let dates = store.nextRemoteSync
+        var dates = store.nextRemoteSync
         store.refreshRecentRepositoryStates(now: Date().addingTimeInterval(31))
         try await Task.sleep(nanoseconds: 200_000_000)
         await store.cancelBackgroundRepositorySync()
         XCTAssertEqual(store.nextRemoteSync, dates, "Local checks must not fetch before the per-project deadline")
+        let busyProject = RepositoryStore(persistsSession: false)
+        busyProject.repositoryURL = paths[0]
+        busyProject.isBusy = true
+        store.refreshRecentRepositoryStates(now: Date().addingTimeInterval(200))
+        for _ in 0..<500 {
+            if store.nextRemoteSync[paths[1].path] != dates[paths[1].path] { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        await store.cancelBackgroundRepositorySync()
+        XCTAssertEqual(store.nextRemoteSync[paths[0].path], dates[paths[0].path])
+        XCTAssertNotEqual(store.nextRemoteSync[paths[1].path], dates[paths[1].path], "A busy project cannot starve other projects")
+        busyProject.isBusy = false; busyProject.closeTransientSession()
+        dates = store.nextRemoteSync
         let transient = RepositoryStore(persistsSession: false)
         transient.isBusy = true
         store.refreshRecentRepositoryStates(now: Date().addingTimeInterval(400))

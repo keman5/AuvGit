@@ -89,8 +89,8 @@ struct ComparisonSearchPopover: View {
                 }
             }
             HStack {
-                Toggle(comparisonSearchText("Case sensitive"), isOn: $options.caseSensitive)
-                Toggle(comparisonSearchText("Regular expression"), isOn: $options.regularExpression)
+                KeyViewProxy(label: comparisonSearchText("Case sensitive"), checked: options.caseSensitive) { options.caseSensitive.toggle() }
+                KeyViewProxy(label: comparisonSearchText("Regular expression"), checked: options.regularExpression) { options.regularExpression.toggle() }
                 if isSearching { ProgressView().controlSize(.mini); if let onCancelSearch { Button(comparisonSearchText("Cancel search"), action: onCancelSearch) } }
                 Text("\(min(max(0, matchIndex), matchCount))/\(matchCount)").monospacedDigit()
             }.frame(maxWidth: .infinity).font(.caption)

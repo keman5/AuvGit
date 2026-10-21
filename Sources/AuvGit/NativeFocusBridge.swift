@@ -271,6 +271,7 @@ struct KeyViewProxy: NSViewRepresentable {
         var activate: (() -> Void)?
         var declaredKeyEquivalent: String?
         var isPrimaryAction = false
+        var isCheckbox = false
         override var acceptsFirstResponder: Bool { isEnabled && !isHiddenOrHasHiddenAncestor }
         override var canBecomeKeyView: Bool { acceptsFirstResponder && window != nil }
         override func becomeFirstResponder() -> Bool { needsDisplay = true; noteFocusRingMaskChanged(); return acceptsFirstResponder }
@@ -286,6 +287,14 @@ struct KeyViewProxy: NSViewRepresentable {
             }
         }
         @objc func invoke(_ sender: Any?) { activate?() }
+        override func keyDown(with event: NSEvent) {
+            if isCheckbox, event.keyCode == 49,
+               event.modifierFlags.intersection([.command, .option, .control]).isEmpty {
+                if isEnabled && !event.isARepeat { invoke(nil) }
+                return
+            }
+            super.keyDown(with: event)
+        }
         override func performKeyEquivalent(with event: NSEvent) -> Bool {
             if declaredKeyEquivalent == "\u{1b}", event.keyCode == 53,
                event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty, isEnabled {
@@ -309,6 +318,7 @@ struct KeyViewProxy: NSViewRepresentable {
         button.keyEquivalent = keyEquivalent.isEmpty && prominent && checked == nil ? "\r" : keyEquivalent; button.keyEquivalentModifierMask = []
         button.declaredKeyEquivalent = button.keyEquivalent
         button.isPrimaryAction = prominent && checked == nil
+        button.isCheckbox = checked != nil
         button.bezelColor = prominent ? .controlAccentColor : nil
         button.contentTintColor = tint
         if let checked { button.setButtonType(.switch); button.state = checked ? .on : .off }

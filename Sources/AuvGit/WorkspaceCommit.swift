@@ -80,7 +80,7 @@ struct WorkspaceCommitSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             Text(workflowText("Commit workspace changes")).font(.headline)
             Text(workflowText("There are no staged files. All tracked changes will be staged and committed. Include untracked files too?"))
-            Toggle(workflowText("Include untracked files"), isOn: $includeUntracked)
+            KeyViewProxy(label: workflowText("Include untracked files"), checked: includeUntracked) { includeUntracked.toggle() }
             HStack {
                 DialogButton(workflowText("Cancel"), role: .cancel) { dismiss() }
                 DialogButton(L10n.text("commit", table: "Main"), prominent: true) {

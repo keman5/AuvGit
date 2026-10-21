@@ -70,13 +70,16 @@ final class NativeFocusAppearanceTests: XCTestCase {
             modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
             context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
         let focus = NativeContextRowFocus()
+        let overlayHost = try XCTUnwrap(window.contentView?.superview)
+        let originalCount = overlayHost.subviews.count
 
         focus.handle(event, in: window)
 
         XCTAssertLessThanOrEqual(views.reduce(0) { $0 + $1.subtreeReads }, depth * 2,
                                  "Context clicks must not repeatedly search nested subtrees")
-        XCTAssertEqual(views[depth - 1].subviews.count, 2, "The matching row must still receive a highlight")
+        XCTAssertEqual(overlayHost.subviews.count, originalCount + 1, "The matching row must receive a highlight above SwiftUI content")
         focus.clear()
+        XCTAssertEqual(overlayHost.subviews.count, originalCount)
         XCTAssertEqual(views[depth - 1].subviews.count, 1)
     }
 
@@ -98,7 +101,7 @@ final class NativeFocusAppearanceTests: XCTestCase {
             (view as? ContextRowMarker).map { [$0] } ?? view.subviews.flatMap { markers(in: $0) }
         }
         let marker = try XCTUnwrap(markers(in: host).first)
-        let parent = try XCTUnwrap(marker.superview)
+        let parent = try XCTUnwrap(host.superview)
         let siblings = Set(parent.subviews.map(ObjectIdentifier.init))
         let point = marker.convert(NSPoint(x: marker.bounds.midX, y: marker.bounds.midY), to: nil)
         let appearance = NativeFocusAppearance.forWindow(window)

@@ -112,7 +112,9 @@ struct MainWindow: View {
         .controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6))
         .frame(minHeight: terminals.visible ? 750 : 680)
         .navigationTitle(store.highlightedRepositoryPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "AuvGit")
-        .background(TerminalShortcutMonitor { terminals.toggle(for: store.repositoryURL, store: store) }.frame(width: 0, height: 0))
+        .background(TerminalShortcutMonitor(isActive: store.workspaceProjects == nil || store.workspaceProjects?.active === store) {
+            terminals.toggle(for: store.repositoryURL, store: store)
+        }.frame(width: 0, height: 0))
         .background(WorkspaceKeyboardRegion(action: { workspaceShortcut($0) }, onWindow: { shortcutWindow = $0 }, menuAction: { workspaceShortcut($0, fromMenu: true) }).allowsHitTesting(false).accessibilityHidden(true))
     }
     @ViewBuilder private var toolbarContent: some View {

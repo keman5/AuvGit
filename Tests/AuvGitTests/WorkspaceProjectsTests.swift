@@ -4,6 +4,38 @@ import XCTest
 
 @MainActor
 final class WorkspaceProjectsTests: XCTestCase {
+    func testForegroundSyncCountsReachEveryProjectSidebarAndClearAfterPush() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let local = root.appendingPathComponent("local"), other = root.appendingPathComponent("other")
+        for url in [local, other] {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            _ = try await GitProcess.run(at: url, arguments: ["init", "-b", "main"])
+        }
+        for args in [["config", "user.name", "Test"], ["config", "user.email", "test@example.invalid"],
+                     ["commit", "--allow-empty", "-m", "base"], ["branch", "tracking"],
+                     ["branch", "--set-upstream-to=tracking"], ["commit", "--allow-empty", "-m", "outgoing"]] {
+            _ = try await GitProcess.run(at: local, arguments: args)
+        }
+        let store = RepositoryStore(persistsSession: false, followsCurrentBranch: true)
+        let projects = WorkspaceProjects(initial: store)
+        defer { for session in projects.sessions { session.closeTransientSession() } }
+        await store.open(local)
+        await store.open(other)
+        let selected = projects.active
+        XCTAssertFalse(selected === store)
+        await store.refresh()
+        XCTAssertEqual(selected.repositorySyncStates[local.path]?.ahead, 1)
+        XCTAssertEqual(selected.repositorySyncStates[local.path]?.behind, 0)
+        _ = try await GitProcess.run(at: local, arguments: ["branch", "-f", "tracking", "main"])
+        await store.refresh()
+        XCTAssertEqual(selected.repositorySyncStates[local.path]?.ahead, 0)
+        _ = try await GitProcess.run(at: local, arguments: ["reset", "--soft", "HEAD~1"])
+        await selected.refreshRepositoryContext(path: local.path)
+        XCTAssertEqual(store.repositorySyncStates[local.path]?.behind, 1)
+        XCTAssertEqual(selected.repositorySyncStates[local.path]?.behind, 1)
+    }
     func testSwitchingDuringGitOperationRetainsOwnerAndAllowsOtherProjectWork() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

@@ -90,33 +90,39 @@ private struct TerminalHost: NSViewRepresentable {
 
 /// Scoped to this host's window; compare/settings/sheets keep macOS's window shortcut.
 struct TerminalShortcutMonitor: NSViewRepresentable {
+    var isActive = true
     let toggle: () -> Void
     static func isToggleShortcut(_ event: NSEvent) -> Bool {
         event.keyCode == 50 &&
         event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad]) == .control
     }
-    func makeNSView(context: Context) -> ShortcutView { ShortcutView(toggle: toggle) }
-    func updateNSView(_ view: ShortcutView, context: Context) { view.toggle = toggle }
+    func makeNSView(context: Context) -> ShortcutView { ShortcutView(isActive: isActive, toggle: toggle) }
+    func updateNSView(_ view: ShortcutView, context: Context) { view.toggle = toggle; view.isActive = isActive }
     static func dismantleNSView(_ view: ShortcutView, coordinator: ()) { view.removeMonitor() }
     final class ShortcutView: NSView {
         var toggle: () -> Void
+        var isActive: Bool
         private var monitor: Any?
-        init(toggle: @escaping () -> Void) { self.toggle = toggle; super.init(frame: .zero) }
+        init(isActive: Bool = true, toggle: @escaping () -> Void) { self.isActive = isActive; self.toggle = toggle; super.init(frame: .zero) }
         required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             removeMonitor()
             guard window != nil else { return }
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                guard let self, let window = self.window, window.isKeyWindow, event.window === window, window.attachedSheet == nil else { return event }
-                // SwiftTerm's keyDown is not open. Reuse this existing window-
-                // scoped monitor only when its terminal owns the first responder.
-                if let terminal = window.firstResponder as? RepositoryTerminalView,
-                   NativeFocusNavigation.leaveEditor(event, from: terminal) { return nil }
-                guard TerminalShortcutMonitor.isToggleShortcut(event) else { return event }
-                self.toggle()
-                return nil
+                guard let self else { return event }
+                return self.handle(event)
             }
+        }
+        func handle(_ event: NSEvent) -> NSEvent? {
+            guard isActive, let window, event.window === window, window.attachedSheet == nil else { return event }
+            // SwiftTerm's keyDown is not open. Reuse this existing window-
+            // scoped monitor only when its terminal owns the first responder.
+            if let terminal = window.firstResponder as? RepositoryTerminalView,
+               NativeFocusNavigation.leaveEditor(event, from: terminal) { return nil }
+            guard TerminalShortcutMonitor.isToggleShortcut(event) else { return event }
+            toggle()
+            return nil
         }
         func removeMonitor() { if let monitor { NSEvent.removeMonitor(monitor) }; monitor = nil }
         deinit { removeMonitor() }

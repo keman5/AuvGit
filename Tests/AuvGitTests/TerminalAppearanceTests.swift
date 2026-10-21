@@ -4,6 +4,31 @@ import XCTest
 
 @MainActor
 final class TerminalAppearanceTests: XCTestCase {
+    func testBackgroundProjectDoesNotConsumeTerminalShortcutAndActivationTransfersOwnership() throws {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        var backgroundToggles = 0, activeToggles = 0
+        let background = TerminalShortcutMonitor.ShortcutView(isActive: false) { backgroundToggles += 1 }
+        let active = TerminalShortcutMonitor.ShortcutView { activeToggles += 1 }
+        window.contentView!.addSubview(background)
+        window.contentView!.addSubview(active)
+        let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .control,
+            timestamp: 0, windowNumber: window.windowNumber, context: nil, characters: "`",
+            charactersIgnoringModifiers: "`", isARepeat: false, keyCode: 50))
+        XCTAssertNotNil(background.handle(event))
+        XCTAssertNil(active.handle(event))
+        XCTAssertEqual(backgroundToggles, 0)
+        XCTAssertEqual(activeToggles, 1)
+        background.isActive = true
+        active.isActive = false
+        XCTAssertNotNil(active.handle(event))
+        XCTAssertNil(background.handle(event))
+        XCTAssertEqual(backgroundToggles, 1)
+        XCTAssertEqual(activeToggles, 1)
+    }
+
     func testTerminalToggleUsesPhysicalGraveKeyWithExactControlModifier() throws {
         func event(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, characters: String) throws -> NSEvent {
             try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers,

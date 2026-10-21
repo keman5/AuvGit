@@ -148,6 +148,11 @@ struct RepositorySidebar: View {
         }
         return false
     }
+    private func syncBadge(_ arrow: String, count: Int, help: String) -> some View {
+        Text("\(arrow)\(count)")
+            .font(.system(size: 10, weight: .semibold)).monospacedDigit()
+            .fixedSize().help(help).accessibilityLabel(help)
+    }
     private func repositoryRow(_ path: String) -> some View {
         let active = path == store.highlightedRepositoryPath
         let sync = store.repositorySyncStates[path]
@@ -164,6 +169,12 @@ struct RepositorySidebar: View {
                 Spacer(minLength: 0)
                 if store.workspaceProjects?.isBusy(path: path) == true {
                     ProgressView().controlSize(.mini)
+                }
+                if hasPull {
+                    syncBadge("↓", count: behind, help: sidebarRefinementText("pull", behind))
+                }
+                if hasPush {
+                    syncBadge("↑", count: ahead, help: sidebarRefinementText("push", ahead))
                 }
                 if let count = store.repositoryChangeCounts[path], count > 0 {
                     Text(String(count)).font(.system(size: 10, weight: .medium))

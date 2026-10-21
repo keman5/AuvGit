@@ -46,7 +46,7 @@ struct RepositoryContextEditor: View {
                     }
                 }
                 TextField(repositoryContextText("Fetch URL"), text: $fetchURL).textFieldStyle(.roundedBorder)
-                Toggle(repositoryContextText("Edit explicit push URL"), isOn: $editPush)
+                KeyViewProxy(label: repositoryContextText("Edit explicit push URL"), checked: editPush) { editPush.toggle() }
                 if editPush {
                     TextField(repositoryContextText("Push URL"), text: $pushURL).textFieldStyle(.roundedBorder)
                     Text(repositoryContextText("Empty removes the first explicit push URL")).font(.caption).foregroundStyle(.secondary)
