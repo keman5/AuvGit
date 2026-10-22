@@ -1,0 +1,12 @@
+"Text Preview" = "文字預覽";
+"Editable file contents" = "可編輯的檔案內容";
+"Save" = "儲存";
+"Monokai · Click or Tab to edit · Esc to close" = "Monokai · 點按或按 Tab 編輯 · Esc 關閉";
+"Unsaved changes" = "尚未儲存的修改";
+"The file changed outside this preview. Reopen it before saving." = "檔案已在預覽視窗外發生變更，請重新開啟後再儲存。";
+"Force text preview" = "強制文字預覽";
+"Text preview formats help" = "使用空格、逗號或換行分隔副檔名或檔名，支援 *.ext、.env.*。符合的格式使用可編輯文字預覽，其他檔案繼續自動識別；二進位及超大檔案使用系統預覽。";
+"Text preview formats" = "文字預覽格式";
+"Restore default formats" = "還原預設格式";
+"Save formats" = "儲存格式";
+"Saved formats apply immediately to the next preview." = "儲存後立即生效，下次開啟預覽即使用新規則。";

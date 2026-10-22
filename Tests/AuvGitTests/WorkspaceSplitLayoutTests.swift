@@ -4,6 +4,25 @@ import AppKit
 
 @MainActor
 final class WorkspaceSplitLayoutTests: XCTestCase {
+    func testClosingTerminalRestoresAllPaneHeightsIncludingManualDividers() {
+        for resizedBeforeModeChange in [false, true] {
+            let split = WorkspaceSplitView(compact: false)
+            for _ in 0..<3 { split.addArrangedSubview(NSView()) }
+            split.setFrameSize(NSSize(width: 900, height: 800)); split.layout()
+            split.setPosition(290, ofDividerAt: 0)
+            let original = split.subviews.map { $0.frame.height }
+            for _ in 0..<3 {
+                if resizedBeforeModeChange { split.setFrameSize(NSSize(width: 900, height: 500)) }
+                split.compact = true
+                split.setFrameSize(NSSize(width: 900, height: 500)); split.layout()
+                split.compact = false
+                split.setFrameSize(NSSize(width: 900, height: 800)); split.layout()
+                for (view, height) in zip(split.subviews, original) {
+                    XCTAssertEqual(view.frame.height, height, accuracy: 0.01)
+                }
+            }
+        }
+    }
     func testSplitViewsUseSeparateDelegatesForSidebarActionDiscovery() throws {
         let splits: [NSSplitView] = [RepositorySidebarSplitView(), HistoryCommitSplitView(), WorkspaceSplitView(compact: false)]
         for split in splits {

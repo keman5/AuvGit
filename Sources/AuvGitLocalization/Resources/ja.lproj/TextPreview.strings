@@ -1,0 +1,12 @@
+"Text Preview" = "テキストプレビュー";
+"Editable file contents" = "編集可能なファイル内容";
+"Save" = "保存";
+"Monokai · Click or Tab to edit · Esc to close" = "Monokai · クリックまたは Tab で編集 · Esc で閉じる";
+"Unsaved changes" = "未保存の変更";
+"The file changed outside this preview. Reopen it before saving." = "ファイルが外部で変更されました。開き直してから保存してください。";
+"Force text preview" = "テキストプレビューを強制";
+"Text preview formats help" = "拡張子やファイル名を空白、カンマ、改行で区切ります。*.ext、.env.* に対応。一致する形式は編集可能なテキスト、その他は自動判定。バイナリや大容量ファイルはシステムプレビューを使用します。";
+"Text preview formats" = "テキストプレビューの形式";
+"Restore default formats" = "既定の形式に戻す";
+"Save formats" = "形式を保存";
+"Saved formats apply immediately to the next preview." = "保存後、次に開くプレビューからすぐに適用されます。";

@@ -44,6 +44,7 @@ struct EditorPreferencesView: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
+                    TextPreviewPreferencesView()
                     section(designText("Font and layout")) {
                         DesignSettingRow(editorPrefsText("Font family"), detail: designText("Choose the editor font")) {
                             Picker(editorPrefsText("Font family"), selection: $fontName) {

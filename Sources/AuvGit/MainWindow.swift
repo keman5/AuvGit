@@ -1336,10 +1336,24 @@ final class WorkspaceSplitView: NSSplitView, NSSplitViewDelegate {
     override func keyDown(with event: NSEvent) {
         if !holdsPreviousPresentation { super.keyDown(with: event) }
     }
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        rememberExpandedHeights()
+    }
+    override func setPosition(_ position: CGFloat, ofDividerAt dividerIndex: Int) {
+        super.setPosition(position, ofDividerAt: dividerIndex)
+        rememberExpandedHeights()
+    }
     var compact: Bool {
-        didSet { if compact != oldValue, initialized { distribute(fileHeight: subviews[0].frame.height, footerHeight: subviews[2].frame.height) } }
+        didSet {
+            guard compact != oldValue, initialized else { return }
+            let preferred = expandedHeights ?? (subviews[0].frame.height, subviews[2].frame.height)
+            distribute(fileHeight: preferred.0, footerHeight: compact ? footerMinimum : preferred.1)
+        }
     }
     private var initialized = false
+    private var expandedHeights: (CGFloat, CGFloat)?
+    private var distributing = false
     private var fileMinimum: CGFloat { compact ? 100 : 120 }
     private var diffMinimum: CGFloat { compact ? 160 : 150 }
     private let footerMinimum: CGFloat = 160
@@ -1360,16 +1374,23 @@ final class WorkspaceSplitView: NSSplitView, NSSplitViewDelegate {
     override func resizeSubviews(withOldSize oldSize: NSSize) {
         guard subviews.count == 3 else { return }
         if !initialized { initializeDistribution() }
-        else { distribute(fileHeight: subviews[0].frame.height, footerHeight: subviews[2].frame.height) }
+        else {
+            let preferred = expandedHeights ?? (subviews[0].frame.height, subviews[2].frame.height)
+            distribute(fileHeight: compact ? subviews[0].frame.height : preferred.0,
+                       footerHeight: compact ? subviews[2].frame.height : preferred.1)
+        }
     }
     private func initializeDistribution() {
         guard subviews.count == 3, bounds.height >= fileMinimum + diffMinimum + footerMinimum + 2 * dividerThickness else { return }
         distribute(fileHeight: 340, footerHeight: compact ? 160 : 180)
         // Startup can pass through a smaller frame before the window reaches its final size.
         initialized = subviews[0].frame.height >= 340
+        if initialized, !compact { expandedHeights = (subviews[0].frame.height, subviews[2].frame.height) }
     }
     private func distribute(fileHeight: CGFloat, footerHeight: CGFloat) {
         guard subviews.count == 3 else { return }
+        distributing = true
+        defer { distributing = false }
         let available = max(0, bounds.height - 2 * dividerThickness)
         var file = max(fileMinimum, fileHeight)
         var footer = max(footerMinimum, footerHeight)
@@ -1393,6 +1414,10 @@ final class WorkspaceSplitView: NSSplitView, NSSplitViewDelegate {
         dividerIndex == 0 ? subviews[2].frame.minY - dividerThickness - diffMinimum : bounds.height - dividerThickness - footerMinimum
     }
     func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool { false }
+    private func rememberExpandedHeights() {
+        guard initialized, !compact, !distributing, subviews.count == 3 else { return }
+        expandedHeights = (subviews[0].frame.height, subviews[2].frame.height)
+    }
 }
 
 /// Remove SwiftUI's expanding default title so the toolbar controls its own spaces.

@@ -6,7 +6,7 @@
 "Opening repository…" = "正在打开仓库…";
 "Open a Git repository to begin" = "打开一个 Git 仓库以开始";
 "Refreshed · %@ changes · %@ staged" = "已刷新 · %@ 个变更 · %@ 个已暂存";
-"Select a file to view changes" = "选择文件查看代码差异";
+"Select a file to view changes" = "选择文件查看差异";
 "Select a commit and file to view changes" = "选择提交及文件查看差异";
 "%@  /  %@" = "%@  /  %@";
 "%@  ·  HEAD → Index" = "%@  ·  HEAD → 索引";

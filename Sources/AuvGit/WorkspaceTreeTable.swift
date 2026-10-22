@@ -23,6 +23,8 @@ struct WorkspaceTreeTable: NSViewRepresentable {
         scroll.autohidesScrollers = true
         let table = TreeTable()
         table.coordinator = context.coordinator
+        table.previewURLs = { [weak coordinator = context.coordinator] in coordinator?.previewURLs() ?? [] }
+        table.previewRepositoryURL = { [weak coordinator = context.coordinator] in coordinator?.parent.repository.url }
         table.delegate = context.coordinator; table.dataSource = context.coordinator
         table.rowHeight = 22; table.usesAutomaticRowHeights = false
         table.usesAlternatingRowBackgroundColors = true
@@ -43,7 +45,7 @@ struct WorkspaceTreeTable: NSViewRepresentable {
     }
     func updateNSView(_ view: NSScrollView, context: Context) { context.coordinator.update(self) }
 
-    final class TreeTable: NSTableView {
+    final class TreeTable: WorkspacePreviewTable {
         weak var coordinator: Coordinator?
         var isTrackingMouse = false
         override func menu(for event: NSEvent) -> NSMenu? { coordinator?.menu(at: convert(event.locationInWindow, from: nil)) }
@@ -207,6 +209,10 @@ struct WorkspaceTreeTable: NSViewRepresentable {
             parent.selection.wrappedValue = paths(table.selectedRowIndexes)
         }
         private func paths(_ selected: IndexSet) -> Set<String> { Set(selected.compactMap { rows.indices.contains($0) ? rows[$0].path : nil }) }
+        func previewURLs() -> [URL] {
+            guard enabled, let table else { return [] }
+            return table.selectedRowIndexes.compactMap { rows.indices.contains($0) ? parent.repository.url.appendingPathComponent(rows[$0].path) : nil }
+        }
         private func toggle(_ path: String) {
             guard enabled, let index = indices[path], rows[index].isDirectory else { return }
             if !parent.expanded.insert(path).inserted { parent.expanded.remove(path) }

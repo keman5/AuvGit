@@ -1610,8 +1610,13 @@ final class AuvGitApplicationDelegate: NSObject, NSApplicationDelegate {
     weak var store: RepositoryStore?
     func applicationWillTerminate(_ notification: Notification) { store?.stopBackgroundRepositorySync(); store?.flushSession() }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard ComparePresenter.hasUnsavedChanges else { store?.flushSession(); return .terminateNow }
-        Task { let approved = await ComparePresenter.prepareToTerminate(); if approved { self.store?.flushSession() }; sender.reply(toApplicationShouldTerminate: approved) }
+        guard ComparePresenter.hasUnsavedChanges || WorkspaceTextPreviewPresenter.hasUnsavedChanges else { store?.flushSession(); return .terminateNow }
+        Task {
+            let previewApproved = WorkspaceTextPreviewPresenter.prepareToTerminate()
+            let approved = previewApproved ? await ComparePresenter.prepareToTerminate() : false
+            if approved { self.store?.flushSession() }
+            sender.reply(toApplicationShouldTerminate: approved)
+        }
         return .terminateLater
     }
 }

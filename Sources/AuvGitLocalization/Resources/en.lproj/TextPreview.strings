@@ -1,0 +1,12 @@
+"Text Preview" = "Text Preview";
+"Editable file contents" = "Editable file contents";
+"Save" = "Save";
+"Monokai · Click or Tab to edit · Esc to close" = "Monokai · Click or Tab to edit · Esc to close";
+"Unsaved changes" = "Unsaved changes";
+"The file changed outside this preview. Reopen it before saving." = "The file changed outside this preview. Reopen it before saving.";
+"Force text preview" = "Force text preview";
+"Text preview formats help" = "Extensions or filenames separated by spaces, commas, or newlines. Supports *.ext and .env.*. Matching formats open as editable text; other files keep automatic detection. Binary and oversized files use system preview.";
+"Text preview formats" = "Text preview formats";
+"Restore default formats" = "Restore default formats";
+"Save formats" = "Save formats";
+"Saved formats apply immediately to the next preview." = "Saved formats apply immediately to the next preview.";

@@ -60,7 +60,7 @@ struct PreferencesWindow: View {
          "Advanced": ["Background refresh", "Polling interval (seconds)"]]
     }
     private var filtered: [String] { categories.filter { category in
-        query.isEmpty || ([category] + (searchTerms[category] ?? [])).contains { prefsText($0).localizedCaseInsensitiveContains(query) || (category == "Keyboard Shortcuts" && shortcutText($0).localizedCaseInsensitiveContains(query)) || $0.localizedCaseInsensitiveContains(query) }
+        query.isEmpty || (category == "Editor" && ["Force text preview", "Text preview formats"].contains { previewText($0).localizedCaseInsensitiveContains(query) }) || ([category] + (searchTerms[category] ?? [])).contains { prefsText($0).localizedCaseInsensitiveContains(query) || (category == "Keyboard Shortcuts" && shortcutText($0).localizedCaseInsensitiveContains(query)) || $0.localizedCaseInsensitiveContains(query) }
     } }
     private func categoryIcon(_ category: String) -> String {
         switch category {

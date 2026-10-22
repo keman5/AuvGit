@@ -27,6 +27,8 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
         scroll.autohidesScrollers = true
         let table = FileTable()
         table.coordinator = context.coordinator
+        table.previewURLs = { [weak coordinator = context.coordinator] in coordinator?.previewURLs() ?? [] }
+        table.previewRepositoryURL = { [weak coordinator = context.coordinator] in coordinator?.parent.repository?.url }
         table.delegate = context.coordinator
         table.dataSource = context.coordinator
         table.allowsMultipleSelection = true
@@ -79,7 +81,7 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
         }
     }
 
-    final class FileTable: NSTableView {
+    final class FileTable: WorkspacePreviewTable {
         weak var coordinator: Coordinator?
         var isTrackingMouse = false
         override func viewDidChangeEffectiveAppearance() {
@@ -335,6 +337,10 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
             if parent.sortOrder != orders { parent.sortOrder = orders }
         }
         private func paths(_ indices: IndexSet) -> Set<String> { Set(indices.compactMap { rows.indices.contains($0) ? rows[$0].path : nil }) }
+        func previewURLs() -> [URL] {
+            guard parent.isReady, let root = parent.repository?.url, let table else { return [] }
+            return table.selectedRowIndexes.compactMap { rows.indices.contains($0) ? root.appendingPathComponent(rows[$0].path) : nil }
+        }
         @objc func compare(_ sender: Any?) {
             if let table { activate(row: table.clickedRow) }
         }
