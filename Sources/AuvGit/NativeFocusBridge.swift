@@ -259,6 +259,7 @@ extension View {
 /// NSButton supplies activation, accessibility actions and the system focus ring.
 struct KeyViewProxy: NSViewRepresentable {
     @Environment(\.isEnabled) private var enabled
+    @Environment(\.controlSize) private var controlSize
     @Environment(\.nativeFocusScope) private var scope
     let label: String
     var checked: Bool? = nil
@@ -267,11 +268,27 @@ struct KeyViewProxy: NSViewRepresentable {
     var minimumWidth: CGFloat = 0
     var tint: NSColor? = nil
     let action: () -> Void
+    private var nativeControlSize: NSControl.ControlSize {
+        guard checked != nil else { return .regular }
+        // SwiftUI reapplies its environment size after representable updates.
+        // Match it from the first draw instead of starting checkboxes at small.
+        switch controlSize {
+        case .mini: return .mini
+        case .small: return .small
+        case .large: return .large
+        default: return .regular
+        }
+    }
     final class Button: NSButton {
         var activate: (() -> Void)?
         var declaredKeyEquivalent: String?
         var isPrimaryAction = false
         var isCheckbox = false
+        override var intrinsicContentSize: NSSize {
+            var size = super.intrinsicContentSize
+            if !isCheckbox { size.height = AuvGitDialogButtonStyle.height }
+            return size
+        }
         override var acceptsFirstResponder: Bool { isEnabled && !isHiddenOrHasHiddenAncestor }
         override var canBecomeKeyView: Bool { acceptsFirstResponder && window != nil }
         override func becomeFirstResponder() -> Bool { needsDisplay = true; noteFocusRingMaskChanged(); return acceptsFirstResponder }
@@ -307,6 +324,10 @@ struct KeyViewProxy: NSViewRepresentable {
         let button = Button(title: label, target: nil, action: nil)
         button.target = button; button.action = #selector(Button.invoke(_:))
         button.bezelStyle = .rounded
+        button.isCheckbox = checked != nil
+        button.setButtonType(checked == nil ? .momentaryPushIn : .switch)
+        button.controlSize = nativeControlSize
+        button.font = .systemFont(ofSize: NSFont.systemFontSize(for: button.controlSize))
         button.focusRingType = .exterior
         NativeFocusAppearance.rememberOriginalRing(for: button)
         return button
@@ -314,21 +335,29 @@ struct KeyViewProxy: NSViewRepresentable {
     func updateNSView(_ button: Button, context: Context) {
         button.title = label; button.setAccessibilityLabel(label)
         button.isEnabled = enabled; button.activate = action
-        button.controlSize = .small
         button.keyEquivalent = keyEquivalent.isEmpty && prominent && checked == nil ? "\r" : keyEquivalent; button.keyEquivalentModifierMask = []
         button.declaredKeyEquivalent = button.keyEquivalent
         button.isPrimaryAction = prominent && checked == nil
-        button.isCheckbox = checked != nil
+        if button.isCheckbox != (checked != nil) {
+            button.setButtonType(checked == nil ? .momentaryPushIn : .switch)
+            button.isCheckbox = checked != nil
+        }
+        // AppKit type changes reset cell metrics. Configure type first, then
+        // apply the same size/font on creation and every state update.
+        button.controlSize = nativeControlSize
+        button.font = .systemFont(ofSize: NSFont.systemFontSize(for: button.controlSize))
         button.bezelColor = prominent ? .controlAccentColor : nil
         button.contentTintColor = tint
-        if let checked { button.setButtonType(.switch); button.state = checked ? .on : .off }
-        else { button.setButtonType(.momentaryPushIn) }
+        if let checked { button.state = checked ? .on : .off }
         scope?.register(button)
         if let window = button.window, window.sheetParent != nil || window is NSPanel {
             DialogAppearance.configureDefaultButton(in: window)
         }
     }
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: Button, context: Context) -> CGSize? { CGSize(width: max(minimumWidth, nsView.intrinsicContentSize.width), height: nsView.intrinsicContentSize.height) }
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: Button, context: Context) -> CGSize? {
+        CGSize(width: max(minimumWidth, nsView.intrinsicContentSize.width),
+               height: checked == nil ? AuvGitDialogButtonStyle.height : nsView.intrinsicContentSize.height)
+    }
 }
 
 enum NativeFocusNavigation {

@@ -3,14 +3,17 @@ import SwiftUI
 
 struct AuvGitDialogButtonStyle: PrimitiveButtonStyle {
     static let minimumWidth: CGFloat = 80
+    static let height: CGFloat = 28
     var prominent = false
 
     func makeBody(configuration: Configuration) -> some View {
         let button = Button(role: configuration.role, action: configuration.trigger) {
             configuration.label.frame(minWidth: Self.minimumWidth)
         }
-        if prominent { button.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction) }
-        else { button.buttonStyle(.bordered) }
+        Group {
+            if prominent { button.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction) }
+            else { button.buttonStyle(.bordered) }
+        }.controlSize(.regular).frame(height: Self.height)
     }
 }
 
