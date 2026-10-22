@@ -212,7 +212,6 @@ private struct LogWindowContent: View {
             .onReceive(NotificationCenter.default.publisher(for: .auvGitWorktreeChanged)) { event in
                 if let url = event.object as? URL, url == store.repositoryURL { Task { await store.refresh(); await loadTags() } }
             }
-            .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in Task { await store.pollForChanges() } }
             .auvGitSheet(item: $resetRequest) { HistoryResetSheet(store: store, request: $0) }
         .auvGitSheet(isPresented: $showOperationLog) { OperationLogView(store: store) }
             .auvGitSheet(item: $mutation) { request in mutationSheet(request) }

@@ -1,10 +1,52 @@
 import XCTest
 import Combine
+import AppKit
 @testable import AuvGit
 @testable import GitCore
 
 @MainActor
 final class ForegroundRefreshTests: XCTestCase {
+    func testApplicationLifecycleResumesAllProjectsWithoutSceneCallbacks() async throws {
+        let root = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let key = "preferences.backgroundRefresh", previous = UserDefaults.standard.object(forKey: key)
+        UserDefaults.standard.set(true, forKey: key)
+        defer { if let previous { UserDefaults.standard.set(previous, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) } }
+        let store = RepositoryStore(persistsSession: false)
+        defer { store.closeTransientSession() }
+        await store.open(root)
+        let delegate: NSApplicationDelegate = AuvGitApplicationDelegate()
+        delegate.applicationDidResignActive?(Notification(name: NSApplication.didResignActiveNotification))
+        XCTAssertFalse(store.applicationActive, "The app lifecycle must work without the hidden SwiftUI scene")
+        try "changed while inactive\n".write(to: root.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+        delegate.applicationDidBecomeActive?(Notification(name: NSApplication.didBecomeActiveNotification))
+        let deadline = Date().addingTimeInterval(3)
+        while store.files.isEmpty, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(store.applicationActive)
+        XCTAssertEqual(store.files.map(\.path), ["file.txt"])
+    }
+    func testApplicationTimerPollsEveryOpenSessionWithoutAWindow() async throws {
+        let roots = try await [fixture(), fixture()]
+        defer { for root in roots { try? FileManager.default.removeItem(at: root) } }
+        let key = "preferences.backgroundRefresh", previous = UserDefaults.standard.object(forKey: key)
+        // Use stores without filesystem observers so only the application timer can update them.
+        UserDefaults.standard.set(false, forKey: key)
+        defer { if let previous { UserDefaults.standard.set(previous, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) } }
+        let sessions = roots.map { _ in RepositoryStore(persistsSession: false) }
+        defer { for store in sessions { store.closeTransientSession() } }
+        for (store, root) in zip(sessions, roots) {
+            store.repository = GitRepository(url: root); store.repositoryURL = root
+            await store.refresh()
+            try "timer change\n".write(to: root.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+        }
+        UserDefaults.standard.set(true, forKey: key)
+        let delegate = AuvGitApplicationDelegate()
+        delegate.startRepositoryPolling(interval: 0.02)
+        let deadline = Date().addingTimeInterval(3)
+        while sessions.contains(where: { $0.files.isEmpty }), Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification))
+        for store in sessions { XCTAssertEqual(store.files.map(\.path), ["file.txt"]) }
+    }
     func testSwitchCleanupDoesNotRepublishIdleControllers() {
         let ai = AICommitController()
         let authentication = RemoteAuthenticationCoordinator()

@@ -39,20 +39,6 @@ struct AuvGitApp: App {
                 .frame(minWidth: 1000)
                 .task { appDelegate.store = store; store.setApplicationActive(NSApp.isActive); AuvGitPreferences.applyAppearance(); await store.restore() }
                 .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in AuvGitPreferences.applyAppearance() }
-                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                    RepositoryStore.setApplicationActiveForAllStores(true)
-                }
-                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
-                    RepositoryStore.setApplicationActiveForAllStores(false)
-                }
-                .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
-                    RepositoryStore.setApplicationActiveForAllStores(false)
-                    RepositoryStore.setApplicationActiveForAllStores(NSApp.isActive)
-                }
-                .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
-                    RepositoryStore.checkRemoteUpdatesForActivePanel()
-                }
-                .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in Task { await store.pollForChanges() } }
         }
         .windowToolbarStyle(.unified)
         .defaultSize(width: 1080, height: 820)
@@ -289,6 +275,13 @@ final class RepositoryStore: ObservableObject {
     @Published var repositoryChangeCounts: [String: Int] = [:]
     struct RepositorySyncState: Equatable { let ahead: Int?; let behind: Int?; let conflicts: Int }
     @Published var repositorySyncStates: [String: RepositorySyncState] = [:]
+    private func publishRepositoryChangeCount(_ count: Int, path: String) {
+        var targets = workspaceProjects?.sessions ?? [self]
+        if !targets.contains(where: { $0 === self }) { targets.append(self) }
+        for target in targets where target.repositoryChangeCounts[path] != count {
+            target.repositoryChangeCounts[path] = count
+        }
+    }
     private func publishRepositorySyncState(_ state: RepositorySyncState, path: String) {
         var targets = workspaceProjects?.sessions ?? [self]
         if !targets.contains(where: { $0 === self }) { targets.append(self) }
@@ -962,6 +955,12 @@ final class RepositoryStore: ObservableObject {
     static func checkRemoteUpdatesForActivePanel() {
         for store in stores.allObjects where store.persistsSession { store.refreshRecentRepositoryStates() }
     }
+    static func pollAllRepositories() async {
+        for store in stores.allObjects {
+            guard !Task.isCancelled else { return }
+            await store.pollForChanges()
+        }
+    }
     func setApplicationActive(_ active: Bool) {
         guard applicationActive != active else { return }
         applicationActive = active
@@ -1031,7 +1030,7 @@ final class RepositoryStore: ObservableObject {
             let shouldLoadWorkspaceDiff = loadsWorkspaceComparison && mode == "workspace" && !cachedDiffIsCurrent
             async let workspaceDiff: Void = shouldLoadWorkspaceDiff ? loadDiff() : ()
             guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
-            if repositoryChangeCounts[repository.url.path] != fileStatus.count { repositoryChangeCounts[repository.url.path] = fileStatus.count }
+            publishRepositoryChangeCount(fileStatus.count, path: repository.url.path)
             let result = try await (fileStatus, newBranches, newBranch, newStashes)
             guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
             if branches != result.1 { branches = result.1 }
@@ -1150,7 +1149,7 @@ final class RepositoryStore: ObservableObject {
             repositoryOperation = state.operation
             recreatableConflicts = state.recreatableConflicts ?? []
             if workspaceStatusFailure != nil { workspaceStatusFailure = nil; errorMessage = nil }
-            if repositoryChangeCounts[repository.url.path] != newFiles.count { repositoryChangeCounts[repository.url.path] = newFiles.count }
+            publishRepositoryChangeCount(newFiles.count, path: repository.url.path)
             let previous = repositorySyncStates[repository.url.path]
             let sync = RepositorySyncState(ahead: previous?.ahead, behind: previous?.behind, conflicts: newFiles.filter(\.isConflict).count)
             publishRepositorySyncState(sync, path: repository.url.path)
@@ -1215,12 +1214,9 @@ final class RepositoryStore: ObservableObject {
                 guard applicationActive, !Task.isCancelled, isImmediate || AuvGitPreferences.backgroundRefresh,
                       (recentPaths + openRepositories + [repositoryURL?.path].compactMap { $0 }).contains(path) else { continue }
                 let counts = text?.split(whereSeparator: { $0.isWhitespace }).compactMap { Int($0) } ?? []
-                if repositoryChangeCounts[path] != files.count { repositoryChangeCounts[path] = files.count }
+                publishRepositoryChangeCount(files.count, path: path)
                 let state = RepositorySyncState(ahead: counts.count == 2 ? counts[0] : nil, behind: counts.count == 2 ? counts[1] : nil, conflicts: files.filter(\.isConflict).count)
                 publishRepositorySyncState(state, path: path)
-                for session in workspaceProjects?.sessions ?? [] where session !== self {
-                    if session.repositoryChangeCounts[path] != files.count { session.repositoryChangeCounts[path] = files.count }
-                }
             }
             recentSyncTask = nil
         }
@@ -1574,7 +1570,7 @@ final class RepositoryStore: ObservableObject {
         guard let files = try? await target.status() else { return }
         let text = try? await target.workflowRead(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
         let counts = text?.split(whereSeparator: { $0.isWhitespace }).compactMap { Int($0) } ?? []
-        repositoryChangeCounts[path] = files.count
+        publishRepositoryChangeCount(files.count, path: path)
         publishRepositorySyncState(RepositorySyncState(ahead: counts.count == 2 ? counts[0] : nil, behind: counts.count == 2 ? counts[1] : nil, conflicts: files.filter(\.isConflict).count), path: path)
     }
     var canStageSelection: Bool { repository != nil && !isBusy && !WorkspaceFileActionTargets.paths(for: .stage, files: files, selection: selectedPaths).isEmpty }
@@ -1608,7 +1604,47 @@ final class RepositoryStore: ObservableObject {
 @MainActor
 final class AuvGitApplicationDelegate: NSObject, NSApplicationDelegate {
     weak var store: RepositoryStore?
-    func applicationWillTerminate(_ notification: Notification) { store?.stopBackgroundRepositorySync(); store?.flushSession() }
+    private var refreshTimer: Timer?
+    private var pollingTask: Task<Void, Never>?
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        startRepositoryPolling()
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(didWake), name: NSWorkspace.didWakeNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(windowBecameKey), name: NSWindow.didBecomeKeyNotification, object: nil)
+    }
+    // The borderless shell hides the bootstrap SwiftUI window. App lifecycle
+    // and periodic work must not depend on that scene's subscriptions staying live.
+    func startRepositoryPolling(interval: TimeInterval = 30) {
+        refreshTimer?.invalidate()
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.pollingTask == nil else { return }
+                self.pollingTask = Task { [weak self] in
+                    await RepositoryStore.pollAllRepositories()
+                    self?.pollingTask = nil
+                }
+            }
+        }
+        refreshTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+    func applicationDidBecomeActive(_ notification: Notification) {
+        RepositoryStore.setApplicationActiveForAllStores(true)
+    }
+    func applicationDidResignActive(_ notification: Notification) {
+        RepositoryStore.setApplicationActiveForAllStores(false)
+    }
+    @objc private func didWake(_ notification: Notification) {
+        RepositoryStore.setApplicationActiveForAllStores(false)
+        RepositoryStore.setApplicationActiveForAllStores(NSApp.isActive)
+    }
+    @objc private func windowBecameKey(_ notification: Notification) {
+        RepositoryStore.checkRemoteUpdatesForActivePanel()
+    }
+    deinit { refreshTimer?.invalidate(); pollingTask?.cancel(); NSWorkspace.shared.notificationCenter.removeObserver(self); NotificationCenter.default.removeObserver(self) }
+    func applicationWillTerminate(_ notification: Notification) {
+        refreshTimer?.invalidate(); pollingTask?.cancel()
+        store?.stopBackgroundRepositorySync(); store?.flushSession()
+    }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard ComparePresenter.hasUnsavedChanges || WorkspaceTextPreviewPresenter.hasUnsavedChanges else { store?.flushSession(); return .terminateNow }
         Task {

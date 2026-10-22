@@ -54,9 +54,16 @@ final class RepositoryQuietRefreshTests: XCTestCase {
         let store = RepositoryStore(persistsSession: false)
         defer { store.closeTransientSession() }
         await store.open(root)
+        // Opening also queues the initial remote/status sweep; count only the
+        // explicit filesystem refresh below, not that independent background read.
+        await store.cancelBackgroundRepositorySync()
         let wrapper = root.appendingPathComponent(".git/test-git")
         try """
         #!/bin/sh
+        # Conflict recovery metadata is a separate read, not the index snapshot under test.
+        case " $* " in
+            *" --resolve-undo "*) exec /usr/bin/git "$@" ;;
+        esac
         for arg in "$@"; do
             case "$arg" in
                 status|show-ref|ls-files) echo "$arg" >> ".git/read-$arg" ;;
