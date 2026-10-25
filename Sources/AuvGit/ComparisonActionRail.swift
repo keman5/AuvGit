@@ -24,9 +24,10 @@ final class ComparisonActionRail: NSView {
     override var isFlipped: Bool { true }
     func setEntries(_ value: [Entry]) {
         entries = value
-        buttons.forEach { $0.removeFromSuperview() }
+        let previous = buttons
+        previous.dropFirst(value.count).forEach { $0.removeFromSuperview() }
         buttons = value.enumerated().map { index, entry in
-            let button = NSButton(title: "", target: self, action: #selector(accept(_:)))
+            let button = previous.indices.contains(index) ? previous[index] : NSButton(title: "", target: self, action: #selector(accept(_:)))
             let font = entry.sourceText?.font ?? entry.text.font ?? .monospacedSystemFont(ofSize: 12, weight: .regular)
             button.image = NSImage(systemSymbolName: entry.deletesContent ? "xmark" : pointsRight ? "chevron.right.2" : "chevron.left.2", accessibilityDescription: nil)?
                 .withSymbolConfiguration(.init(pointSize: max(8, font.pointSize - 3), weight: .regular))
@@ -35,7 +36,7 @@ final class ComparisonActionRail: NSView {
             button.contentTintColor = DiffVisualStyle.actionColor
             button.toolTip = entry.title
             button.setAccessibilityLabel(entry.title)
-            addSubview(button)
+            if button.superview == nil { addSubview(button) }
             return button
         }
         refresh()

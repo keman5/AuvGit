@@ -93,6 +93,7 @@ final class DialogAppearanceTests: XCTestCase {
             }
             _ = try await repo.workflowRead(["commit", "--allow-empty", "-m", "Base"])
             let oid = try await repo.workflowRevision("HEAD")
+            _ = try await repo.workflowRead(["remote", "add", "origin", "/unused-local-remote"])
             _ = try await repo.workflowRead(["update-ref", "refs/remotes/origin/website/app-store", oid])
             try "Unsaved workspace draft".write(to: root.appendingPathComponent("draft.txt"), atomically: true, encoding: .utf8)
             let store = RepositoryStore(persistsSession: false)
@@ -133,7 +134,7 @@ final class DialogAppearanceTests: XCTestCase {
             XCTAssertNil(store.error)
             let created = try await repo.workflowRevision("refs/heads/website/app-store")
             let current = try await repo.currentBranch()
-            XCTAssertEqual(created, oid); XCTAssertEqual(current, "main")
+            XCTAssertEqual(created, oid); XCTAssertEqual(current, "website/app-store")
             XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("draft.txt"), encoding: .utf8), "Unsaved workspace draft")
         }
     }

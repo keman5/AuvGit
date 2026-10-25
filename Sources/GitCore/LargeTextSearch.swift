@@ -39,7 +39,9 @@ public enum LargeTextSearch {
     }
     public static func text(_ value: String, options: LargeTextSearchOptions) async throws -> LargeTextSearchResult {
         let task = Task.detached { () throws -> LargeTextSearchResult in
+            try Task.checkCancellation()
             let scanner = try Scanner(options)
+            if options.query.isEmpty { return scanner.result(limited: false) }
             let source = value as NSString
             var offset = 0, byteOffset: UInt64 = 0, line = 1
             while offset < source.length {
@@ -97,13 +99,17 @@ public enum LargeTextSearch {
             guard let expression else { return false }
             let text = value.hasSuffix("\r\n") ? String(value.dropLast(2)) : value.hasSuffix("\n") ? String(value.dropLast()) : value
             var limited = false
+            let source = text as NSString
+            var previousEnd = 0, byteOffset = cursor.offset
             expression.enumerateMatches(in: text, options: [.reportProgress], range: NSRange(location: 0, length: text.utf16.count)) { match, _, stop in
                 if Task.isCancelled { stop.pointee = true; return }
                 guard let match else { return }
                 if self.hits.count == LargeTextSearch.maximumMatches { limited = true; stop.pointee = true; return }
-                let prefix = (text as NSString).substring(to: match.range.location)
-                let matchBytes = (text as NSString).substring(with: match.range).utf8.count
-                self.hits.append(LargeTextSearchHit(cursor: cursor, range: match.range, matchOffset: cursor.offset + UInt64(prefix.utf8.count), matchByteLength: matchBytes))
+                byteOffset += UInt64(source.substring(with: NSRange(location: previousEnd, length: match.range.location - previousEnd)).utf8.count)
+                let matchBytes = source.substring(with: match.range).utf8.count
+                self.hits.append(LargeTextSearchHit(cursor: cursor, range: match.range, matchOffset: byteOffset, matchByteLength: matchBytes))
+                previousEnd = NSMaxRange(match.range)
+                byteOffset += UInt64(matchBytes)
             }
             try Task.checkCancellation()
             return limited

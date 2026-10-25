@@ -158,10 +158,12 @@ final class MainWindowSwitchPerformanceTests: XCTestCase {
         """.write(to: wrapper, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
         let defaults = UserDefaults.standard
-        let keys = ["auvgit.git.executablePath", "appLanguage", "workspace.showHiddenFiles", "sidebar.localBranchesExpanded", "sidebar.remoteBranchesExpanded", "sidebar.stashesExpanded", "preferences.historyPageSize"]
+        let keys = ["auvgit.git.executablePath", "appLanguage", "workspace.showHiddenFiles", "sidebar.localBranchesExpanded", "sidebar.remoteBranchesExpanded", "sidebar.stashesExpanded", "preferences.historyPageSize", "workspace.columns.v1", "NSTableView Columns AuvGit.Workspace.NativeFiles.v1"]
         let previous = keys.map { defaults.object(forKey: $0) }
+        defaults.removeObject(forKey: "workspace.columns.v1")
+        defaults.removeObject(forKey: "NSTableView Columns AuvGit.Workspace.NativeFiles.v1")
         defaults.set(wrapper.path, forKey: keys[0]); defaults.set("en", forKey: keys[1])
-        for key in keys.dropFirst(2).dropLast() { defaults.set(true, forKey: key) }
+        for key in ["workspace.showHiddenFiles", "sidebar.localBranchesExpanded", "sidebar.remoteBranchesExpanded", "sidebar.stashesExpanded"] { defaults.set(true, forKey: key) }
         defaults.set(200, forKey: "preferences.historyPageSize")
         defer {
             for (key, value) in zip(keys, previous) {
@@ -239,7 +241,11 @@ final class MainWindowSwitchPerformanceTests: XCTestCase {
             if !emptySource || repo != repositories[0] {
                 XCTAssertTrue(fileText.contains(repo.lastPathComponent + "-file00000"))
                 if !tree {
-                    XCTAssertTrue(fileText.contains(productionBootstrap ? "Modified" : "Untracked"), "Status must render without ellipses")
+                    let table = try XCTUnwrap(tables(in: host).first { $0.numberOfRows == 6_001 })
+                    let index = try XCTUnwrap(table.tableColumns.firstIndex { $0.identifier.rawValue == "status" })
+                    let cell = try XCTUnwrap(table.view(atColumn: index, row: 0, makeIfNecessary: true) as? WorkspaceNativeFilesTable.Cell)
+                    XCTAssertEqual(cell.label.stringValue, productionBootstrap ? "Modified" : "Untracked")
+                    XCTAssertGreaterThanOrEqual(cell.label.frame.width + 0.01, try XCTUnwrap(cell.label.cell).cellSize.width, "Status must render without ellipses")
                 }
             }
             XCTAssertTrue(historyText.contains(repo.lastPathComponent + " history"))

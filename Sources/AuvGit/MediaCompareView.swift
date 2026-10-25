@@ -8,6 +8,11 @@ private func advancedText(_ key: String) -> String { L10n.text(key, table: "Adva
 
 enum StaticImagePreview {
     static let maximumPixels = 64_000_000
+    private static let images: NSCache<NSData, NSImage> = {
+        let cache = NSCache<NSData, NSImage>()
+        cache.countLimit = 12; cache.totalCostLimit = 64 * 1024 * 1024
+        return cache
+    }()
     static func dimensions(_ data: Data) -> (Int, Int)? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
@@ -17,9 +22,16 @@ enum StaticImagePreview {
     }
     static func image(_ data: Data) -> NSImage? {
         guard data.count <= FileComparisonLimits.previewBytes else { return nil }
+        let key = data as NSData
+        if let image = images.object(forKey: key) { return image }
+        guard let image = decode(data) else { return nil }
+        let pixels = image.representations.map { $0.pixelsWide * $0.pixelsHigh }.max() ?? 0
+        images.setObject(image, forKey: key, cost: data.count + pixels * 4)
+        return image
+    }
+    private static func decode(_ data: Data) -> NSImage? {
         if let document = SafeStaticDocument.image(data) { return document }
-        guard data.count <= FileComparisonLimits.previewBytes,
-              let source = CGImageSourceCreateWithData(data as CFData, nil),
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let type = CGImageSourceGetType(source) as String?,
               ["public.png", "public.jpeg", "com.compuserve.gif", "public.tiff", "com.microsoft.bmp", "org.webmproject.webp", "public.heic", "public.heif", "com.apple.icns"].contains(type),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],

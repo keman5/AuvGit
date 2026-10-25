@@ -7,7 +7,12 @@ final class StaticImagePreviewTests: XCTestCase {
     func testPNGPreviewAndSourceDimensions() throws {
         let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 3, pixelsHigh: 2, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
         let data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
-        XCTAssertNotNil(StaticImagePreview.image(data))
+        let first = try XCTUnwrap(StaticImagePreview.image(data))
+        XCTAssertTrue(StaticImagePreview.image(data) === first, "Repeated body updates must reuse the decoded image")
+        let replacement = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 4, pixelsHigh: 2, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        let changed = try XCTUnwrap(replacement.representation(using: .png, properties: [:]))
+        XCTAssertNotEqual(changed, data)
+        XCTAssertFalse(StaticImagePreview.image(changed) === first, "Changed bytes must not reuse an old preview")
         XCTAssertEqual(StaticImagePreview.dimensions(data)?.0, 3)
         XCTAssertEqual(StaticImagePreview.dimensions(data)?.1, 2)
     }
@@ -43,6 +48,7 @@ final class SafeStaticDocumentTests: XCTestCase {
         context.closePDF()
         let data = output as Data
         XCTAssertEqual(SafeStaticDocument.pdfPageCount(data), 2)
-        XCTAssertNotNil(StaticImagePreview.image(data))
+        let first = try XCTUnwrap(StaticImagePreview.image(data))
+        XCTAssertTrue(StaticImagePreview.image(data) === first, "PDF pages must not be rendered again for each opacity or selection update")
     }
 }

@@ -50,7 +50,7 @@ final class WorkspaceQuickLookTests: XCTestCase {
         NSCursor.arrow.set()
     }
 
-    func testFirstMouseClickEntersPreviewEditorAndPlacesInsertionPoint() throws {
+    func testFirstMouseClickEntersPreviewEditorAndEditsOnlyTheDraft() throws {
         _ = NSApplication.shared
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".txt")
         defer { try? FileManager.default.removeItem(at: url) }
@@ -67,17 +67,19 @@ final class WorkspaceQuickLookTests: XCTestCase {
         XCTAssertGreaterThan(editor.frame.height, 40, "Editor frame: \(editor.frame)")
         let point = editor.convert(NSPoint(x: 65, y: 20), to: nil)
         XCTAssertTrue(window.contentView?.hitTest(point) === editor, "Click must hit the editor; frame: \(editor.frame), hit: \(String(describing: window.contentView?.hitTest(point)))")
+        let timestamp = ProcessInfo.processInfo.systemUptime
         func mouse(_ type: NSEvent.EventType) throws -> NSEvent {
-            try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: 0,
-                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+            try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: timestamp + (type == .leftMouseUp ? 0.001 : 0),
+                windowNumber: window.windowNumber, context: nil, eventNumber: type == .leftMouseDown ? 1_000_000 : 1_000_001, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0))
         }
         NSApp.postEvent(try mouse(.leftMouseUp), atStart: true)
         editor.mouseDown(with: try mouse(.leftMouseDown))
         XCTAssertTrue(window.isEditingContent, "The first click must focus the editor without requiring Tab or a second click")
-        XCTAssertEqual(editor.selectedRange().length, 0)
-        XCTAssertGreaterThan(editor.selectedRange().location, 0)
-        XCTAssertLessThan(editor.selectedRange().location, 18)
+        XCTAssertEqual(editor.string, document.text)
+        // TextKit tracking also reads the physical pointer; exact caret placement is checked with native UI input.
+        let expected = (editor.string as NSString).replacingCharacters(in: editor.selectedRange(), with: "X")
         editor.insertText("X", replacementRange: editor.selectedRange())
+        XCTAssertEqual(editor.string, expected)
         XCTAssertTrue(document.isDirty)
         XCTAssertTrue(editor.string.contains("X"))
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "click here to edit\nsecond line\n")
@@ -141,6 +143,23 @@ final class WorkspaceQuickLookTests: XCTestCase {
         try FileManager.default.removeItem(at: url)
         XCTAssertThrowsError(try document.save())
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    func testSaveRejectsExternallyExpandedFileWithoutReadingItAll() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".txt")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data("original\n".utf8).write(to: url)
+        let document = try XCTUnwrap(WorkspaceTextPreviewDocument.open(url))
+        document.text = "my unsaved draft\n"
+        let handle = try FileHandle(forWritingTo: url)
+        defer { try? handle.close() }
+        try handle.truncate(atOffset: 1_073_741_824)
+        let start = Date()
+        XCTAssertThrowsError(try document.save())
+        XCTAssertLessThan(Date().timeIntervalSince(start), 0.5, "Reject file growth before reading a gigabyte on the UI thread")
+        XCTAssertTrue(document.isDirty)
+        XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue, 1_073_741_824)
+        XCTAssertEqual(document.text, "my unsaved draft\n")
     }
 
     func testMonokaiHighlightsSourceWithoutChangingText() {

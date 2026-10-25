@@ -52,7 +52,7 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
     @State private var preparing = true
 
     private var preparationRequest: WorkspaceFilePreparation {
-        return WorkspaceFilePreparation(repository: repository?.url.path, files: files, ignoredPaths: ignoredRepository == repository?.url.path ? ignoredPaths : [], filter: filter, filterCase: filterCase, category: category, showHidden: showHidden, showIgnored: showIgnored, sort: sortOrder)
+        return WorkspaceFilePreparation(repository: repository?.url.path, files: files, ignoredPaths: ignoredRepository == repository?.url.path ? ignoredPaths : [], filter: filter, filterCase: filterCase, category: category, showHidden: showHidden, showIgnored: showIgnored, sort: sortOrder.isEmpty ? [.init(column: .path, ascending: true)] : sortOrder)
     }
     private func rebuildVisibleFiles() {
         let request = preparationRequest

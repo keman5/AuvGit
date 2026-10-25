@@ -5,6 +5,30 @@ import XCTest
 
 @MainActor
 final class NativeFocusAppearanceTests: XCTestCase {
+    func testKeyboardModeSurvivesBetweenTransientScopeOwners() {
+        let window = window()
+        defer { window.close() }
+        weak var mode: NativeFocusAppearance?
+        autoreleasepool {
+            let appearance = NativeFocusAppearance.forWindow(window)
+            appearance.beginNavigation()
+            mode = appearance
+        }
+        XCTAssertNotNil(mode, "A view update must not discard keyboard mode while its window is alive")
+        XCTAssertTrue(mode === NativeFocusAppearance.forWindow(window))
+        XCTAssertTrue(NativeFocusAppearance.isVisible(in: window))
+    }
+    func testKeyboardModeDoesNotRetainAClosedWindow() async throws {
+        weak var closed: NSWindow?
+        autoreleasepool {
+            let window = window()
+            closed = window
+            _ = NativeFocusAppearance.forWindow(window)
+            window.close()
+        }
+        for _ in 0..<100 where closed != nil { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertNil(closed, "Window-scoped keyboard mode must not keep closed windows alive")
+    }
     func testKeyboardRingReturnsAfterWindowReactivationWithoutMovingFocus() throws {
         let window = window()
         defer { window.close() }

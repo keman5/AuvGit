@@ -7,7 +7,7 @@ import Combine
 /// and popovers start with their own hidden mode.
 @MainActor
 final class NativeFocusAppearance: ObservableObject {
-    private static let windows = NSMapTable<NSWindow, NativeFocusAppearance>.weakToWeakObjects()
+    private static let windows = NSMapTable<NSWindow, NativeFocusAppearance>.weakToStrongObjects()
     // SwiftUI sheet content can move into a native panel while its rings are hidden.
     // Preserve the control's original style across those window-scoped states.
     private static let originalRings = NSMapTable<NSView, NSNumber>.weakToStrongObjects()
@@ -118,7 +118,8 @@ final class NativeFocusAppearance: ObservableObject {
     func preserveExplicitFocus() { hasInteracted = true }
 
     private func clearInitialFocus() {
-        guard !hasInteracted, let window, window.attachedSheet == nil else { return }
+        guard !hasInteracted, let window, window.attachedSheet == nil,
+              !(window.childWindows ?? []).contains(where: { $0.isVisible && $0.isKeyWindow }) else { return }
         window.initialFirstResponder = nil
         window.makeFirstResponder(window)
     }

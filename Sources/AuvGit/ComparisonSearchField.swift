@@ -53,9 +53,9 @@ struct ComparisonSearchField: NSViewRepresentable {
     }
     func updateNSView(_ field: NSTextField, context: Context) {
         context.coordinator.parent = self
-        field.isEnabled = enabled
+        if field.isEnabled != enabled { field.isEnabled = enabled }
         if field.stringValue != text { field.stringValue = text }
-        field.placeholderString = placeholder
+        if field.placeholderString != placeholder { field.placeholderString = placeholder }
         let focusScope = scope ?? context.coordinator.fallbackScope
         if scope == nil { focusScope.attach(to: field.window) }
         focusScope.register(field, initial: initialFocus)

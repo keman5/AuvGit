@@ -2,6 +2,27 @@ import XCTest
 @testable import GitCore
 
 final class LargeTextSearchTests: XCTestCase {
+    func testDenseUnicodeLineUsesExactByteOffsetsAndCapsMatches() async throws {
+        let prefix = String(repeating: "前", count: 250_000)
+        let start = Date()
+        let result = try await LargeTextSearch.text(prefix + String(repeating: "😀hit中", count: 10_001), options: LargeTextSearchOptions(query: "hit"))
+        XCTAssertEqual(result.hits.count, LargeTextSearch.maximumMatches)
+        XCTAssertTrue(result.isLimited)
+        for (index, hit) in result.hits.enumerated() {
+            XCTAssertEqual(hit.matchOffset, UInt64(750_004 + index * 10))
+            XCTAssertEqual(hit.range, NSRange(location: 250_002 + index * 6, length: 3))
+            XCTAssertEqual(hit.matchByteLength, 3)
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(start), 2, "Dense matches must not repeatedly scan a long prefix")
+        let zeroWidth = try await LargeTextSearch.text("前😀hit中hit", options: LargeTextSearchOptions(query: "(?=hit)", regularExpression: true))
+        XCTAssertEqual(zeroWidth.hits.map(\.matchOffset), [7, 13])
+        XCTAssertEqual(zeroWidth.hits.map(\.matchByteLength), [0, 0])
+    }
+    func testEmptyQueryDoesNotScanAnOverlongLine() async throws {
+        let result = try await LargeTextSearch.text(String(repeating: "a", count: LargeTextSearch.maximumLineBytes + 1), options: LargeTextSearchOptions(query: ""))
+        XCTAssertTrue(result.hits.isEmpty)
+        XCTAssertFalse(result.isLimited)
+    }
     func testStreamingChunkBoundaryUnicodeAndExactCursor() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: url) }

@@ -504,7 +504,7 @@ struct ComparisonEditor: NSViewRepresentable {
                                 }
                             }
                         } else if model.resolver == nil {
-                            let diff = TextLineDiff(source: source.text.string, target: pane.text.string)
+                            let diff = difference(source, pane)
                             entries = diff.blocks().map { block in
                                 let leftLines = pointsRight ? block.sourceLines : block.targetLines
                                 let rightLines = pointsRight ? block.targetLines : block.sourceLines
@@ -727,8 +727,8 @@ struct ComparisonEditor: NSViewRepresentable {
             scrollSourceID = first.0.id
         }
         @objc func didScroll(_ notification: Notification) {
-            panes.forEach { $0.gutter.needsDisplay = true; $0.leftRail.refresh(); $0.rightRail.refresh() }
             guard !aligning, !updating, !scrolling, let clip = notification.object as? NSClipView else { return }
+            defer { panes.forEach { $0.gutter.needsDisplay = true; $0.leftRail.refresh(); $0.rightRail.refresh() } }
             guard let source = panes.first(where: { $0.scroll.contentView === clip }) else { return }
             guard !source.scroll.isUpdatingGeometry else { return }
             scrollSourceID = source.id
@@ -768,7 +768,11 @@ struct ComparisonEditor: NSViewRepresentable {
                 if let index = blocks.firstIndex(where: { ($0.startLine - 1)..<$0.endLine ~= line }) {
                     var choices: [(String, ConflictDraft.Side)] = [("Use Ours", .ours), ("Use Theirs", .theirs), ("Ours → Theirs", .oursThenTheirs), ("Theirs → Ours", .theirsThenOurs)]
                     if blocks[index].base != nil { choices.append(("Use Base", .base)) }
-                    return choices.map { title, side in (resolverText(title), { [weak self] in self?.acceptConflict(side, index: index) }) }
+                    let targetText = target.text.string
+                    return choices.map { title, side in (resolverText(title), { [weak self, weak target] in
+                        guard let target, target.text.isEditable, target.text.string == targetText else { return }
+                        self?.acceptConflict(side, index: index)
+                    }) }
                 }
                 return []
             }
@@ -776,9 +780,11 @@ struct ComparisonEditor: NSViewRepresentable {
                 let diff = difference(source, target)
                 guard let block = diff.blocks().first(where: { $0.targetLines.contains(line) || ($0.targetLines.isEmpty && ($0.targetLines.lowerBound == line || $0.targetLines.lowerBound == line + 1)) }) else { return nil }
                 let title = L10n.text("acceptBlock", table: "AdvancedDiff", arguments: [source.title.stringValue])
-                return (title, { [weak target] in
-                    guard let target else { return }
-                    let value = TextLineDiff.accepting(block, source: source.text.string, target: target.text.string)
+                let sourceText = source.text.string, targetText = target.text.string
+                return (title, { [weak target, weak source] in
+                    guard let target, let source, target.text.isEditable,
+                          source.text.string == sourceText, target.text.string == targetText else { return }
+                    let value = TextLineDiff.accepting(block, source: sourceText, target: targetText)
                     target.text.window?.makeFirstResponder(target.text)
                     target.text.replaceAsUndoableEdit(value)
                 })
@@ -976,16 +982,17 @@ struct ComparisonEditor: NSViewRepresentable {
                 changeBandIndex = nil
             }
             let height = Double(max(1, panes.map { $0.text.bounds.height }.max() ?? 1))
+            let markers = model.overviewMarkers ?? navigationBands.enumerated().map { index, band in
+                let top = panes.indices.map { band[$0].lowerBound >= panes[$0].gutter.starts.count ? panes[$0].text.bounds.height : panes[$0].y(forLine: band[$0].lowerBound) }.min() ?? 0
+                let bottom = panes.indices.map { band[$0].upperBound >= panes[$0].gutter.starts.count ? panes[$0].text.bounds.height : panes[$0].y(forLine: band[$0].upperBound) }.max() ?? top
+                let kind: ComparisonOverviewMarker.Kind = band[baseline].isEmpty ? .addition : band.enumerated().contains(where: { $0.offset != baseline && $0.element.isEmpty }) ? .deletion : .modification
+                return ComparisonOverviewMarker(lower: min(1, Double(top) / height), upper: min(1, Double(max(top + 1, bottom)) / height), kind: kind, index: index)
+            }
             for (paneIndex, pane) in panes.enumerated() {
                 pane.scroll.overview.usesLocalViewport = model.overviewMarkers == nil
-                pane.scroll.overview.markers = model.overviewMarkers ?? navigationBands.enumerated().map { index, band in
-                    let top = panes.indices.map { band[$0].lowerBound >= panes[$0].gutter.starts.count ? panes[$0].text.bounds.height : panes[$0].y(forLine: band[$0].lowerBound) }.min() ?? 0
-                    let bottom = panes.indices.map { band[$0].upperBound >= panes[$0].gutter.starts.count ? panes[$0].text.bounds.height : panes[$0].y(forLine: band[$0].upperBound) }.max() ?? top
-                    let kind: ComparisonOverviewMarker.Kind = band[baseline].isEmpty ? .addition : band.enumerated().contains(where: { $0.offset != baseline && $0.element.isEmpty }) ? .deletion : .modification
-                    return ComparisonOverviewMarker(lower: min(1, Double(top) / height), upper: min(1, Double(max(top + 1, bottom)) / height), kind: kind, index: index)
-                }
-                pane.scroll.overview.onNavigate = { [weak self] fraction in
-                    guard let self else { return }
+                pane.scroll.overview.markers = markers
+                pane.scroll.overview.onNavigate = { [weak self, weak pane] fraction in
+                    guard let self, let pane else { return }
                     if let action = self.model.onOverviewNavigate { action(fraction); return }
                     let y = CGFloat(fraction) * CGFloat(height)
                     for target in self.panes {

@@ -2,6 +2,10 @@
 set -euo pipefail
 cd "${0:A:h:h}"
 if command -v go >/dev/null 2>&1; then go clean -cache; fi
+if [[ "${1:-}" == --test-performance-review ]]; then
+  swift test --build-system native -c release --filter "${AUVGIT_REVIEW_TEST_FILTER:-Comparison|ConflictPreviewPerformanceTests|RepositorySwitchLatencyTests|RepositoryQuietRefreshTests|ForegroundRefreshTests|DiffPreviewPerformanceTests|FileCompareSessionTests|WorkspaceCommitTests}"
+  exit
+fi
 if [[ "${1:-}" == --test-dialog-buttons ]]; then
   swift test --build-system native --filter 'ControlTypographyTests|DialogButtonWidthTests|DialogAppearanceTests.testLatePrimaryRegistrationOverridesRewrittenCancelShortcut|DialogAppearanceTests.testAlertDefaultSkipsDisabledActionsAndPrefersCancelToDestructive|DialogAppearanceTests.testLongAlertMessagesScrollWhileActionsStayVisibleAndKeyboardReachable|DialogAppearanceTests.testRealSwiftUISheetUsesSharedOuterSilhouetteAndNativeDismissal|NativeFocusBridgeTests.testWorkspaceUntrackedCheckboxSupportsTabAndSpace'
   exit
@@ -34,7 +38,7 @@ INSTALL_APP=true
 case "${1:-}" in
   "") ;;
   --no-install) INSTALL_APP=false ;;
-  *) print -u2 "Usage: $0 [--no-install|--test-dialog-buttons|--test-file-sorting|--test-refresh|--test-workspace-preview]"; exit 1 ;;
+  *) print -u2 "Usage: $0 [--no-install|--test-performance-review|--test-dialog-buttons|--test-file-sorting|--test-refresh|--test-workspace-preview]"; exit 1 ;;
 esac
 # Compile the native icon so macOS 26+ does not wrap the legacy icns in a gray tile.
 ICON_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/auvgit-app-icon.XXXXXX")"

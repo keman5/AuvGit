@@ -44,11 +44,15 @@ final class WorkspaceTextPreviewDocument {
 
     func save() throws {
         guard isDirty else { return }
-        guard url.resolvingSymlinksInPath() == resolvedURL,
-              try Data(contentsOf: resolvedURL) == savedData else {
-            throw GitError(previewText("The file changed outside this preview. Reopen it before saving."))
-        }
-        let permissions = try FileManager.default.attributesOfItem(atPath: resolvedURL.path)[.posixPermissions]
+        let changed = GitError(previewText("The file changed outside this preview. Reopen it before saving."))
+        guard url.resolvingSymlinksInPath() == resolvedURL else { throw changed }
+        let attributes = try FileManager.default.attributesOfItem(atPath: resolvedURL.path)
+        guard attributes[.type] as? FileAttributeType == .typeRegular,
+              (attributes[.size] as? NSNumber)?.intValue == savedData.count else { throw changed }
+        let handle = try FileHandle(forReadingFrom: resolvedURL)
+        defer { try? handle.close() }
+        guard try (handle.read(upToCount: savedData.count + 1) ?? Data()) == savedData else { throw changed }
+        let permissions = attributes[.posixPermissions]
         let data = try ComparisonTextDecoder.encode(text, format: format)
         try data.write(to: resolvedURL, options: .atomic)
         if let permissions { try FileManager.default.setAttributes([.posixPermissions: permissions], ofItemAtPath: resolvedURL.path) }
