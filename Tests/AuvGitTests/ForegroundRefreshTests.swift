@@ -6,6 +6,137 @@ import AppKit
 
 @MainActor
 final class ForegroundRefreshTests: XCTestCase {
+    func testActivationReplacesBlockedAutomaticReadAndStagingRemainsResponsive() async throws {
+        let root = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let key = "preferences.backgroundRefresh", previous = UserDefaults.standard.object(forKey: key)
+        UserDefaults.standard.set(false, forKey: key)
+        defer { if let previous { UserDefaults.standard.set(previous, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) } }
+        let store = RepositoryStore(persistsSession: false)
+        defer { store.closeTransientSession() }
+        store.repository = GitRepository(url: root); store.repositoryURL = root
+        await store.refresh()
+        let started = root.appendingPathComponent(".git/status-started")
+        let executable = try installBlockedStatus(root, started: started)
+        defer { restoreGit(executable) }
+        UserDefaults.standard.set(true, forKey: key)
+        let read = Task { await store.refreshIfChanged() }
+        defer { read.cancel() }
+        let deadline = Date().addingTimeInterval(3)
+        while !FileManager.default.fileExists(atPath: started.path), Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: started.path))
+        store.setApplicationActive(false)
+        try "changed while inactive\n".write(to: root.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+        store.setApplicationActive(true)
+        let recovered = Date().addingTimeInterval(2)
+        while store.files.isEmpty, Date() < recovered { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertEqual(store.files.map(\.path), ["file.txt"], "Activation cannot wait for a stale status command")
+        store.selectedPaths = ["file.txt"]
+        store.stageSelection()
+        let staged = Date().addingTimeInterval(2)
+        while store.files.first?.isStaged != true, Date() < staged { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertTrue(store.files.first?.isStaged == true)
+        read.cancel(); await read.value
+    }
+
+    func testSlowProjectDoesNotBlockOtherProjectsPolling() async throws {
+        let roots = try await [fixture(), fixture(), fixture()]
+        defer { for root in roots { try? FileManager.default.removeItem(at: root) } }
+        let key = "preferences.backgroundRefresh", previous = UserDefaults.standard.object(forKey: key)
+        UserDefaults.standard.set(false, forKey: key)
+        defer { if let previous { UserDefaults.standard.set(previous, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) } }
+        let stores = roots.map { _ in RepositoryStore(persistsSession: false) }
+        defer { stores.forEach { $0.closeTransientSession() } }
+        for (store, root) in zip(stores, roots) {
+            store.repository = GitRepository(url: root); store.repositoryURL = root
+            await store.refresh()
+            try "new content\n".write(to: root.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+        }
+        // Whichever session the weak store registry visits first is the slow one.
+        let started = roots[0].appendingPathComponent(".git/status-started")
+        let executable = try installBlockedStatus(roots[0], started: started)
+        defer { restoreGit(executable) }
+        UserDefaults.standard.set(true, forKey: key)
+        let poll = Task { await RepositoryStore.pollAllRepositories() }
+        defer { poll.cancel() }
+        let deadline = Date().addingTimeInterval(3)
+        while stores.filter({ !$0.files.isEmpty }).count < 2, Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: started.path))
+        XCTAssertEqual(stores.filter { !$0.files.isEmpty }.count, 2, "Only the blocked repository may remain stale")
+        poll.cancel(); await poll.value
+    }
+
+    func testStagingCancelsBlockedAutomaticReadWithoutActivation() async throws {
+        let root = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "changed\n".write(to: root.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+        let store = RepositoryStore(persistsSession: false)
+        defer { store.closeTransientSession() }
+        store.repository = GitRepository(url: root); store.repositoryURL = root
+        await store.refresh()
+        let started = root.appendingPathComponent(".git/status-started")
+        let executable = try installBlockedStatus(root, started: started)
+        defer { restoreGit(executable) }
+        let stopped = expectation(description: "Automatic read stopped for staging")
+        let read = Task { await store.refreshIfChanged(); stopped.fulfill() }
+        defer { read.cancel() }
+        let deadline = Date().addingTimeInterval(3)
+        while !FileManager.default.fileExists(atPath: started.path), Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: started.path))
+        store.selectedPaths = ["file.txt"]
+        store.stageSelection()
+        let staged = Date().addingTimeInterval(2)
+        while store.files.first?.isStaged != true, Date() < staged { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertTrue(store.files.first?.isStaged == true)
+        await fulfillment(of: [stopped], timeout: 2)
+        XCTAssertNil(store.error)
+        read.cancel(); await read.value
+    }
+
+    func testRepeatedFilesystemChangesAndStageCyclesKeepStatusFresh() async throws {
+        let root = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let key = "preferences.backgroundRefresh", previous = UserDefaults.standard.object(forKey: key)
+        UserDefaults.standard.set(false, forKey: key)
+        defer { if let previous { UserDefaults.standard.set(previous, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) } }
+        let store = RepositoryStore(persistsSession: false)
+        defer { store.closeTransientSession() }
+        await store.open(root)
+        await store.cancelBackgroundRepositorySync()
+        UserDefaults.standard.set(true, forKey: key)
+        for cycle in 0..<60 {
+            try "cycle \(cycle)\n".write(to: root.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+            let changed = Date().addingTimeInterval(2)
+            while store.files.first?.isUnstaged != true, Date() < changed { try await Task.sleep(for: .milliseconds(5)) }
+            XCTAssertTrue(store.files.first?.isUnstaged == true, "Filesystem events must remain live at cycle \(cycle)")
+            store.selectedPaths = ["file.txt"]
+            store.stageSelection()
+            let deadline = Date().addingTimeInterval(2)
+            while store.files.first?.isUnstaged != false, Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
+            XCTAssertTrue(store.files.first?.isStaged == true)
+            XCTAssertFalse(store.files.first?.isUnstaged == true)
+        }
+    }
+
+    private func installBlockedStatus(_ root: URL, started: URL) throws -> Any? {
+        let previous = UserDefaults.standard.object(forKey: "auvgit.git.executablePath")
+        let wrapper = root.appendingPathComponent(".git/blocked-status-git")
+        let quoted = "'" + started.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        try """
+        #!/bin/sh
+        for arg in "$@"; do
+            if [ "$arg" = status ] && mkdir \(quoted) 2>/dev/null; then
+                trap '' TERM
+                sleep 30
+            fi
+        done
+        exec /usr/bin/git "$@"
+        """.write(to: wrapper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
+        UserDefaults.standard.set(wrapper.path, forKey: "auvgit.git.executablePath")
+        return previous
+    }
+
     func testApplicationLifecycleResumesAllProjectsWithoutSceneCallbacks() async throws {
         let root = try await fixture()
         defer { try? FileManager.default.removeItem(at: root) }

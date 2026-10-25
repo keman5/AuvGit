@@ -146,7 +146,8 @@ final class RepositoryStore: ObservableObject {
     private var filesystemRefresh: Task<Void, Never>?
     private var filesystemRefreshing = false
     private var filesystemPending = false
-    private var checkingFilesystemState = false
+    private var automaticRefreshTask: Task<Void, Never>?
+    private var automaticRefreshVersion = UUID()
     private(set) var applicationActive = true
     private var lastAutomaticRefresh = Date.distantPast
     private var activationTask: Task<Void, Never>?
@@ -205,6 +206,7 @@ final class RepositoryStore: ObservableObject {
     /// A Log window owns this transient store, not the main workspace session.
     func closeTransientSession() {
         guard !persistsSession else { return }
+        cancelAutomaticRefresh()
         projectPreparationTask?.cancel(); projectPreparationTask = nil
         recentSyncTask?.cancel(); recentSyncTask = nil
         activationTask?.cancel(); activationTask = nil
@@ -259,6 +261,7 @@ final class RepositoryStore: ObservableObject {
         historyMemoryCache.removeValue(forKey: path)
         openRepositories.removeAll { $0 == path }
         guard repositoryURL?.path == path else { flushSession(); return }
+        cancelAutomaticRefresh()
         fileObserver = nil; filesystemRefresh?.cancel(); repository = nil; repositoryURL = nil
         files = []; commits = []; localUnpushedCommitHashes = nil; branches = []; stashes = []; commitFiles = []; selectedPaths = []; selectedCommit = nil; selectedCommitPath = nil
         commitMessage = ""; amend = false; recentCommitMessages = []; accessedURL?.stopAccessingSecurityScopedResource(); accessedURL = nil
@@ -590,6 +593,7 @@ final class RepositoryStore: ObservableObject {
         pendingRepositoryPath = url.path
         let path = url.standardizedFileURL.path
         if isBusy || !isCurrentLocation {
+            cancelAutomaticRefresh()
             if openingFallback == nil { openingFallback = (repository, repositoryURL, currentHistorySnapshot()) }
             if let current = repositoryURL?.path, !isBusy {
                 session.repositories[current] = captureViewState()
@@ -652,6 +656,7 @@ final class RepositoryStore: ObservableObject {
             cacheCurrentHistory(for: path)
         }
         if openingRepositoryPath != url.path {
+            cancelAutomaticRefresh()
             flushSession()
             refreshReadVersion = UUID(); refreshingRepository = nil
             repoVersion = UUID(); historyVersion = UUID(); detailVersion = UUID(); diffVersion = UUID()
@@ -956,9 +961,10 @@ final class RepositoryStore: ObservableObject {
         for store in stores.allObjects where store.persistsSession { store.refreshRecentRepositoryStates() }
     }
     static func pollAllRepositories() async {
-        for store in stores.allObjects {
-            guard !Task.isCancelled else { return }
-            await store.pollForChanges()
+        await withTaskGroup(of: Void.self) { group in
+            for store in stores.allObjects {
+                group.addTask { guard !Task.isCancelled else { return }; await store.pollForChanges() }
+            }
         }
     }
     func setApplicationActive(_ active: Bool) {
@@ -967,6 +973,7 @@ final class RepositoryStore: ObservableObject {
         let version = UUID(); activationVersion = version
         activationTask?.cancel(); activationTask = nil
         if !active {
+            cancelAutomaticRefresh()
             recentSyncTask?.cancel(); projectPreparationTask?.cancel()
             filesystemRefresh?.cancel(); filesystemRefresh = nil; filesystemPending = false
             return
@@ -992,11 +999,29 @@ final class RepositoryStore: ObservableObject {
     }
     private var lastObservedState: RepositoryChangeState?
     private var lastHistoryState: String?
+    private func cancelAutomaticRefresh() {
+        guard let task = automaticRefreshTask else { return }
+        automaticRefreshVersion = UUID()
+        automaticRefreshTask = nil
+        task.cancel()
+        refreshReadVersion = UUID(); refreshingRepository = nil
+    }
     func refreshIfChanged() async {
-        guard applicationActive, let repository, !isBusy, !checkingFilesystemState, refreshingRepository != repository.url else { return }
+        guard applicationActive, !isBusy, !Task.isCancelled else { return }
+        if let task = automaticRefreshTask { await task.value; return }
+        guard let repository, refreshingRepository != repository.url else { return }
+        let generation = UUID(); automaticRefreshVersion = generation
+        // Keep the read cancellable after its filesystem debounce task has finished.
+        let task = Task {
+            defer { if automaticRefreshVersion == generation { automaticRefreshTask = nil } }
+            await performAutomaticRefresh()
+        }
+        automaticRefreshTask = task
+        await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+    }
+    private func performAutomaticRefresh() async {
+        guard applicationActive, let repository, !isBusy, !Task.isCancelled, refreshingRepository != repository.url else { return }
         let version = repoVersion, readVersion = refreshReadVersion
-        checkingFilesystemState = true
-        defer { checkingFilesystemState = false }
         do {
             let (newFiles, state) = try await GitCommandLog.$suppressRoutineReads.withValue(true) {
                 let newFiles = try await repository.status()
@@ -1525,6 +1550,7 @@ final class RepositoryStore: ObservableObject {
     }
     func operation(_ name: String, refreshFilesOnly: Bool = false, onFailure: ((Error) -> Void)? = nil, body: @escaping (GitRepository) async throws -> Void) {
         guard let repository, workspaceStatusFailure == nil, !isBusy, pendingRepositoryPath == nil else { return }
+        cancelAutomaticRefresh()
         diffTask?.cancel(); diffTask = nil
         refreshReadVersion = UUID(); refreshingRepository = nil; diffVersion = UUID(); historyVersion = UUID()
         isBusy = true; beginUserOperation(name)
