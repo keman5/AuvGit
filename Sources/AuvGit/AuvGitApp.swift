@@ -266,10 +266,16 @@ final class RepositoryStore: ObservableObject {
         files = []; commits = []; localUnpushedCommitHashes = nil; branches = []; stashes = []; commitFiles = []; selectedPaths = []; selectedCommit = nil; selectedCommitPath = nil
         commitMessage = ""; amend = false; recentCommitMessages = []; accessedURL?.stopAccessingSecurityScopedResource(); accessedURL = nil
         let candidates = Array(openRepositories.reversed()); session.activeRepository = candidates.first; flushSession()
+        guard workspaceProjects == nil || workspaceProjects?.active === self else { return }
         Task {
             for candidate in candidates {
-                await open(URL(fileURLWithPath: candidate))
-                if repository != nil { return }
+                let url = URL(fileURLWithPath: candidate)
+                let missing = await Task.detached(priority: .userInitiated) { Self.repositoryRootIsMissing(url) }.value
+                guard repository == nil, !isBusy, pendingRepositoryPath == nil,
+                      workspaceProjects == nil || workspaceProjects?.active === self else { return }
+                if missing { continue }
+                await open(url, promptsIfUnavailable: false)
+                if (workspaceProjects?.active ?? self).repository != nil { return }
             }
         }
     }
@@ -1135,12 +1141,19 @@ final class RepositoryStore: ObservableObject {
         }
     }
     func removeRecentRepository(_ path: String) {
-        guard !isBusy else { return }
-        recentPaths.removeAll { $0 == path }
+        guard !isBusy, workspaceProjects?.isBusy(path: path) != true else { return }
+        let stores = workspaceProjects?.sessions ?? [self]
+        // Every session participates in persistence; stale tabs must not resurrect a removed project.
+        for store in stores {
+            store.recentPaths.removeAll { $0 == path }
+            store.openRepositories.removeAll { $0 == path }
+            if store.unavailableRepository?.path == path { store.unavailableRepository = nil }
+        }
         if persistsSession { UserDefaults.standard.set(recentPaths, forKey: "recentRepositories") }
         workspaceProjects?.synchronizeProjectList(from: self)
         unavailableRepository = nil
-        closeRepositoryTab(path)
+        for store in stores { store.closeRepositoryTab(path) }
+        flushSession()
         if let presentationCache { Task { try? await presentationCache.remove(repository: URL(fileURLWithPath: path)) } }
     }
     private func applyFileStatus(_ newFiles: [GitFile]) {

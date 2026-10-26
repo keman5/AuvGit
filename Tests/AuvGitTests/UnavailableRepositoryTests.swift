@@ -12,6 +12,94 @@ final class UnavailableRepositoryTests: XCTestCase {
     }
     private func temporaryRoot() -> URL { FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString) }
 
+    func testRemovingCurrentProjectSkipsDeletedFallbackWithoutPrompting() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let valid = try await repository(root, "valid"), missing = try await repository(root, "missing"), removed = try await repository(root, "removed")
+        let store = RepositoryStore(persistsSession: false)
+        defer { store.closeTransientSession() }
+        await store.open(valid); await store.open(missing); await store.open(removed)
+        try FileManager.default.removeItem(at: missing)
+        store.removeRecentRepository(removed.path)
+        let deadline = Date().addingTimeInterval(5)
+        while store.repositoryURL?.path != valid.path || store.isBusy {
+            if Date() >= deadline { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(store.repositoryURL?.path, valid.path)
+        XCTAssertNil(store.unavailableRepository)
+        XCTAssertFalse(store.openRepositories.contains(removed.path))
+        XCTAssertTrue(store.recentPaths.contains(missing.path), "Automatic fallback must not remove unavailable projects")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: removed.appendingPathComponent(".git").path))
+    }
+
+    func testRemovingProjectCleansEverySessionAndSelectsOnlyOneAvailableFallback() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let valid = try await repository(root, "a-valid"), missing = try await repository(root, "z-missing"), removed = try await repository(root, "removed")
+        let original = RepositoryStore(persistsSession: false, followsCurrentBranch: true)
+        let projects = WorkspaceProjects(initial: original)
+        defer { for store in projects.sessions { store.closeTransientSession() } }
+        await original.open(valid)
+        original.commitMessage = "preserved draft"
+        await projects.active.open(missing)
+        await projects.active.open(removed)
+        let closed = projects.active
+        try FileManager.default.removeItem(at: missing)
+        closed.removeRecentRepository(removed.path)
+        let deadline = Date().addingTimeInterval(5)
+        while projects.active !== original || projects.active.isBusy {
+            if Date() >= deadline { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(projects.active === original)
+        XCTAssertEqual(projects.active.repositoryURL?.path, valid.path)
+        XCTAssertEqual(original.commitMessage, "preserved draft")
+        for store in projects.sessions {
+            XCTAssertNil(store.unavailableRepository)
+            XCTAssertFalse(store.recentPaths.contains(removed.path))
+            XCTAssertFalse(store.openRepositories.contains(removed.path))
+        }
+        XCTAssertNil(closed.repository)
+        original.removeRecentRepository(missing.path)
+        XCTAssertTrue(projects.active === original, "Removing an inactive missing project must not activate another session")
+        for store in projects.sessions {
+            XCTAssertNil(store.unavailableRepository)
+            XCTAssertFalse(store.openRepositories.contains(missing.path))
+            XCTAssertFalse(store.recentPaths.contains(missing.path))
+        }
+    }
+
+    func testRemovingLastAvailableProjectLeavesWelcomeWithoutMissingPrompt() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let missing = try await repository(root, "missing"), removed = try await repository(root, "removed")
+        let store = RepositoryStore(persistsSession: false)
+        defer { store.closeTransientSession() }
+        await store.open(missing); await store.open(removed)
+        try FileManager.default.removeItem(at: missing)
+        store.removeRecentRepository(removed.path)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertNil(store.repository)
+        XCTAssertNil(store.pendingRepositoryPath)
+        XCTAssertNil(store.unavailableRepository)
+        XCTAssertTrue(store.recentPaths.contains(missing.path))
+    }
+
+    func testAutomaticFallbackDoesNotReplaceAnExplicitProjectSelection() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fallback = try await repository(root, "fallback"), removed = try await repository(root, "removed"), chosen = try await repository(root, "chosen")
+        let store = RepositoryStore(persistsSession: false)
+        defer { store.closeTransientSession() }
+        await store.open(fallback); await store.open(removed)
+        store.removeRecentRepository(removed.path)
+        await store.open(chosen)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(store.repositoryURL?.path, chosen.path)
+        XCTAssertNil(store.unavailableRepository)
+    }
+
     func testDeletedRegisteredRootPromptsAndCancellationKeepsEntries() async throws {
         let root = temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
