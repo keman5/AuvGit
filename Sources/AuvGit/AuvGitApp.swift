@@ -93,15 +93,6 @@ final class RepositoryStore: ObservableObject {
     }
     lazy var creationOperation = RepositoryCreationOperation(store: self)
 
-    func creationProgressHandler(operationID: UUID) -> @Sendable (NetworkProgress) -> Void {
-        progressOperationID = operationID; progressRepository = repositoryURL
-        return { [weak self] event in
-            Task { @MainActor in
-                guard let self, self.currentUserOperationID == operationID, self.isBusy else { return }
-                self.liveProgress = event
-            }
-        }
-    }
     private struct HistoryMemorySnapshot {
         let files: [GitFile]
         let filesGeneration: UUID
@@ -309,8 +300,11 @@ final class RepositoryStore: ObservableObject {
         set { commandRecords.userCommands = newValue }
     }
     var operationLog: [GitCommandRecord] {
-        let actions = userOperationLog.sorted { $0.date > $1.date }
-        let details = (commandLog + userCommandLog).sorted { $0.date > $1.date }
+        let creation = creationOperation.operationStore
+        let actions = (userOperationLog + (creation?.userOperationLog ?? [])).sorted { $0.date > $1.date }
+        var seen = Set<UUID>()
+        let details = (commandLog + userCommandLog + (creation?.commandLog ?? []) + (creation?.userCommandLog ?? []))
+            .filter { seen.insert($0.id).inserted }.sorted { $0.date > $1.date }
         return actions + details
     }
     @Published private var latestOperationKey: String?
@@ -321,8 +315,12 @@ final class RepositoryStore: ObservableObject {
     @Published private(set) var liveProgress: NetworkProgress?
     private var progressOperationID: UUID?
     private var progressRepository: URL?
-    var visibleProgress: NetworkProgress? { progressRepository == repositoryURL ? liveProgress : nil }
+    var visibleProgress: NetworkProgress? {
+        if !isBusy, creationOperation.busy { return creationOperation.operationStore?.visibleProgress }
+        return progressRepository == repositoryURL ? liveProgress : nil
+    }
     var footerStatus: String {
+        if !isBusy, creationOperation.busy, let runner = creationOperation.operationStore { return runner.footerStatus }
         if let liveProgress, progressRepository == repositoryURL {
             let detail = Self.progressDetail(liveProgress.message)
             return detail.isEmpty ? status : detail
@@ -343,7 +341,14 @@ final class RepositoryStore: ObservableObject {
     }
     func commands(for operation: GitCommandRecord) -> [GitCommandRecord] {
         guard operation.command.isEmpty, let id = operation.operationID else { return [] }
-        return userCommandLog.filter { $0.operationID == id }.sorted { $0.date < $1.date }
+        let commands = userCommandLog + (creationOperation.operationStore?.userCommandLog ?? [])
+        var seen = Set<UUID>()
+        return commands.filter { $0.operationID == id && seen.insert($0.id).inserted }.sorted { $0.date < $1.date }
+    }
+    func adoptCreationResult(from runner: RepositoryStore, previousOperationID: UUID) {
+        guard !isBusy, currentUserOperationID == previousOperationID else { return }
+        latestOperationName = runner.latestOperationName; latestOperationKey = runner.latestOperationKey
+        errorMessage = runner.errorMessage
     }
     func beginUserOperation(_ name: String) {
         liveProgress = nil; progressOperationID = nil; progressRepository = nil

@@ -39,7 +39,6 @@ struct MainWindow: View {
     @State private var showTools = false
     @State var fileTree = false
     @State private var showCreate = false
-    @State private var createClone: Bool?
     @State private var blamePath: String?
     @State private var showNetwork = false
     @State private var showTags = false
@@ -89,7 +88,7 @@ struct MainWindow: View {
             }
             Divider()
             HStack(spacing: 8) {
-                if store.isBusy { ProgressView().controlSize(.mini) }
+                if store.isBusy || store.creationOperation.busy { ProgressView().controlSize(.mini) }
                 else { Circle().fill(store.error == nil ? Color.green : .orange).frame(width: 6, height: 6) }
                 Text(L10n.text("stagedRatio", table: "Main", arguments: [store.stagedCount, store.files.count]))
                     .monospacedDigit().fixedSize(horizontal: true, vertical: false).layoutPriority(1)
@@ -99,7 +98,7 @@ struct MainWindow: View {
                         .frame(minHeight: 24, alignment: .leading).contentShape(Rectangle())
                 }.buttonStyle(.plain).help(store.footerStatus).accessibilityLabel(refinementText("Open operation log") + ": " + store.footerStatus)
                 Spacer(minLength: 0)
-                if let fraction = store.visibleProgress?.fraction, store.isBusy {
+                if let fraction = store.visibleProgress?.fraction, store.isBusy || store.creationOperation.busy {
                     ProgressView(value: fraction).frame(width: 90)
                     Text("\(Int(fraction * 100))%").monospacedDigit()
                 }
@@ -334,7 +333,7 @@ struct MainWindow: View {
         case "stash": confirm(mainText("stashTitle"), mainText("stashMessage")) { store.operation("贮藏") { try await $0.stash(message: "AuvGit stash") } }
         case "applyStash": if let stash = store.stashes.first { sidebarAction(.stashApply, stash.ref) }
         case "refresh": Task { await store.refresh() }
-        case "create": createClone = nil; showCreate = true
+        case "create": store.creationOperation.present()
         case "open": store.chooseRepository()
         case "fetch": runToolbarNetwork(.fetch)
         case "commit": store.mode = "workspace"; commitFocused = true
@@ -420,7 +419,7 @@ struct MainWindow: View {
         observedContent
         .onDisappear { confirmation?.cancelled?(); confirmation = nil; authentication.cancel() }
         .background {
-        repositoryAvailabilityContent.auvGitAlert(item: $confirmation, focusesOnPresentation: confirmation?.informational != true) { action in
+        repositoryAvailabilityContent.auvGitAlert(item: $confirmation) { action in
             AuvGitAlert(title: action.title, message: action.message, buttons: action.permanentlyDelete != nil ? [
                 AuvGitAlertButton(fileContextText("permanentlyDelete"), role: .destructive) { confirmation = nil; action.permanentlyDelete?() },
                 AuvGitAlertButton(mainText("cancel"), role: .cancel) { confirmation = nil },
@@ -513,7 +512,8 @@ struct MainWindow: View {
             })
         }
         .auvGitSheet(isPresented: $showTools) { RepositoryTools(store: store) }
-        .auvGitSheet(isPresented: $showCreate) { CreateRepositorySheet(store: store, initialClone: createClone) }
+        .auvGitSheet(isPresented: $showCreate) { CreateRepositorySheet(store: store).environment(\.isEnabled, true) }
+        .background(RepositoryCreationAlerts(creation: store.creationOperation))
         .onReceive(store.creationOperation.$isPresented) { presented in showCreate = presented }
         .onChange(of: showCreate) { _, presented in
             if !presented { store.creationOperation.isPresented = false }
@@ -1015,7 +1015,7 @@ extension MainWindow {
             if sidebarFocus.hasFileFocus && !fromMenu { return false }
             if fileFocus.hasFileFocus, let path = store.selectedPaths.sorted().first { fileAction(.history, [path]) }
             else if let repository = store.repository { LogPresenter.show(repository: repository) }
-        case .clone: guard !store.isBusy else { return true }; createClone = true; showCreate = true
+        case .clone: store.creationOperation.present(initialClone: true)
         case .commit: guard store.repository != nil, !store.isBusy else { return true }; commitFocused = true
         case .pull, .fetch, .push, .stash:
             guard store.repository != nil, !store.isBusy else { return true }
@@ -1256,7 +1256,7 @@ private struct NamePromptSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text(prompt.title).font(.headline)
-            StableTextField(interactionText("Name"), text: $value, onSubmit: submit, initialFocus: true).textFieldStyle(.roundedBorder)
+            StableTextField(interactionText("Name"), text: $value, onSubmit: submit).textFieldStyle(.roundedBorder)
             HStack {
                 KeyViewProxy(label: L10n.text("cancel", table: "Main"), keyEquivalent: "\u{1b}", minimumWidth: AuvGitDialogButtonStyle.minimumWidth, action: onCancel)
                 KeyViewProxy(label: L10n.text("continue", table: "Main"), prominent: true, minimumWidth: AuvGitDialogButtonStyle.minimumWidth, action: submit)

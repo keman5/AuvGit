@@ -87,6 +87,17 @@ final class NativeFocusAppearance: ObservableObject {
         contextRowFocus.handle(event, in: window)
         if event.type != .keyDown { restoresKeyboardFocus = false; setVisible(false); return false }
         let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        // The default-action outline does not take first responder. Match its
+        // visible cue with Space only while the window itself owns input;
+        // editors and controls keep their normal Space behavior after Tab/click.
+        if event.keyCode == 49, flags.isEmpty, window.firstResponder === window,
+           window.isKeyWindow, let button = window.defaultButtonCell?.controlView as? KeyViewProxy.Button {
+            button.updateDefaultActionIndicator()
+            if button.showsDefaultActionFocus {
+                if !event.isARepeat { button.performClick(nil) }
+                return true
+            }
+        }
         if event.keyCode == 48, flags.subtracting([.control, .shift]).isEmpty {
             // Tab remains literal input in editors and during shortcut capture.
             if let recorder = window.firstResponder as? ShortcutRecorder.RecorderView, recorder.isRecording { return false }
@@ -140,6 +151,7 @@ final class NativeFocusAppearance: ObservableObject {
                 view.focusRingType = desired
                 view.needsDisplay = true
             }
+            (view as? KeyViewProxy.Button)?.updateDefaultActionIndicator()
             view.subviews.forEach(visit)
         }
         visit(content)

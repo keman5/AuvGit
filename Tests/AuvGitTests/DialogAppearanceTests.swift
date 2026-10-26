@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 import XCTest
-import GitCore
+@testable import GitCore
 @testable import AuvGit
 
 @MainActor
@@ -156,7 +156,61 @@ final class DialogAppearanceTests: XCTestCase {
                 }
         }
     }
-    func testRealPullSheetFocusesPullAndCyclesButtonsOnEveryPresentation() throws {
+    func testDefaultActionCueSupportsSpaceWithoutTakingFirstResponder() throws {
+        try runApplicationFixture {
+            let app = NSApplication.shared, policy = NSApplication.shared.activationPolicy()
+            app.setActivationPolicy(.regular)
+            defer { app.setActivationPolicy(policy) }
+            let model = PullSheetModel()
+            let host = NSHostingView(rootView: PullSheetFixture(model: model))
+            let parent = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+            parent.isReleasedWhenClosed = false; parent.contentView = host
+            defer { if let sheet = parent.attachedSheet { parent.endSheet(sheet) }; parent.close() }
+            try await self.activateFixture(parent)
+            model.presented = true
+            for _ in 0..<40 { try await Task.sleep(for: .milliseconds(10)) }
+            try await self.ensureApplicationActive()
+            let visible = DialogAppearance.visibleWindow(for: try XCTUnwrap(parent.attachedSheet))
+            let primary = try XCTUnwrap(visible.defaultButtonCell?.controlView as? KeyViewProxy.Button)
+            XCTAssertTrue(primary.showsDefaultActionFocus)
+            XCTAssertTrue(visible.firstResponder === visible)
+            var activations = 0
+            primary.activate = { activations += 1 }
+            @MainActor func space(flags: NSEvent.ModifierFlags = [], repeating: Bool = false) -> NSEvent {
+                NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags,
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: visible.windowNumber, context: nil,
+                    characters: " ", charactersIgnoringModifiers: " ", isARepeat: repeating, keyCode: 49)!
+            }
+            let appearance = NativeFocusAppearance.forWindow(visible)
+            app.sendEvent(space())
+            XCTAssertEqual(activations, 1)
+            XCTAssertTrue(visible.firstResponder === visible)
+            XCTAssertTrue(appearance.handle(space(repeating: true)))
+            XCTAssertEqual(activations, 1, "Holding Space must not repeat an operation")
+            XCTAssertFalse(appearance.handle(space(flags: .command)))
+            primary.isEnabled = false
+            XCTAssertFalse(appearance.handle(space()))
+            primary.isEnabled = true
+            let inputHost = NSHostingView(rootView: TextField("Input", text: .constant("")))
+            let inputWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 250, height: 80), styleMask: [.titled], backing: .buffered, defer: false)
+            inputWindow.isReleasedWhenClosed = false; inputWindow.contentView = inputHost
+            defer { inputWindow.close() }
+            @MainActor func input(in view: NSView) -> NSTextField? {
+                (view as? NSTextField) ?? view.subviews.lazy.compactMap { input(in: $0) }.first
+            }
+            inputHost.layoutSubtreeIfNeeded()
+            let field = try XCTUnwrap(input(in: inputHost))
+            XCTAssertTrue(inputWindow.makeFirstResponder(field))
+            let editorSpace = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: inputWindow.windowNumber, context: nil, characters: " ", charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49)!
+            let inputAppearance = NativeFocusAppearance.forWindow(inputWindow)
+            XCTAssertTrue(inputWindow.makeFirstResponder(field))
+            XCTAssertFalse(inputAppearance.handle(editorSpace), "Space in an editor must remain text input")
+            XCTAssertEqual(activations, 1)
+        }
+    }
+
+    func testRealPullSheetWaitsForTabAndCyclesButtonsOnEveryPresentation() throws {
         try runApplicationFixture {
             let app = NSApplication.shared, policy = NSApplication.shared.activationPolicy()
             app.setActivationPolicy(.regular)
@@ -180,16 +234,31 @@ final class DialogAppearanceTests: XCTestCase {
                 let primary = try XCTUnwrap(visible.defaultButtonCell?.controlView as? KeyViewProxy.Button)
                 XCTAssertEqual(primary.title, networkText("pull"))
                 XCTAssertTrue(visible.isKeyWindow)
-                XCTAssertTrue(visible.firstResponder === primary, "Pull must have keyboard focus as soon as the sheet opens")
-                XCTAssertTrue(NativeFocusAppearance.isVisible(in: visible))
-                XCTAssertNotEqual(primary.focusRingType, .none)
-                for title in [networkText("fetch"), networkText("cancel"), networkText("pull")] {
-                    app.sendEvent(key(visible, code: 48, characters: "\t"))
-                    XCTAssertEqual((visible.firstResponder as? NSButton)?.title, title)
-                    XCTAssertNotEqual((visible.firstResponder as? NSButton)?.focusRingType, NSFocusRingType.none)
+                XCTAssertFalse(visible.firstResponder is NSControl, "Opening a sheet must not focus a control")
+                XCTAssertFalse(NativeFocusAppearance.isVisible(in: visible))
+                XCTAssertEqual(primary.focusRingType, .none)
+                XCTAssertEqual(primary.layer?.borderWidth ?? 0, 0, "A full-frame border changes the apparent button height instead of drawing the native focus shape")
+                XCTAssertTrue(primary.showsDefaultActionFocus, "Every default action must display the native focus style before Tab")
+                if presentation == 0, let path = ProcessInfo.processInfo.environment["AUVGIT_DEFAULT_ACTION_PREVIEW"],
+                   let content = visible.contentView,
+                   let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) {
+                    content.cacheDisplay(in: content.bounds, to: bitmap)
+                    try bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
                 }
+                var reached = Set<String>()
+                for _ in 0..<3 {
+                    app.sendEvent(key(visible, code: 48, characters: "\t"))
+                    reached.insert(try XCTUnwrap(visible.firstResponder as? NSButton).title)
+                    XCTAssertNotEqual((visible.firstResponder as? NSButton)?.focusRingType, NSFocusRingType.none)
+                    NativeFocusAppearance.forWindow(visible).apply()
+                    XCTAssertEqual(primary.layer?.borderWidth ?? 0, 0, "Tab must leave only the actual keyboard focus ring")
+                    XCTAssertFalse(primary.showsDefaultActionFocus)
+                }
+                XCTAssertEqual(reached, Set([networkText("fetch"), networkText("cancel"), networkText("pull")]))
                 if presentation == 0 {
-                    app.sendEvent(key(visible, code: 48, characters: "\u{19}", flags: .shift))
+                    for _ in 0..<3 where (visible.firstResponder as? NSButton)?.title != networkText("cancel") {
+                        app.sendEvent(key(visible, code: 48, characters: "\u{19}", flags: .shift))
+                    }
                     XCTAssertEqual((visible.firstResponder as? NSButton)?.title, networkText("cancel"))
                     app.sendEvent(key(visible, code: 49, characters: " "))
                 } else if presentation == 1 {
@@ -438,6 +507,98 @@ final class DialogAppearanceTests: XCTestCase {
         // loop; XCTest's async scheduler alone leaves NSApp inactive/non-running.
         app.run()
         if let failure { throw failure }
+    }
+
+    private struct ClonePromptFixture: View {
+        let store: RepositoryStore
+        @ObservedObject var creation: RepositoryCreationOperation
+        var body: some View {
+            Text("Parent").frame(width: 500, height: 400)
+                .auvGitSheet(isPresented: $creation.isPresented) { CreateRepositorySheet(store: store) }
+                .background(RepositoryCreationAlerts(creation: creation))
+                .disabled(!creation.isPresented) // Background project views cannot receive workspace actions.
+        }
+    }
+
+    func testCloneReplacementAndRetryPresentRealAlertsAndAllowEscape() throws {
+        try runApplicationFixture {
+            let app = NSApplication.shared, policy = NSApplication.shared.activationPolicy()
+            app.setActivationPolicy(.regular)
+            defer { app.setActivationPolicy(policy) }
+            let defaults = UserDefaults.standard
+            let keys = [CloneDestination.parentPreference, RepositoryCreationDraft.preference]
+            let saved = keys.map { defaults.object(forKey: $0) }
+            defer { for (key, value) in zip(keys, saved) { defaults.set(value, forKey: key) } }
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            let target = root.appendingPathComponent("target"), trash = root.appendingPathComponent("trash")
+            try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+            try "keep".write(to: target.appendingPathComponent("keep.txt"), atomically: true, encoding: .utf8)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let store = RepositoryStore(persistsSession: false)
+            defer { store.closeTransientSession() }
+            var attempts = 0
+            let creation = RepositoryCreationOperation(store: store, trashItem: {
+                try FileManager.default.moveItem(at: $0, to: trash)
+            }) { _, _, url, _, _ in
+                attempts += 1
+                if attempts == 1 { throw GitError("fatal: remote repository unavailable") }
+                return try await GitRepository.initialize(at: url)
+            }
+            store.creationOperation = creation
+            creation.prepare(initialClone: true)
+            creation.source = "https://example.invalid/team/repo.git"
+            creation.destination = target.path
+            let parent = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 400),
+                styleMask: [.titled], backing: .buffered, defer: false)
+            parent.isReleasedWhenClosed = false
+            parent.contentView = NSHostingView(rootView: ClonePromptFixture(store: store, creation: creation))
+            defer { if let sheet = parent.attachedSheet { parent.endSheet(sheet) }; parent.close() }
+            @MainActor func settle() async throws { try await Task.sleep(for: .milliseconds(500)) }
+            @MainActor func buttons(_ view: NSView) -> [NSButton] {
+                (view as? NSButton).map { [$0] } ?? view.subviews.flatMap(buttons)
+            }
+            @MainActor func action(_ title: String, in window: NSWindow) throws -> NSButton {
+                try XCTUnwrap(buttons(try XCTUnwrap(window.contentView)).first { $0.title == workflowText(title) })
+            }
+            @MainActor func escape(_ window: NSWindow) throws {
+                try app.sendEvent(XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                    characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)))
+            }
+            try await self.activateFixture(parent)
+            creation.isPresented = true
+            try await settle()
+            let form = DialogAppearance.visibleWindow(for: try XCTUnwrap(parent.attachedSheet))
+            creation.create()
+            try await settle()
+            let replacement = DialogAppearance.visibleWindow(for: try XCTUnwrap(form.attachedSheet))
+            XCTAssertFalse(NativeFocusAppearance.isVisible(in: replacement))
+            _ = try action("Move to Trash and Clone Again", in: replacement)
+            try escape(replacement)
+            try await settle()
+            XCTAssertNil(creation.prompt)
+            XCTAssertTrue(creation.isPresented)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: target.appendingPathComponent("keep.txt").path))
+            creation.create()
+            try await settle()
+            let confirmed = DialogAppearance.visibleWindow(for: try XCTUnwrap(form.attachedSheet))
+            try action("Move to Trash and Clone Again", in: confirmed).performClick(nil)
+            try await settle()
+            XCTAssertFalse(creation.isPresented)
+            XCTAssertEqual(attempts, 1)
+            let retry = DialogAppearance.visibleWindow(for: try XCTUnwrap(parent.attachedSheet))
+            XCTAssertFalse(NativeFocusAppearance.isVisible(in: retry))
+            let retryButton = try action("Retry Clone", in: retry)
+            XCTAssertTrue(retryButton.isEnabled, "A background project's failure alert must remain interactive")
+            retryButton.performClick(nil)
+            try await settle()
+            XCTAssertEqual(attempts, 2)
+            XCTAssertFalse(creation.busy)
+            XCTAssertNil(creation.prompt)
+            XCTAssertNil(parent.attachedSheet)
+            XCTAssertNotNil(store.repository)
+            XCTAssertEqual(try String(contentsOf: trash.appendingPathComponent("keep.txt")), "keep")
+        }
     }
 
     private func activateFixture(_ window: NSWindow) async throws {
@@ -693,6 +854,121 @@ final class DialogAppearanceTests: XCTestCase {
         XCTAssertEqual(DialogAppearance.fileListSummary(large), interactionText("File Count Summary", 21))
         XCTAssertFalse(DialogAppearance.fileListSummary(large).contains("file-0.txt"))
         XCTAssertFalse(DialogAppearance.fileListSummary(large).contains("\n"))
+    }
+
+    private struct ForcePushSheetFixture: View {
+        @ObservedObject var model: SheetModel
+        let preview: ForcePushPreview
+        var body: some View {
+            Text("Parent").frame(width: 500, height: 400)
+                .auvGitSheet(isPresented: $model.presented) {
+                    ForcePushConfirmation(preview: preview, cancel: { model.presented = false },
+                        execute: { model.confirmations += 1; model.presented = false })
+                }
+        }
+    }
+
+    func testForcePushDefaultCancelUsesNativeFocusAndEqualButtonHeights() throws {
+        try runApplicationFixture {
+            let app = NSApplication.shared, policy = NSApplication.shared.activationPolicy()
+            let originalAppearance = app.appearance
+            app.setActivationPolicy(.regular)
+            defer { app.appearance = originalAppearance; app.setActivationPolicy(policy) }
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: root) }
+            for arguments in [["init", "-b", "main"], ["config", "user.name", "Fixture"],
+                ["config", "user.email", "fixture@example.invalid"],
+                ["commit", "--allow-empty", "-m", "local"],
+                ["commit", "--allow-empty", "-m", "remote"],
+                ["update-ref", "refs/remotes/origin/main", "HEAD"],
+                ["update-ref", "refs/heads/main", "HEAD~1"],
+                ["remote", "add", "origin", "https://example.invalid/fixture.git"],
+                ["config", "branch.main.remote", "origin"],
+                ["config", "branch.main.merge", "refs/heads/main"]] {
+                _ = try await GitProcess.run(at: root, arguments: arguments)
+            }
+            let preview = try await GitRepository(url: root).cachedForcePushPreview()
+            let value = try XCTUnwrap(preview)
+            for dark in [false, true] {
+                app.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+                let model = SheetModel()
+                let parent = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 400),
+                    styleMask: [.titled], backing: .buffered, defer: false)
+                parent.isReleasedWhenClosed = false
+                parent.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+                parent.contentView = NSHostingView(rootView: ForcePushSheetFixture(model: model, preview: value)
+                    .environment(\.colorScheme, dark ? .dark : .light))
+                defer { if let sheet = parent.attachedSheet { parent.endSheet(sheet) }; parent.close() }
+                try await self.activateFixture(parent)
+                model.presented = true
+                for _ in 0..<40 { try await Task.sleep(for: .milliseconds(10)) }
+                try await self.ensureApplicationActive()
+                let panel = DialogAppearance.visibleWindow(for: try XCTUnwrap(parent.attachedSheet))
+                let content = try XCTUnwrap(panel.contentView)
+                func buttons(_ view: NSView) -> [KeyViewProxy.Button] {
+                    (view as? KeyViewProxy.Button).map { [$0] } ?? view.subviews.flatMap(buttons)
+                }
+                let actions = buttons(content)
+                XCTAssertEqual(actions.count, 2)
+                let cancel = try XCTUnwrap(actions.first { $0.title == forcePushText("cancel") })
+                let force = try XCTUnwrap(actions.first { $0.title == forcePushText("action") })
+                XCTAssertTrue(panel.defaultButtonCell === cancel.cell)
+                XCTAssertTrue(cancel.showsDefaultActionFocus)
+                XCTAssertFalse(force.showsDefaultActionFocus)
+                func ringPixels() throws -> Int {
+                    let rect = cancel.convert(cancel.bounds.insetBy(dx: -4, dy: -4), to: content)
+                    let bitmap = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: rect))
+                    content.cacheDisplay(in: rect, to: bitmap)
+                    return (0..<bitmap.pixelsHigh).reduce(0) { count, y in
+                        count + (0..<bitmap.pixelsWide).filter { x in
+                            guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { return false }
+                            return color.blueComponent > color.redComponent + 0.15 && color.blueComponent > color.greenComponent + 0.05
+                        }.count
+                    }
+                }
+                let initialRingPixels = try ringPixels()
+                XCTAssertGreaterThan(initialRingPixels, 20)
+                XCTAssertEqual(cancel.layer?.borderWidth ?? 0, 0)
+                XCTAssertFalse(panel.firstResponder is NSControl)
+                func tab(_ backwards: Bool = false) throws {
+                    let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero,
+                        modifierFlags: backwards ? .shift : [], timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: panel.windowNumber, context: nil, characters: "\t",
+                        charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: 48))
+                    app.sendEvent(event)
+                }
+                XCTAssertEqual(cancel.frame.height, AuvGitDialogButtonStyle.height, accuracy: 0.5)
+                XCTAssertEqual(cancel.frame.height, force.frame.height, accuracy: 0.5)
+                let cancelRect = cancel.convert(cancel.bounds, to: content)
+                let forceRect = force.convert(force.bounds, to: content)
+                XCTAssertEqual(cancelRect.minY, forceRect.minY, accuracy: 0.5)
+                XCTAssertEqual(cancel.focusRingMaskBounds.height, force.focusRingMaskBounds.height, accuracy: 0.5)
+                try tab()
+                XCTAssertTrue(panel.firstResponder === force, "Tab must advance from the indicated default Cancel to the confirmation action")
+                try tab(true)
+                XCTAssertTrue(panel.firstResponder === cancel)
+                try tab(true)
+                XCTAssertTrue(panel.firstResponder === force, "Shift-Tab must wrap through both actions")
+                try tab()
+                XCTAssertTrue(panel.firstResponder === cancel)
+                XCTAssertGreaterThanOrEqual(try ringPixels(), initialRingPixels * 3 / 4,
+                    "Wrapping back to the default action must retain its visible focus outline in both appearances")
+                if let path = ProcessInfo.processInfo.environment["AUVGIT_FORCE_PUSH_PREVIEW"],
+                   let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) {
+                    content.cacheDisplay(in: content.bounds, to: bitmap)
+                    try bitmap.representation(using: .png, properties: [:])?.write(
+                        to: URL(fileURLWithPath: path + (dark ? "-dark.png" : "-light.png")))
+                }
+                let escape = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: panel.windowNumber, context: nil,
+                    characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
+                app.sendEvent(escape)
+                for _ in 0..<30 { try await Task.sleep(for: .milliseconds(10)) }
+                XCTAssertFalse(model.presented)
+                XCTAssertEqual(model.confirmations, 0, "Checking default focus must never force-push")
+            }
+        }
     }
 
     func testNativeFrameIsHiddenBeforeShellInstallation() {

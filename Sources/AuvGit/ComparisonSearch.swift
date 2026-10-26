@@ -111,7 +111,7 @@ struct ComparisonSearchPopover: View {
         }.controlSize(.small).padding(14).frame(width: 400).onExitCommand(perform: close).background(ComparisonKeyboardRegion(standalone: true, commands: [.compareFind]) { _ in
             return true
         })
-        .nativeFocusRoot(focusesOnPresentation: true)
+        .nativeFocusRoot()
         .task(id: query) {
             guard let query else { return }
             do { try await Task.sleep(for: .milliseconds(150)) } catch { return }

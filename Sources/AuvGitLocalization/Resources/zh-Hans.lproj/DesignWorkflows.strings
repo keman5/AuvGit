@@ -47,3 +47,9 @@
 "Commits to push" = "将要推送的提交";
 "No outgoing commits" = "没有需要推送的提交";
 "No upstream branch is configured" = "尚未配置上游分支";
+"Destination already exists" = "目标文件夹已存在";
+"Move the existing folder to Trash and clone again? All existing contents will be moved to Trash." = "是否将现有文件夹移入废纸篓并重新克隆？该文件夹中的全部内容都会移入废纸篓。";
+"Move to Trash and Clone Again" = "移入废纸篓并重新克隆";
+"Clone failed" = "克隆失败";
+"Retry cloning this repository?" = "是否重试克隆此仓库？";
+"The destination contains the clone source. Choose another destination." = "目标文件夹包含克隆源，请选择其他目标位置。";

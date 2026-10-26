@@ -147,6 +147,19 @@ final class NativeFocusCoordinator: ObservableObject {
             target.acknowledged = target.request
             return true
         }
+        // A button-only dialog already indicates its default action without
+        // taking first responder. The first Tab advances from that cue rather
+        // than apparently selecting the same action a second time.
+        func hasInput(in view: NSView) -> Bool {
+            guard !view.isHiddenOrHasHiddenAncestor else { return false }
+            if let field = view as? NSTextField, field.isEditable, field.isEnabled { return true }
+            if let editor = view as? NSTextView, editor.isEditable, !editor.isFieldEditor { return true }
+            return view.subviews.contains { hasInput(in: $0) }
+        }
+        if let content = window.contentView, !hasInput(in: content),
+           let button = window.defaultButtonCell?.controlView,
+           let next = backwards ? button.previousValidKeyView : button.nextValidKeyView,
+           isAvailable(next, in: window), window.makeFirstResponder(next) { return true }
         // NSWindow.selectNextKeyView cannot always enter a SwiftUI button loop
         // when the window itself owns first responder. Start at its content.
         if let content = window.contentView,
@@ -280,10 +293,63 @@ struct KeyViewProxy: NSViewRepresentable {
         }
     }
     final class Button: NSButton {
+        /// AppKit otherwise dims the title while retaining the accent bezel.
+        /// A muted surface keeps disabled actions distinct without dimming text.
+        final class Cell: NSButtonCell {
+            private var usesDisabledPalette: Bool {
+                guard let button = controlView as? Button else { return false }
+                return button.isPrimaryAction && !button.isCheckbox && !button.isEnabled
+            }
+            override func drawBezel(withFrame frame: NSRect, in controlView: NSView) {
+                guard usesDisabledPalette else { super.drawBezel(withFrame: frame, in: controlView); return }
+                let dark = controlView.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                (dark ? NSColor(srgbRed: 0.20, green: 0.26, blue: 0.33, alpha: 1)
+                      : NSColor(srgbRed: 0.85, green: 0.89, blue: 0.94, alpha: 1)).setFill()
+                NSBezierPath(roundedRect: frame.insetBy(dx: 1, dy: 1), xRadius: 5, yRadius: 5).fill()
+            }
+            override func drawTitle(_ title: NSAttributedString, withFrame frame: NSRect, in controlView: NSView) -> NSRect {
+                guard usesDisabledPalette else { return super.drawTitle(title, withFrame: frame, in: controlView) }
+                let dark = controlView.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                let readableTitle = NSMutableAttributedString(attributedString: title)
+                readableTitle.addAttribute(.foregroundColor,
+                    value: dark ? NSColor(srgbRed: 0.85, green: 0.89, blue: 0.94, alpha: 1)
+                                : NSColor(srgbRed: 0.25, green: 0.30, blue: 0.37, alpha: 1),
+                    range: NSRange(location: 0, length: readableTitle.length))
+                readableTitle.draw(in: frame)
+                return frame
+            }
+        }
         var activate: (() -> Void)?
         var declaredKeyEquivalent: String?
         var isPrimaryAction = false
         var isCheckbox = false
+        private(set) var showsDefaultActionFocus = false
+        /// The default-action cue is visual only; it never takes first responder.
+        func updateDefaultActionIndicator() {
+            let outlined = !isCheckbox && isEnabled && !isHiddenOrHasHiddenAncestor &&
+                window?.isKeyWindow == true && window?.defaultButtonCell === cell &&
+                !NativeFocusAppearance.isVisible(in: window)
+            if showsDefaultActionFocus != outlined {
+                showsDefaultActionFocus = outlined
+                needsDisplay = true
+                noteFocusRingMaskChanged()
+            }
+        }
+        override func draw(_ dirtyRect: NSRect) {
+            super.draw(dirtyRect)
+            // Borderless dialog panels do not reliably paint AppKit's automatic
+            // ring after traversing the key-view loop. Use the same native mask
+            // as the default-action cue for the actual keyboard target too.
+            let keyboardFocus = isEnabled && window?.isKeyWindow == true &&
+                window?.firstResponder === self && NativeFocusAppearance.isVisible(in: window)
+            guard showsDefaultActionFocus || keyboardFocus else { return }
+            // Use the native bezel mask, not the view's layout rectangle. The
+            // latter includes alignment padding and makes the default taller.
+            NSGraphicsContext.saveGraphicsState()
+            NSFocusRingPlacement.only.set()
+            super.drawFocusRingMask()
+            NSGraphicsContext.restoreGraphicsState()
+        }
         override var intrinsicContentSize: NSSize {
             var size = super.intrinsicContentSize
             if !isCheckbox { size.height = AuvGitDialogButtonStyle.height }
@@ -293,10 +359,6 @@ struct KeyViewProxy: NSViewRepresentable {
         override var canBecomeKeyView: Bool { acceptsFirstResponder && window != nil }
         override func becomeFirstResponder() -> Bool { needsDisplay = true; noteFocusRingMaskChanged(); return acceptsFirstResponder }
         override func resignFirstResponder() -> Bool { needsDisplay = true; noteFocusRingMaskChanged(); return true }
-        override var focusRingMaskBounds: NSRect { bounds }
-        override func drawFocusRingMask() {
-            NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 5, yRadius: 5).fill()
-        }
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             if let window, window.sheetParent != nil || window is NSPanel {
@@ -322,6 +384,7 @@ struct KeyViewProxy: NSViewRepresentable {
     }
     func makeNSView(context: Context) -> Button {
         let button = Button(title: label, target: nil, action: nil)
+        button.cell = Button.Cell(textCell: label)
         button.target = button; button.action = #selector(Button.invoke(_:))
         button.bezelStyle = .rounded
         button.isCheckbox = checked != nil

@@ -176,10 +176,9 @@ struct CreateRepositorySheet: View {
     @ObservedObject var store: RepositoryStore
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var creation: RepositoryCreationOperation
-    init(store: RepositoryStore, initialClone: Bool? = nil) {
+    init(store: RepositoryStore) {
         self.store = store
         _creation = ObservedObject(wrappedValue: store.creationOperation)
-        store.creationOperation.prepare(initialClone: initialClone)
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -258,11 +257,38 @@ struct CreateRepositorySheet: View {
             }.buttonStyle(AuvGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.controlSize(.small).interactiveDismissDisabled(creation.busy).padding(20).frame(width: 440)
             .nativeFocusRoot(reusingParent: true)
+            .background(RepositoryCreationAlerts(creation: creation, inForm: true))
             .onChange(of: creation.clone) { _, _ in creation.saveDraft() }
             .onChange(of: creation.source) { _, _ in creation.saveDraft() }
             .onChange(of: creation.destination) { _, _ in creation.saveDraft() }
             .onChange(of: creation.cloneDestination) { _, _ in creation.saveDraft() }
             .onDisappear { creation.endPresentation() }
+    }
+}
+
+struct RepositoryCreationAlerts: View {
+    @ObservedObject var creation: RepositoryCreationOperation
+    var inForm = false
+    var body: some View {
+        Color.clear.frame(width: 0, height: 0).auvGitAlert(item: Binding(
+            get: { creation.isPresented == inForm ? creation.prompt : nil },
+            set: { creation.prompt = $0 }
+        )) { prompt in
+            switch prompt {
+            case .replace(let target):
+                return AuvGitAlert(title: workflowText("Destination already exists"),
+                    message: workflowText("Move the existing folder to Trash and clone again? All existing contents will be moved to Trash.") + "\n\n" + target.path,
+                    buttons: [AuvGitAlertButton(workflowText("Cancel"), role: .cancel),
+                        AuvGitAlertButton(workflowText("Move to Trash and Clone Again"), role: .destructive) {
+                            Task { creation.replaceAndCreate(target) }
+                        }])
+            case .retry(let message):
+                return AuvGitAlert(title: workflowText("Clone failed"), message: message + "\n\n" + workflowText("Retry cloning this repository?"),
+                    buttons: [AuvGitAlertButton(workflowText("Cancel"), role: .cancel),
+                        AuvGitAlertButton(workflowText("Retry Clone")) { Task { creation.create() } }])
+            }
+        }
+        .environment(\.isEnabled, true)
     }
 }
 

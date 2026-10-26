@@ -40,11 +40,11 @@ extension View {
     func auvGitSheet<Content: View>(isPresented: Binding<Bool>, onDismiss: (() -> Void)? = nil,
                                     @ViewBuilder content: @escaping () -> Content) -> some View {
         sheet(isPresented: isPresented, onDismiss: onDismiss) {
-            content().nativeFocusRoot(focusesOnPresentation: true).background(Color(nsColor: .windowBackgroundColor)).background(DialogFrameStyle())
+            content().nativeFocusRoot().background(Color(nsColor: .windowBackgroundColor)).background(DialogFrameStyle())
                 .presentationCornerRadius(AuvGitStyle.windowCornerRadius)
         }
     }
-    func auvGitSheet<Item: Identifiable, Content: View>(item: Binding<Item?>, onDismiss: (() -> Void)? = nil, focusesOnPresentation: Bool = true,
+    func auvGitSheet<Item: Identifiable, Content: View>(item: Binding<Item?>, onDismiss: (() -> Void)? = nil, focusesOnPresentation: Bool = false,
                                                        @ViewBuilder content: @escaping (Item) -> Content) -> some View {
         sheet(item: item, onDismiss: onDismiss) { value in
             content(value).nativeFocusRoot(focusesOnPresentation: focusesOnPresentation).background(Color(nsColor: .windowBackgroundColor)).background(DialogFrameStyle())
@@ -62,7 +62,7 @@ extension View {
                      @AuvGitAlertActions actions: @escaping () -> [AuvGitAlertButton]) -> some View {
         auvGitAlert(title, isPresented: isPresented, actions: actions) { EmptyView() }
     }
-    func auvGitAlert<Item: Identifiable>(item: Binding<Item?>, focusesOnPresentation: Bool = true,
+    func auvGitAlert<Item: Identifiable>(item: Binding<Item?>, focusesOnPresentation: Bool = false,
                                          content: @escaping (Item) -> AuvGitAlert) -> some View {
         auvGitSheet(item: item, focusesOnPresentation: focusesOnPresentation) { value in
             let alert = content(value)
@@ -201,6 +201,7 @@ enum DialogAppearance {
             ?? candidates.first { ($0 as? KeyViewProxy.Button)?.isPrimaryAction == true || $0.bezelColor == .controlAccentColor }
             ?? candidates.last { declaredKey($0) == "\u{1b}" }
         window.defaultButtonCell = preferred?.cell as? NSButtonCell
+        candidates.compactMap { $0 as? KeyViewProxy.Button }.forEach { $0.updateDefaultActionIndicator() }
     }
 
     static func confirmClose(title: String, message: String, save: String, discard: String, cancel: String) -> NSApplication.ModalResponse {
@@ -210,7 +211,7 @@ enum DialogAppearance {
                        AuvGitAlertButton(discard, role: .destructive) { NSApp.stopModal(withCode: .alertSecondButtonReturn) },
                        AuvGitAlertButton(cancel, role: .cancel) { NSApp.stopModal(withCode: .alertThirdButtonReturn) }]
         let host = NSHostingView(rootView: AuvGitAlertView(title: title, message: Text(message), buttons: buttons, close: {})
-            .background(Color(nsColor: .windowBackgroundColor)).nativeFocusRoot(focusesOnPresentation: true))
+            .background(Color(nsColor: .windowBackgroundColor)).nativeFocusRoot())
         window.contentView = host
         window.setContentSize(host.fittingSize)
         style(window)
