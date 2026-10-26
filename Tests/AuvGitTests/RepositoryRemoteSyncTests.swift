@@ -4,6 +4,51 @@ import XCTest
 
 @MainActor
 final class RepositoryRemoteSyncTests: XCTestCase {
+    func testSlowRemoteCannotHideAlreadyKnownIncomingUpdatesInLaterProjects() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let remote = root.appendingPathComponent("remote.git"), producer = root.appendingPathComponent("producer")
+        let slow = root.appendingPathComponent("slow"), ready = root.appendingPathComponent("ready")
+        _ = try await GitProcess.run(at: root, arguments: ["init", "--bare", remote.path])
+        _ = try await GitProcess.run(at: root, arguments: ["clone", remote.path, producer.path])
+        for args in [["config", "user.name", "Test"], ["config", "user.email", "test@example.invalid"],
+                     ["commit", "--allow-empty", "-m", "base"], ["push", "origin", "HEAD"]] {
+            _ = try await GitProcess.run(at: producer, arguments: args)
+        }
+        for path in [slow, ready] { _ = try await GitProcess.run(at: root, arguments: ["clone", remote.path, path.path]) }
+        _ = try await GitProcess.run(at: producer, arguments: ["commit", "--allow-empty", "-m", "incoming"])
+        _ = try await GitProcess.run(at: producer, arguments: ["push", "origin", "HEAD"])
+        _ = try await GitProcess.run(at: ready, arguments: ["fetch", "origin"])
+        let wrapper = root.appendingPathComponent("test-git"), started = root.appendingPathComponent("started")
+        try """
+        #!/bin/sh
+        for arg in "$@"; do
+            if [ "$arg" = "ls-remote" ]; then
+                touch '\(started.path)'
+                sleep 30
+            fi
+        done
+        exec /usr/bin/git "$@"
+        """.write(to: wrapper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
+        let key = "auvgit.git.executablePath", previous = UserDefaults.standard.object(forKey: key)
+        UserDefaults.standard.set(wrapper.path, forKey: key)
+        defer { if let previous { UserDefaults.standard.set(previous, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) } }
+        let store = RepositoryStore(persistsSession: false)
+        defer { store.closeTransientSession() }
+        store.recentPaths = [slow.path, ready.path]
+        store.refreshRecentRepositoryStates(addedPaths: [slow.path, ready.path])
+        let deadline = Date().addingTimeInterval(3)
+        while !FileManager.default.fileExists(atPath: started.path), Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: started.path))
+        XCTAssertEqual(store.repositorySyncStates[ready.path]?.behind, 1,
+            "A project with known incoming commits must appear before any slow remote check completes")
+        store.setApplicationActive(false)
+        await store.cancelBackgroundRepositorySync()
+        XCTAssertEqual(store.repositorySyncStates[ready.path]?.behind, 1, "Switching apps must retain the known sidebar state")
+    }
+
     func testNewProjectFetchesImmediatelyWithBackgroundRefreshDisabled() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

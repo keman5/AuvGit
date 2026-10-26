@@ -1206,6 +1206,21 @@ final class RepositoryStore: ObservableObject {
         let paths = ([workspaceProjects?.active.repositoryURL?.path, repositoryURL?.path].compactMap { $0 } + openRepositories + recentPaths).filter { seen.insert($0).inserted }
         nextRemoteSync = nextRemoteSync.filter { paths.contains($0.key) }
         recentSyncTask = Task {
+            // Populate every sidebar row from known refs before waiting on any
+            // network request. A slow remote must not hide another project's updates.
+            await withTaskGroup(of: Void.self) { group in
+                var pending = paths.makeIterator()
+                for _ in 0..<3 {
+                    if let path = pending.next() {
+                        group.addTask { await self.refreshRecentRepositoryLocalState(path: path) }
+                    }
+                }
+                while await group.next() != nil {
+                    if !Task.isCancelled, let path = pending.next() {
+                        group.addTask { await self.refreshRecentRepositoryLocalState(path: path) }
+                    }
+                }
+            }
             var remaining = immediate ? [] : paths
             while !immediateRemoteSyncPaths.isEmpty || !remaining.isEmpty {
                 let isImmediate = !immediateRemoteSyncPaths.isEmpty
@@ -1234,17 +1249,28 @@ final class RepositoryStore: ObservableObject {
                         nextRemoteSync[path] = Date().addingTimeInterval(300)
                     }
                 }
-                guard !Task.isCancelled, let files = try? await GitCommandLog.$suppressRoutineReads.withValue(true, operation: { try await repo.status() }) else { continue }
-                let text = try? await GitCommandLog.$suppressRoutineReads.withValue(true) { try await repo.workflowRead(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"]) }
-                guard applicationActive, !Task.isCancelled, isImmediate || AuvGitPreferences.backgroundRefresh,
-                      (recentPaths + openRepositories + [repositoryURL?.path].compactMap { $0 }).contains(path) else { continue }
-                let counts = text?.split(whereSeparator: { $0.isWhitespace }).compactMap { Int($0) } ?? []
-                publishRepositoryChangeCount(files.count, path: path)
-                let state = RepositorySyncState(ahead: counts.count == 2 ? counts[0] : nil, behind: counts.count == 2 ? counts[1] : nil, conflicts: files.filter(\.isConflict).count)
-                publishRepositorySyncState(state, path: path)
+                await refreshRecentRepositoryLocalState(path: path)
             }
             recentSyncTask = nil
         }
+    }
+    private func refreshRecentRepositoryLocalState(path: String) async {
+        func mayPublish() -> Bool {
+            applicationActive && !Task.isCancelled &&
+            (recentPaths + openRepositories + [repositoryURL?.path].compactMap { $0 }).contains(path) &&
+            !Self.stores.allObjects.contains(where: { $0.isBusy && ($0.repositoryURL == nil || $0.repositoryURL?.path == path) })
+        }
+        guard mayPublish() else { return }
+        let repo = GitRepository(url: URL(fileURLWithPath: path))
+        guard let files = try? await GitCommandLog.$suppressRoutineReads.withValue(true, operation: { try await repo.status() }) else { return }
+        let text = try? await GitCommandLog.$suppressRoutineReads.withValue(true) {
+            try await repo.workflowRead(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
+        }
+        guard mayPublish() else { return }
+        let counts = text?.split(whereSeparator: { $0.isWhitespace }).compactMap { Int($0) } ?? []
+        publishRepositoryChangeCount(files.count, path: path)
+        publishRepositorySyncState(RepositorySyncState(ahead: counts.count == 2 ? counts[0] : nil,
+            behind: counts.count == 2 ? counts[1] : nil, conflicts: files.filter(\.isConflict).count), path: path)
     }
     private func resetMainHistorySelection() {
         historyRef = nil; historyPath = nil; selectedCommit = nil; selectedCommitPath = nil; commitFiles = []
