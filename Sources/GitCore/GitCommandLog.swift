@@ -143,6 +143,15 @@ public enum GitFailureSummary {
     }
     public static func key(for message: String) -> String? {
         let text = message.lowercased()
+        let mergeMessages = [
+            "Merge commits must use a merge instruction; converting one to pick would flatten topology",
+            "Merge requires a commit and label", "Merge source must be a merge commit", "Merge requires existing labels",
+            "Select a valid mainline parent for the merge commit", "Mainline parent is only valid for merge commits",
+            "Resolve the existing local conflicts before pulling.",
+            "Finish the current merge, rebase, cherry-pick or revert before pulling."
+        ]
+        if let key = mergeMessages.first(where: { text == $0.lowercased() }) { return key }
+        if text.contains("you have not concluded your merge") { return "Finish or abort the current merge before continuing" }
         if text.contains("finish or abort the active git operation before resetting") { return "Finish or abort the active Git operation before resetting" }
         if text.contains("repository or head changed. reopen the reset confirmation.") { return "Repository or HEAD changed. Reopen the reset confirmation." }
         if text.contains("stale info") { return "Remote changed; preview and confirm force push again" }
@@ -170,7 +179,7 @@ public enum GitFailureSummary {
         if text.contains("repository not found") { return "Remote repository unavailable" }
         if text.contains("unknown revision") || text.contains("bad revision") || text.contains("not a valid object") || text.contains("needed a single revision") || text.contains("pathspec") { return "Revision or path not found" }
         if text.contains("unable to auto-detect email") || text.contains("author identity unknown") || text.contains("empty ident") { return "Git author identity is not configured" }
-        if text.contains("unmerged") || text.contains("resolve your current index") || text.contains("merge conflict") { return "Resolve conflicts before continuing" }
+        if text.contains("unmerged") || text.contains("resolve your current index") || text.contains("merge conflict") || text.contains("automatic merge failed") { return "Resolve conflicts before continuing" }
         if text.contains("permission denied") || text.contains("operation not permitted") || text.contains("read-only file system") { return "Permission denied" }
         return nil
     }

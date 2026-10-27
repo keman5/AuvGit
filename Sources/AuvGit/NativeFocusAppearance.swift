@@ -38,6 +38,14 @@ final class NativeFocusAppearance: ObservableObject {
         return windows.object(forKey: window)?.isVisible ?? false
     }
 
+    /// AppKit may leave the SwiftUI root, rather than the window, as responder.
+    /// Both represent an idle dialog; text input and controls own their keys.
+    static func hasContainerResponder(in window: NSWindow) -> Bool {
+        guard let responder = window.firstResponder else { return false }
+        return responder === window || (responder === window.contentView &&
+            !(responder is NSControl) && !(responder is NSTextView))
+    }
+
     static func rememberOriginalRing(for view: NSView) {
         originalRings.setObject(NSNumber(value: view.focusRingType.rawValue), forKey: view)
     }
@@ -88,9 +96,9 @@ final class NativeFocusAppearance: ObservableObject {
         if event.type != .keyDown { restoresKeyboardFocus = false; setVisible(false); return false }
         let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
         // The default-action outline does not take first responder. Match its
-        // visible cue with Space only while the window itself owns input;
+        // visible cue with Space while the window or its root owns input;
         // editors and controls keep their normal Space behavior after Tab/click.
-        if event.keyCode == 49, flags.isEmpty, window.firstResponder === window,
+        if event.keyCode == 49, flags.isEmpty, Self.hasContainerResponder(in: window),
            window.isKeyWindow, let button = window.defaultButtonCell?.controlView as? KeyViewProxy.Button {
             button.updateDefaultActionIndicator()
             if button.showsDefaultActionFocus {

@@ -138,7 +138,7 @@ final class NativeFocusCoordinator: ObservableObject {
         entryResponder?.scope = nil; entryResponder = nil
     }
     func enterKeyViewLoop(backwards: Bool) -> Bool {
-        guard let window, window.firstResponder === window, window.attachedSheet == nil else { return false }
+        guard let window, NativeFocusAppearance.hasContainerResponder(in: window), window.attachedSheet == nil else { return false }
         appearance?.beginNavigation()
         window.recalculateKeyViewLoop()
         let available = targets.values.filter { $0.view.map { isAvailable($0, in: window) } == true }

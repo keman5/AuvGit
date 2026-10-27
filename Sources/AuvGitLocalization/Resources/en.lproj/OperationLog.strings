@@ -77,3 +77,13 @@
 "Reusing objects" = "Reusing objects";
 
 "Git index is corrupt; workspace changes are unavailable." = "Git index is corrupt; workspace changes are unavailable.";
+
+"Merge commits must use a merge instruction; converting one to pick would flatten topology" = "Merge commits must use a merge instruction; converting one to pick would flatten topology";
+"Merge requires a commit and label" = "Merge requires a commit and label";
+"Merge source must be a merge commit" = "Merge source must be a merge commit";
+"Merge requires existing labels" = "Merge requires existing labels";
+"Select a valid mainline parent for the merge commit" = "Select a valid mainline parent for the merge commit";
+"Mainline parent is only valid for merge commits" = "Mainline parent is only valid for merge commits";
+"Resolve the existing local conflicts before pulling." = "Resolve the existing local conflicts before pulling.";
+"Finish the current merge, rebase, cherry-pick or revert before pulling." = "Finish the current merge, rebase, cherry-pick or revert before pulling.";
+"Finish or abort the current merge before continuing" = "Finish or abort the current merge before continuing";

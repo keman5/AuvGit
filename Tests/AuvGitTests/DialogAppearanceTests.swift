@@ -185,28 +185,38 @@ final class DialogAppearanceTests: XCTestCase {
             app.sendEvent(space())
             XCTAssertEqual(activations, 1)
             XCTAssertTrue(visible.firstResponder === visible)
+            let content = try XCTUnwrap(visible.contentView)
+            XCTAssertTrue(visible.makeFirstResponder(content))
+            XCTAssertTrue(visible.firstResponder === content)
+            app.sendEvent(space())
+            XCTAssertEqual(activations, 2, "SwiftUI's hosting view may own input instead of the panel on older macOS")
+            XCTAssertTrue(visible.firstResponder === content, "Activating the default must not force control focus")
             XCTAssertTrue(appearance.handle(space(repeating: true)))
-            XCTAssertEqual(activations, 1, "Holding Space must not repeat an operation")
-            XCTAssertFalse(appearance.handle(space(flags: .command)))
+            XCTAssertEqual(activations, 2, "Holding Space must not repeat an operation")
+            for flags: NSEvent.ModifierFlags in [.command, .option, .control, .shift] {
+                XCTAssertFalse(appearance.handle(space(flags: flags)))
+            }
             primary.isEnabled = false
             XCTAssertFalse(appearance.handle(space()))
             primary.isEnabled = true
             let inputHost = NSHostingView(rootView: TextField("Input", text: .constant("")))
-            let inputWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 250, height: 80), styleMask: [.titled], backing: .buffered, defer: false)
-            inputWindow.isReleasedWhenClosed = false; inputWindow.contentView = inputHost
-            defer { inputWindow.close() }
+            inputHost.frame = NSRect(x: 0, y: 0, width: 250, height: 80)
+            content.addSubview(inputHost)
+            defer { inputHost.removeFromSuperview() }
             @MainActor func input(in view: NSView) -> NSTextField? {
                 (view as? NSTextField) ?? view.subviews.lazy.compactMap { input(in: $0) }.first
             }
             inputHost.layoutSubtreeIfNeeded()
             let field = try XCTUnwrap(input(in: inputHost))
-            XCTAssertTrue(inputWindow.makeFirstResponder(field))
-            let editorSpace = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
-                windowNumber: inputWindow.windowNumber, context: nil, characters: " ", charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49)!
-            let inputAppearance = NativeFocusAppearance.forWindow(inputWindow)
-            XCTAssertTrue(inputWindow.makeFirstResponder(field))
-            XCTAssertFalse(inputAppearance.handle(editorSpace), "Space in an editor must remain text input")
-            XCTAssertEqual(activations, 1)
+            XCTAssertTrue(visible.makeFirstResponder(field))
+            XCTAssertFalse(appearance.handle(space()), "Space in a field editor must remain text input even with a default action")
+            let editor = NSTextView(frame: NSRect(x: 0, y: 0, width: 250, height: 80))
+            content.addSubview(editor)
+            defer { editor.removeFromSuperview() }
+            XCTAssertTrue(visible.makeFirstResponder(editor))
+            app.sendEvent(space())
+            XCTAssertEqual(editor.string, " ", "A default action must not consume Space typed into a text view")
+            XCTAssertEqual(activations, 2)
         }
     }
 
@@ -246,8 +256,12 @@ final class DialogAppearanceTests: XCTestCase {
                     try bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
                 }
                 var reached = Set<String>()
-                for _ in 0..<3 {
+                if presentation == 1 {
+                    XCTAssertTrue(visible.makeFirstResponder(visible.contentView))
+                }
+                for step in 0..<3 {
                     app.sendEvent(key(visible, code: 48, characters: "\t"))
+                    if step == 0 { XCTAssertEqual((visible.firstResponder as? NSButton)?.title, networkText("fetch")) }
                     reached.insert(try XCTUnwrap(visible.firstResponder as? NSButton).title)
                     XCTAssertNotEqual((visible.firstResponder as? NSButton)?.focusRingType, NSFocusRingType.none)
                     NativeFocusAppearance.forWindow(visible).apply()

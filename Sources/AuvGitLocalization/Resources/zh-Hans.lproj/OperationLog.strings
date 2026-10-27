@@ -77,3 +77,13 @@
 "Reusing objects" = "正在复用对象";
 
 "Git index is corrupt; workspace changes are unavailable." = "Git 索引已损坏，无法读取工作区变更。";
+
+"Merge commits must use a merge instruction; converting one to pick would flatten topology" = "合并提交必须使用 merge 指令；改成 pick 会丢失分支合并关系。";
+"Merge requires a commit and label" = "merge 指令需要指定提交和标签。";
+"Merge source must be a merge commit" = "merge 指令的来源必须是合并提交。";
+"Merge requires existing labels" = "merge 指令必须引用计划中已定义的标签。";
+"Select a valid mainline parent for the merge commit" = "请为合并提交选择有效的主线父提交。";
+"Mainline parent is only valid for merge commits" = "只有合并提交才能指定主线父提交。";
+"Resolve the existing local conflicts before pulling." = "请先解决现有的本地冲突，再拉取代码。";
+"Finish the current merge, rebase, cherry-pick or revert before pulling." = "请先完成或中止当前合并、变基、挑选或撤销操作，再拉取代码。";
+"Finish or abort the current merge before continuing" = "请先完成或中止当前合并，再继续操作。";

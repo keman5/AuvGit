@@ -77,3 +77,13 @@
 "Reusing objects" = "オブジェクトを再利用中";
 
 "Git index is corrupt; workspace changes are unavailable." = "Git インデックスが破損しているため、作業ツリーの変更を読み取れません。";
+
+"Merge commits must use a merge instruction; converting one to pick would flatten topology" = "マージコミットには merge 命令を使用してください。pick に変更するとブランチのマージ関係が失われます。";
+"Merge requires a commit and label" = "merge 命令にはコミットとラベルを指定してください。";
+"Merge source must be a merge commit" = "merge 命令のソースにはマージコミットを指定してください。";
+"Merge requires existing labels" = "merge 命令には計画内で定義済みのラベルを指定してください。";
+"Select a valid mainline parent for the merge commit" = "マージコミットの有効なメインライン親を選択してください。";
+"Mainline parent is only valid for merge commits" = "メインライン親を指定できるのはマージコミットのみです。";
+"Resolve the existing local conflicts before pulling." = "既存のローカル競合を解決してからプルしてください。";
+"Finish the current merge, rebase, cherry-pick or revert before pulling." = "現在のマージ、リベース、チェリーピック、またはリバートを完了または中止してからプルしてください。";
+"Finish or abort the current merge before continuing" = "現在のマージを完了または中止してから続行してください。";

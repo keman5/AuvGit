@@ -5,6 +5,23 @@ import Foundation
 final class LocalizationTests: XCTestCase {
     private let languages = ["en", "zh-Hans", "zh-Hant", "ja"]
 
+    func testMergeFailureMessagesDoNotFallBackToEnglish() throws {
+        let messages = [
+            "Merge commits must use a merge instruction; converting one to pick would flatten topology",
+            "Merge requires a commit and label", "Merge source must be a merge commit", "Merge requires existing labels",
+            "Select a valid mainline parent for the merge commit", "Mainline parent is only valid for merge commits",
+            "Resolve the existing local conflicts before pulling.",
+            "Finish the current merge, rebase, cherry-pick or revert before pulling.",
+            "Finish or abort the current merge before continuing"
+        ]
+        for code in languages where code != "en" {
+            for message in messages {
+                let translated = L10n.text(message, table: "OperationLog", arguments: [], language: try XCTUnwrap(AppLanguage(rawValue: code)))
+                XCTAssertNotEqual(translated, message, "Missing \(code): \(message)")
+            }
+        }
+    }
+
     func testSystemLanguageResolutionAndFallback() {
         let cases: [(String, [String], String)] = [
             ("en", ["ja-JP"], "en"),

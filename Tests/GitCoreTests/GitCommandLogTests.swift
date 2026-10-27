@@ -8,6 +8,22 @@ private final class CommandRecordCapture: @unchecked Sendable {
     var values: [GitCommandRecord] { lock.lock(); defer { lock.unlock() }; return records }
 }
 final class GitCommandLogTests: XCTestCase {
+    func testMergeFailuresHaveSpecificLocalizedSummaries() {
+        let messages = [
+            "Merge commits must use a merge instruction; converting one to pick would flatten topology",
+            "Merge requires a commit and label", "Merge source must be a merge commit", "Merge requires existing labels",
+            "Select a valid mainline parent for the merge commit", "Mainline parent is only valid for merge commits",
+            "Resolve the existing local conflicts before pulling.",
+            "Finish the current merge, rebase, cherry-pick or revert before pulling."
+        ]
+        for message in messages {
+            XCTAssertEqual(GitFailureSummary.key(for: message), message)
+            XCTAssertEqual(GitFailureSummary.message(for: message, localize: { "translated: " + $0 }), "translated: " + message)
+        }
+        XCTAssertEqual(GitFailureSummary.key(for: "fatal: You have not concluded your merge (MERGE_HEAD exists).\nPlease, commit your changes before you merge."), "Finish or abort the current merge before continuing")
+        XCTAssertEqual(GitFailureSummary.key(for: "Automatic merge failed; fix conflicts and then commit the result."), "Resolve conflicts before continuing")
+        XCTAssertNil(GitFailureSummary.key(for: "Merge diagnostic that is not recognized"))
+    }
     func testUnchangedBranchAndRemoteEditsRunNoGitCommands() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
