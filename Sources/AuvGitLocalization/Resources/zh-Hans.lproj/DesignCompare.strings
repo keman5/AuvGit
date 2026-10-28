@@ -7,7 +7,7 @@
 "Sync" = "同步滚动";
 "Wrap" = "换行";
 "Lines" = "行号";
-"Ours → Result ← Theirs" = "Ours → Result ← Theirs";
+"Ours → Result ← Theirs" = "我方 → 合并结果 ← 对方";
 "HEAD ← Index ← Working Tree" = "HEAD ← 暂存区 ← 工作区";
 "Edit the result to resolve conflicts" = "编辑结果以解决冲突";
 "Edit the working tree to save your changes" = "在工作区编辑并保存修改";

@@ -47,9 +47,3 @@
 "Commits to push" = "プッシュするコミット";
 "No outgoing commits" = "プッシュするコミットはありません";
 "No upstream branch is configured" = "上流ブランチが設定されていません";
-"Destination already exists" = "保存先フォルダは既に存在します";
-"Move the existing folder to Trash and clone again? All existing contents will be moved to Trash." = "既存のフォルダをゴミ箱に移動して、再度クローンしますか？フォルダ内のすべての内容がゴミ箱に移動します。";
-"Move to Trash and Clone Again" = "ゴミ箱に移動して再クローン";
-"Clone failed" = "クローンに失敗しました";
-"Retry cloning this repository?" = "このリポジトリのクローンを再試行しますか？";
-"The destination contains the clone source. Choose another destination." = "保存先フォルダにクローン元が含まれています。別の保存先を選択してください。";

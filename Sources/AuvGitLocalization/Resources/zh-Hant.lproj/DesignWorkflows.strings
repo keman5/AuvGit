@@ -47,9 +47,3 @@
 "Commits to push" = "將要推送的提交";
 "No outgoing commits" = "沒有需要推送的提交";
 "No upstream branch is configured" = "尚未設定上游分支";
-"Destination already exists" = "目標資料夾已存在";
-"Move the existing folder to Trash and clone again? All existing contents will be moved to Trash." = "是否將現有資料夾移至垃圾桶並重新複製？該資料夾中的全部內容都會移至垃圾桶。";
-"Move to Trash and Clone Again" = "移至垃圾桶並重新複製";
-"Clone failed" = "複製失敗";
-"Retry cloning this repository?" = "是否重試複製此儲存庫？";
-"The destination contains the clone source. Choose another destination." = "目標資料夾包含複製來源，請選擇其他目標位置。";

@@ -9,6 +9,15 @@ final class WorkspaceProjects: ObservableObject {
     @Published private(set) var sessions: [RepositoryStore]
     private var observers: [ObjectIdentifier: AnyCancellable] = [:]
     private var sessionObservers: [ObjectIdentifier: AnyCancellable] = [:]
+    private var creationObservers: [ObjectIdentifier: AnyCancellable] = [:]
+
+    var creationPromptOperation: RepositoryCreationOperation? {
+        sessions.lazy.map(\.creationOperation).first { !$0.isPresented && $0.prompt != nil }
+    }
+
+    var creationPresentationStore: RepositoryStore? {
+        sessions.first { $0.creationOperation.isPresented }
+    }
 
     init(initial supplied: RepositoryStore? = nil) {
         let initial = supplied ?? RepositoryStore()
@@ -25,6 +34,9 @@ final class WorkspaceProjects: ObservableObject {
         sessionObservers[ObjectIdentifier(store)] = store.objectWillChange
             .debounce(for: .milliseconds(500), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.sessions.first?.flushSession() }
+        creationObservers[ObjectIdentifier(store)] = store.creationOperation.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
     }
 
     @discardableResult
@@ -72,7 +84,7 @@ struct WorkspaceProjectsView: View {
     var usesBorderlessToolbar = false
     var shellToolbarModel: BorderlessToolbarModel? = nil
 
-    var body: some View {
+    @ViewBuilder private var projectContent: some View {
         if !usesBorderlessToolbar && EightPointWindowShell.usesBorderlessMode {
             MainWindow(store: projects.active)
         } else {
@@ -88,5 +100,24 @@ struct WorkspaceProjectsView: View {
                 }
             }
         }
+    }
+
+    var body: some View {
+        projectContent
+            .auvGitSheet(isPresented: Binding(
+                get: { projects.creationPresentationStore != nil },
+                set: { presented in
+                    if !presented { projects.creationPresentationStore?.creationOperation.isPresented = false }
+                }
+            )) {
+                if let store = projects.creationPresentationStore {
+                    CreateRepositorySheet(store: store).environment(\.isEnabled, true)
+                }
+            }
+            .background {
+                if let creation = projects.creationPromptOperation {
+                    RepositoryCreationAlerts(creation: creation)
+                }
+            }
     }
 }

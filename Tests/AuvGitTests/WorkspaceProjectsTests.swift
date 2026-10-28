@@ -1,9 +1,24 @@
 import XCTest
+import Combine
 @testable import AuvGit
 @testable import GitCore
 
 @MainActor
 final class WorkspaceProjectsTests: XCTestCase {
+    func testWorkspacePublishesRepositoryCreationPresentation() {
+        let store = RepositoryStore(persistsSession: false)
+        let projects = WorkspaceProjects(initial: store)
+        var changes = 0
+        let observation = projects.objectWillChange.sink { changes += 1 }
+
+        store.creationOperation.present(initialClone: true)
+
+        XCTAssertGreaterThan(changes, 0)
+        XCTAssertTrue(projects.creationPresentationStore === store)
+        store.creationOperation.isPresented = false
+        withExtendedLifetime(observation) {}
+    }
+
     func testForegroundSyncCountsReachEveryProjectSidebarAndClearAfterPush() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

@@ -158,6 +158,40 @@ final class RepositoryCreationOperationTests: XCTestCase {
         XCTAssertFalse(store.isBusy)
     }
 
+    func testBackgroundCloneFailureRemainsPresentableWithoutReplacingSelectedProject() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = root.appendingPathComponent("first"), second = root.appendingPathComponent("second")
+        for url in [first, second] { _ = try await GitRepository.initialize(at: url) }
+        let store = RepositoryStore(persistsSession: false)
+        var release: CheckedContinuation<Void, Never>?
+        let operation = RepositoryCreationOperation(store: store) { _, _, _, _, _ in
+            await withCheckedContinuation { release = $0 }
+            throw GitError("remote clone stopped")
+        }
+        store.creationOperation = operation
+        let projects = WorkspaceProjects(initial: store)
+        defer { for session in projects.sessions { session.closeTransientSession() } }
+        await store.open(first)
+        operation.clone = true
+        operation.source = "https://example.invalid/team/repo.git"
+        operation.destination = root.appendingPathComponent("clone").path
+        operation.create()
+        let deadline = Date().addingTimeInterval(8)
+        while release == nil, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertNotNil(release)
+        await store.open(second)
+        let selected = projects.active
+        XCTAssertFalse(selected === store)
+        release?.resume(); release = nil
+        try await settle(operation)
+
+        XCTAssertTrue(projects.active === selected, "A background failure must not interrupt work in the selected project")
+        XCTAssertTrue(projects.creationPromptOperation === operation,
+            "The visible workspace must own presentation of a prompt from a hidden project")
+        guard case .retry = operation.prompt else { return XCTFail("Expected retry prompt") }
+    }
+
     func testExistingDestinationRequiresConfirmationAndKeepsOldContentsInTrash() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

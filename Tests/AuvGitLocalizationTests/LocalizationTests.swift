@@ -5,6 +5,24 @@ import Foundation
 final class LocalizationTests: XCTestCase {
     private let languages = ["en", "zh-Hans", "zh-Hant", "ja"]
 
+    func testCloneConfirmationMessagesUseTheWorkflowTable() throws {
+        let messages = [
+            "Destination already exists",
+            "Move the existing folder to Trash and clone again? All existing contents will be moved to Trash.",
+            "Move to Trash and Clone Again",
+            "Clone failed",
+            "Retry cloning this repository?",
+            "The destination contains the clone source. Choose another destination."
+        ]
+        for code in languages where code != "en" {
+            let language = try XCTUnwrap(AppLanguage(rawValue: code))
+            for message in messages {
+                XCTAssertNotEqual(L10n.text(message, table: "Workflow", arguments: [], language: language), message,
+                    "Clone dialog falls back to English: \(code)/\(message)")
+            }
+        }
+    }
+
     func testMergeFailureMessagesDoNotFallBackToEnglish() throws {
         let messages = [
             "Merge commits must use a merge instruction; converting one to pick would flatten topology",

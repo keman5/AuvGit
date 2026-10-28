@@ -27,6 +27,12 @@
 "SSH authentication failed. Add a private key to your SSH agent and register its public key with the Git server, then retry." = "SSH authentication failed. Add a private key to your SSH agent and register its public key with the Git server, then retry.";
 "Retry Clone" = "Retry Clone";
 "Destination folder" = "Destination folder";
+"Destination already exists" = "Destination already exists";
+"Move the existing folder to Trash and clone again? All existing contents will be moved to Trash." = "Move the existing folder to Trash and clone again? All existing contents will be moved to Trash.";
+"Move to Trash and Clone Again" = "Move to Trash and Clone Again";
+"Clone failed" = "Clone failed";
+"Retry cloning this repository?" = "Retry cloning this repository?";
+"The destination contains the clone source. Choose another destination." = "The destination contains the clone source. Choose another destination.";
 "Choose…" = "Choose…";
 "Create" = "Create";
 "compare" = "Compare two references";

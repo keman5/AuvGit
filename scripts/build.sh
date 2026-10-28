@@ -2,6 +2,11 @@
 set -euo pipefail
 cd "${0:A:h:h}"
 if command -v go >/dev/null 2>&1; then go clean -cache; fi
+if [[ "${1:-}" == --test-localizations ]]; then
+  python3 scripts/check-localizations.py
+  swift test --build-system native --filter LocalizationTests
+  exit
+fi
 if [[ "${1:-}" == --test-disabled-buttons ]]; then
   swift test --build-system native --filter 'DisabledDialogButtonTests|DialogButtonWidthTests|ControlTypographyTests|NativeFocusBridgeTests.testWorkspaceUntrackedCheckboxSupportsTabAndSpace'
   exit
@@ -54,8 +59,10 @@ INSTALL_APP=true
 case "${1:-}" in
   "") ;;
   --no-install) INSTALL_APP=false ;;
-  *) print -u2 "Usage: $0 [--no-install|--test-dialog-focus|--test-clone-dialogs|--test-performance-review|--test-dialog-buttons|--test-file-sorting|--test-refresh|--test-workspace-preview]"; exit 1 ;;
+  *) print -u2 "Usage: $0 [--no-install|--test-localizations|--test-dialog-focus|--test-clone-dialogs|--test-performance-review|--test-dialog-buttons|--test-file-sorting|--test-refresh|--test-workspace-preview]"; exit 1 ;;
 esac
+python3 scripts/check-localizations.py
+rm -rf -- "$PWD/.artifacts"
 # Compile the native icon so macOS 26+ does not wrap the legacy icns in a gray tile.
 ICON_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/auvgit-app-icon.XXXXXX")"
 trap 'rm -rf -- "$ICON_BUILD_DIR"' EXIT
@@ -117,6 +124,13 @@ codesign --force --sign - "$APP"
 # Reusing the bundle directory otherwise leaves Finder's cached icon unchanged.
 touch "$APP/Contents/Resources" "$APP/Contents" "$APP"
 print "Built $APP"
+DMG="$PWD/.artifacts/AuvGit.dmg"
+DMG_ROOT="$ICON_BUILD_DIR/dmg"
+mkdir -p "$DMG_ROOT"
+ditto "$APP" "$DMG_ROOT/AuvGit.app"
+ln -s /Applications "$DMG_ROOT/Applications"
+hdiutil create -volname AuvGit -srcfolder "$DMG_ROOT" -ov -format UDZO "$DMG"
+print "Packaged $DMG"
 if $INSTALL_APP; then
   LOCAL_APP="/Applications/AuvGit.app"
   codesign --verify --strict "$APP"
@@ -137,11 +151,17 @@ let deadline = Date().addingTimeInterval(15)
 while apps.contains(where: { !$0.isTerminated }) && Date() < deadline {
     RunLoop.current.run(until: Date().addingTimeInterval(0.1))
 }
+for app in apps where !app.isTerminated { app.forceTerminate() }
+let forcedDeadline = Date().addingTimeInterval(5)
+while apps.contains(where: { !$0.isTerminated }) && Date() < forcedDeadline {
+    RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+}
 guard apps.allSatisfy({ $0.isTerminated }) else {
     fputs("AuvGit is still running. Local application was not replaced.\n", stderr)
     exit(1)
 }
 SWIFT
+  rm -rf -- "$LOCAL_APP"
   ditto "$APP" "$LOCAL_APP"
   codesign --verify --strict "$LOCAL_APP"
   cmp "$APP/Contents/MacOS/AuvGit" "$LOCAL_APP/Contents/MacOS/AuvGit"
@@ -156,7 +176,7 @@ for legacy in legacyApps {
 }
 let artifacts = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(".artifacts", isDirectory: true)
 for artifact in try FileManager.default.contentsOfDirectory(at: artifacts, includingPropertiesForKeys: nil)
-    where artifact.lastPathComponent != "AuvGit.app" {
+    where !["AuvGit.app", "AuvGit.dmg"].contains(artifact.lastPathComponent) {
     try FileManager.default.trashItem(at: artifact, resultingItemURL: nil)
 }
 SWIFT

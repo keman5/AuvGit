@@ -13,6 +13,23 @@ def table(locale, name):
     path = resources / (locale + '.lproj') / (name + '.strings')
     return json.loads(subprocess.check_output(['plutil', '-convert', 'json', '-o', '-', str(path)]))
 all_tables = {p.stem: table('en', p.stem) for p in (resources / 'en.lproj').glob('*.strings')}
+helpers = {
+    'mainText': 'Main', 'diffText': 'Detail', 'historyText': 'Detail',
+    'historyActionText': 'HistoryActions', 'interactionText': 'Interactions',
+    'compareText': 'Compare', 'diffControlText': 'DiffControls', 'terminalText': 'Terminal',
+    'sessionText': 'SessionWorkflows', 'workflowText': 'Workflow', 'panelText': 'VisualPanels',
+    'compareExtra': 'CompareExtras', 'prefsText': 'Preferences', 'gitPrefsText': 'GitPreferences',
+    'editorPrefsText': 'EditorPreferences', 'designText': 'DesignWorkflows',
+    'designCompareText': 'DesignCompare', 'designWorkspaceText': 'DesignWorkspace',
+    'networkText': 'Network', 'logText': 'LogWindow', 'shortcutText': 'KeyboardShortcuts',
+    'repositoryContextText': 'RepositoryContext', 'sidebarRefinementText': 'SidebarRefinement',
+    'forcePushText': 'ForcePush', 'historyRefinementText': 'HistoryRefinement',
+    'aiCommitText': 'AICommit', 'comparisonSearchText': 'ComparisonSearch',
+    'fileContextText': 'FileContext', 'previewText': 'TextPreview', 'noticeText': 'FloatingNotice',
+    'resolverText': 'Resolver', 'advancedText': 'AdvancedDiff', 'pagedText': 'AdvancedDiff',
+    'largeText': 'LargeComparison', 'compactText': 'CompactWorkspace',
+    'shellToolbarText': 'ShellToolbar',
+}
 for name, original in all_tables.items():
     for locale in locales:
         translated = table(locale, name)
@@ -24,14 +41,10 @@ for name, original in all_tables.items():
                 pattern = r'%(?:([1-9]\d*)\$)?[-+ #0]*(?:\d+|\*)?(?:\.(?:\d+|\*))?((?:hh|ll|[hljztL])?[@diuoxXfFeEgGaAcCsSp])'
                 return Counter(match.group(2) for match in re.finditer(pattern, text.replace('%%', '')))
             assert placeholders(value) == placeholders(translated[key]), f'{locale}/{name}/{key}: placeholder mismatch'
-for filename, helper, name in [('MainWindow.swift', 'mainText', 'Main'), ('DiffPane.swift', 'diffText', 'Detail'), ('HistoryPane.swift', 'historyText', 'Detail')]:
-    source = (root / 'Sources/AuvGit' / filename).read_text()
-    for key in re.findall(r'\b' + helper + r'\("([^"\n]+)"', source):
-        assert key in all_tables[name], f'{filename}: missing {key}'
 # Helpers shared across UI files must be checked at every static call site.
 for path in (root / 'Sources/AuvGit').glob('*.swift'):
     source = path.read_text()
-    for helper, name in [('historyActionText', 'HistoryActions'), ('interactionText', 'Interactions'), ('compareText', 'Compare'), ('diffControlText', 'DiffControls'), ('terminalText', 'Terminal'), ('sessionText', 'SessionWorkflows'), ('workflowText', 'Workflow'), ('panelText', 'VisualPanels'), ('compareExtra', 'CompareExtras'), ('prefsText', 'Preferences'), ('gitPrefsText', 'GitPreferences'), ('editorPrefsText', 'EditorPreferences')]:
+    for helper, name in helpers.items():
         for key in re.findall(r'\b' + helper + r'\("([^"\n]+)"', source):
             assert key in all_tables[name], f'{path.name}: missing {name}/{key}'
     if path.name == 'WorkspaceFilesPane.swift':

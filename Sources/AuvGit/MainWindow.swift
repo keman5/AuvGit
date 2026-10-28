@@ -361,6 +361,7 @@ struct MainWindow: View {
     private var toolbarCanUnstage: Bool { toolbarReady && WorkspaceFileActionTargets.hasEligibleTarget(for: .unstage, files: store.files, selection: toolbarSelection) }
     private var toolbarCanDiscard: Bool { toolbarReady && WorkspaceFileActionTargets.hasEligibleTarget(for: .discard, files: store.files, selection: toolbarSelection) }
     private var handlesStoreEvents: Bool { (usesBorderlessToolbar || !EightPointWindowShell.usesBorderlessMode) && (store.workspaceProjects == nil || store.workspaceProjects?.active === store) }
+    private var handlesCreationPresentation: Bool { store.workspaceProjects == nil }
 
     private var observedContent: some View {
         toolbarContent.onReceive(NotificationCenter.default.publisher(for: .auvGitWorktreeChanged)) { event in
@@ -512,9 +513,16 @@ struct MainWindow: View {
             })
         }
         .auvGitSheet(isPresented: $showTools) { RepositoryTools(store: store) }
-        .auvGitSheet(isPresented: $showCreate) { CreateRepositorySheet(store: store).environment(\.isEnabled, true) }
-        .background(RepositoryCreationAlerts(creation: store.creationOperation))
-        .onReceive(store.creationOperation.$isPresented) { presented in showCreate = presented }
+        .auvGitSheet(isPresented: Binding(
+            get: { handlesCreationPresentation && showCreate },
+            set: { showCreate = $0 }
+        )) { CreateRepositorySheet(store: store).environment(\.isEnabled, true) }
+        .background {
+            if handlesCreationPresentation { RepositoryCreationAlerts(creation: store.creationOperation) }
+        }
+        .onReceive(store.creationOperation.$isPresented) { presented in
+            if handlesCreationPresentation { showCreate = presented }
+        }
         .onChange(of: showCreate) { _, presented in
             if !presented { store.creationOperation.isPresented = false }
         }

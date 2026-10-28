@@ -7,7 +7,7 @@
 "Sync" = "同期";
 "Wrap" = "折り返し";
 "Lines" = "行番号";
-"Ours → Result ← Theirs" = "Ours → Result ← Theirs";
+"Ours → Result ← Theirs" = "自分 → マージ結果 ← 相手";
 "HEAD ← Index ← Working Tree" = "HEAD ← インデックス ← 作業ツリー";
 "Edit the result to resolve conflicts" = "結果を編集して競合を解消";
 "Edit the working tree to save your changes" = "作業ツリーを編集して変更を保存";

@@ -72,7 +72,7 @@
 "systemLanguage" = "跟随系统";
 "fetch" = "获取";
 "pull" = "拉取";
-"push" = "Push";
+"push" = "推送";
 "dismissError" = "关闭错误提示";
 
 "customizeToolbar" = "自定工具栏…";
