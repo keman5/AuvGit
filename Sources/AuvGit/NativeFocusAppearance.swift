@@ -95,6 +95,19 @@ final class NativeFocusAppearance: ObservableObject {
         contextRowFocus.handle(event, in: window)
         if event.type != .keyDown { restoresKeyboardFocus = false; setVisible(false); return false }
         let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        // Custom windows can outlive the SwiftUI scene that owns the Edit menu.
+        // Route Select All to the actual responder before stale menu validation
+        // or remembered workspace scopes can swallow the native editing action.
+        if flags == .command, event.charactersIgnoringModifiers?.lowercased() == "a" {
+            if let text = window.firstResponder as? NSTextView, text.isSelectable {
+                text.selectAll(nil)
+                return true
+            }
+            if let table = window.firstResponder as? NSTableView, table.allowsMultipleSelection {
+                table.selectAll(nil)
+                return true
+            }
+        }
         // The default-action outline does not take first responder. Match its
         // visible cue with Space while the window or its root owns input;
         // editors and controls keep their normal Space behavior after Tab/click.
