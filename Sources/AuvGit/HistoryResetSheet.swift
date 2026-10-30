@@ -24,9 +24,14 @@ struct HistoryResetSheet: View {
             Text(request.commit.hash).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
             if let context { Text(context.reference).font(.caption).foregroundStyle(.secondary) }
             if request.advanced {
-                Picker(text("mode"), selection: $mode) {
-                    ForEach(GitResetMode.allCases, id: \.self) { Text(text($0.rawValue)).tag($0) }
-                }.pickerStyle(.radioGroup)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(text("mode"))
+                    ForEach(GitResetMode.allCases, id: \.self) { option in
+                        KeyViewProxy(label: text(option.rawValue), checked: mode == option, radio: true) {
+                            mode = option
+                        }
+                    }
+                }
             }
             Text(text((request.advanced ? mode : .hard).rawValue + "Message")).font(.caption).foregroundStyle(.secondary)
             if let error { Text(error).font(.caption).foregroundStyle(.red) }

@@ -1,11 +1,124 @@
 import AppKit
 import SwiftUI
+import AuvGitLocalization
 import XCTest
 @testable import GitCore
 @testable import AuvGit
 
 @MainActor
 final class DialogAppearanceTests: XCTestCase {
+    private final class ResetSheetModel: ObservableObject {
+        @Published var request: HistoryResetRequest?
+    }
+    private struct ResetSheetFixture: View {
+        @ObservedObject var model: ResetSheetModel
+        let store: RepositoryStore
+        var body: some View {
+            Text("Reset parent").frame(width: 650, height: 600)
+                .auvGitSheet(item: $model.request) { HistoryResetSheet(store: store, request: $0) }
+        }
+    }
+    func testAdvancedResetClickTargetsKeyboardCancelAndSoftReset() throws {
+        try runApplicationFixture {
+            let app = NSApplication.shared, policy = NSApplication.shared.activationPolicy()
+            app.setActivationPolicy(.regular)
+            defer { app.setActivationPolicy(policy) }
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let repo = try await GitRepository.initialize(at: root)
+            for (key, value) in [("user.name", "Reset Fixture"), ("user.email", "fixture@example.invalid"), ("commit.gpgsign", "false")] {
+                _ = try await repo.workflowRead(["config", key, value])
+            }
+            _ = try await repo.workflowRead(["commit", "--allow-empty", "-m", "Base"])
+            let commits = try await repo.log()
+            let commit = try XCTUnwrap(commits.first)
+            _ = try await repo.workflowRead(["commit", "--allow-empty", "-m", "Second"])
+            let originalHead = try await repo.workflowRevision("HEAD")
+            let draft = root.appendingPathComponent("draft.txt")
+            try "Staged content".write(to: draft, atomically: true, encoding: .utf8)
+            try await repo.stage(paths: ["draft.txt"])
+            try "Unstaged content".write(to: draft, atomically: true, encoding: .utf8)
+            let store = RepositoryStore(persistsSession: false)
+            defer { store.closeTransientSession() }
+            await store.open(root)
+            let model = ResetSheetModel()
+            let parent = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 650, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+            parent.isReleasedWhenClosed = false
+            parent.contentView = NSHostingView(rootView: ResetSheetFixture(model: model, store: store))
+            defer { if let sheet = parent.attachedSheet { parent.endSheet(sheet) }; parent.close() }
+            try await self.activateFixture(parent)
+            model.request = HistoryResetRequest(commit: commit, repositoryURL: try XCTUnwrap(store.repositoryURL), advanced: true)
+            for _ in 0..<60 { try await Task.sleep(for: .milliseconds(10)) }
+            let panel = DialogAppearance.visibleWindow(for: try XCTUnwrap(parent.attachedSheet))
+            let content = try XCTUnwrap(panel.contentView)
+            @MainActor func buttons(_ view: NSView) -> [NSButton] { (view as? NSButton).map { [$0] } ?? view.subviews.flatMap(buttons) }
+            let actions = buttons(content)
+            XCTAssertFalse(panel.firstResponder is NSControl)
+            let confirm = try XCTUnwrap(actions.first { $0.title == L10n.text("confirm", table: "HistoryReset") })
+            XCTAssertTrue(confirm.isEnabled)
+            for mode in GitResetMode.allCases {
+                let button = try XCTUnwrap(actions.first { $0.title == L10n.text(mode.rawValue, table: "HistoryReset") })
+                for x in [CGFloat(8), button.bounds.maxX - 8] {
+                    let point = button.convert(NSPoint(x: x, y: button.bounds.midY), to: content.superview)
+                    XCTAssertTrue(content.hitTest(point) === button, "Radio \(mode) icon and label must receive clicks")
+                }
+                button.performClick(nil)
+                for _ in 0..<5 { try await Task.sleep(for: .milliseconds(10)) }
+                XCTAssertEqual(button.state, .on)
+                XCTAssertEqual(actions.filter { ($0 as? KeyViewProxy.Button)?.isRadio == true && $0.state == .on }.count, 1)
+            }
+            let cancel = try XCTUnwrap(actions.first { $0.title == workflowText("Cancel") })
+            let point = cancel.convert(NSPoint(x: cancel.bounds.midX, y: cancel.bounds.midY), to: content.superview)
+            XCTAssertTrue(content.hitTest(point) === cancel)
+            let escape = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: panel.windowNumber, context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
+            XCTAssertTrue(panel.performKeyEquivalent(with: escape))
+            for _ in 0..<30 { try await Task.sleep(for: .milliseconds(10)) }
+            XCTAssertNil(model.request)
+            let head = try await repo.workflowRevision("HEAD")
+            XCTAssertEqual(head, originalHead)
+
+            // Present again and exercise the real confirm path using a safe
+            // soft reset, keeping both staged and unstaged fixture contents.
+            model.request = HistoryResetRequest(commit: commit, repositoryURL: try XCTUnwrap(store.repositoryURL), advanced: true)
+            for _ in 0..<60 { try await Task.sleep(for: .milliseconds(10)) }
+            let resetPanel = DialogAppearance.visibleWindow(for: try XCTUnwrap(parent.attachedSheet))
+            let resetContent = try XCTUnwrap(resetPanel.contentView)
+            let resetActions = buttons(resetContent)
+            let soft = try XCTUnwrap(resetActions.first { $0.title == L10n.text("soft", table: "HistoryReset") })
+            XCTAssertFalse(resetPanel.firstResponder is NSControl)
+            resetPanel.recalculateKeyViewLoop()
+            let tab = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: resetPanel.windowNumber, context: nil, characters: "\t", charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: 48))
+            for _ in 0..<10 {
+                NSApp.sendEvent(tab)
+                if resetPanel.firstResponder === soft { break }
+            }
+            XCTAssertTrue(resetPanel.firstResponder === soft)
+            let space = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: resetPanel.windowNumber, context: nil, characters: " ", charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49))
+            soft.keyDown(with: space)
+            for _ in 0..<5 { try await Task.sleep(for: .milliseconds(10)) }
+            XCTAssertEqual(soft.state, .on)
+            let reset = try XCTUnwrap(resetActions.first { $0.title == L10n.text("confirm", table: "HistoryReset") })
+            XCTAssertTrue(reset.isEnabled)
+            let resetPoint = reset.convert(NSPoint(x: reset.bounds.midX, y: reset.bounds.midY), to: resetContent.superview)
+            XCTAssertTrue(resetContent.hitTest(resetPoint) === reset)
+            reset.performClick(nil)
+            for _ in 0..<300 {
+                try await Task.sleep(for: .milliseconds(10))
+                if model.request == nil && !store.isBusy { break }
+            }
+            XCTAssertNil(model.request)
+            XCTAssertFalse(store.isBusy)
+            XCTAssertNil(store.error)
+            let resetHead = try await repo.workflowRevision("HEAD")
+            let staged = try await repo.workflowRead(["show", ":draft.txt"])
+            XCTAssertEqual(resetHead, commit.hash)
+            XCTAssertEqual(staged, "Staged content")
+            XCTAssertEqual(try String(contentsOf: draft, encoding: .utf8), "Unstaged content")
+        }
+    }
     func testLatePrimaryRegistrationOverridesRewrittenCancelShortcut() throws {
         let window = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 180),
                              styleMask: [.titled], backing: .buffered, defer: false)

@@ -268,7 +268,7 @@ extension View {
     }
 }
 
-/// Native action/checkbox for controls whose SwiftUI host has no key-view stop.
+/// Native action/selection control whose whole label participates in hit testing.
 /// NSButton supplies activation, accessibility actions and the system focus ring.
 struct KeyViewProxy: NSViewRepresentable {
     @Environment(\.isEnabled) private var enabled
@@ -276,6 +276,7 @@ struct KeyViewProxy: NSViewRepresentable {
     @Environment(\.nativeFocusScope) private var scope
     let label: String
     var checked: Bool? = nil
+    var radio = false
     var keyEquivalent = ""
     var prominent = false
     var minimumWidth: CGFloat = 0
@@ -323,6 +324,7 @@ struct KeyViewProxy: NSViewRepresentable {
         var declaredKeyEquivalent: String?
         var isPrimaryAction = false
         var isCheckbox = false
+        var isRadio = false
         private(set) var showsDefaultActionFocus = false
         /// The default-action cue is visual only; it never takes first responder.
         func updateDefaultActionIndicator() {
@@ -388,7 +390,8 @@ struct KeyViewProxy: NSViewRepresentable {
         button.target = button; button.action = #selector(Button.invoke(_:))
         button.bezelStyle = .rounded
         button.isCheckbox = checked != nil
-        button.setButtonType(checked == nil ? .momentaryPushIn : .switch)
+        button.isRadio = radio
+        button.setButtonType(checked == nil ? .momentaryPushIn : radio ? .radio : .switch)
         button.controlSize = nativeControlSize
         button.font = .systemFont(ofSize: NSFont.systemFontSize(for: button.controlSize))
         button.focusRingType = .exterior
@@ -401,9 +404,10 @@ struct KeyViewProxy: NSViewRepresentable {
         button.keyEquivalent = keyEquivalent.isEmpty && prominent && checked == nil ? "\r" : keyEquivalent; button.keyEquivalentModifierMask = []
         button.declaredKeyEquivalent = button.keyEquivalent
         button.isPrimaryAction = prominent && checked == nil
-        if button.isCheckbox != (checked != nil) {
-            button.setButtonType(checked == nil ? .momentaryPushIn : .switch)
+        if button.isCheckbox != (checked != nil) || button.isRadio != radio {
+            button.setButtonType(checked == nil ? .momentaryPushIn : radio ? .radio : .switch)
             button.isCheckbox = checked != nil
+            button.isRadio = radio
         }
         // AppKit type changes reset cell metrics. Configure type first, then
         // apply the same size/font on creation and every state update.

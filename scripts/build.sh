@@ -2,6 +2,10 @@
 set -euo pipefail
 cd "${0:A:h:h}"
 if command -v go >/dev/null 2>&1; then go clean -cache; fi
+if [[ "${1:-}" == --test-history-reset ]]; then
+  swift test --build-system native --filter 'HistoryResetTests|DialogAppearanceTests.testAdvancedReset'
+  exit
+fi
 if [[ "${1:-}" == --test-staging ]]; then
   swift test --build-system native --filter 'GitRepositoryTests|ConflictResolutionGateTests|PartialStagingTests|FileManagementTests'
   exit
