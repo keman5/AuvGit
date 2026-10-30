@@ -57,7 +57,7 @@ struct OperationLogView: View {
         }.auvGitSheet(item: $fullRecord) { record in
             VStack(alignment: .leading, spacing: 12) {
                 HStack { Text(text("Full sanitized output")).font(.headline); DialogButton(text("Close"), prominent: true, role: .cancel) { fullRecord = nil } }.buttonStyle(AuvGitDialogButtonStyle()).frame(maxWidth: .infinity)
-                OperationLogTextView(content: detailText(record, full: true), focused: true, onFocus: {})
+                OperationLogTextView(content: detailText(record, full: true), focused: false, onFocus: {})
             }.padding(20).frame(width: 900, height: 600)
         }.buttonBorderShape(.roundedRectangle(radius: 6)).padding(20).frame(width: 760, height: 510)
     }

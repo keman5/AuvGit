@@ -138,11 +138,9 @@ struct TagManagementView: View {
             }
             VStack(alignment: .leading, spacing: 8) {
                 Text(designText("Tag type")).font(.callout)
-                Picker(designText("Tag type"), selection: $tagKind) {
-                    Text(designText("Lightweight")).tag("lightweight")
-                    Text(designText("Annotated")).tag("annotated")
-                    Text(workflowText("Signed tag")).tag("signed")
-                }.labelsHidden().pickerStyle(.radioGroup).frame(maxWidth: .infinity, alignment: .leading)
+                KeyViewProxy(label: designText("Lightweight"), checked: tagKind == "lightweight", radio: true) { tagKind = "lightweight" }
+                KeyViewProxy(label: designText("Annotated"), checked: tagKind == "annotated", radio: true) { tagKind = "annotated" }
+                KeyViewProxy(label: workflowText("Signed tag"), checked: tagKind == "signed", radio: true) { tagKind = "signed" }
             }
             if tagKind != "lightweight" {
                 Text(workflowText("Annotation")).font(.system(size: 13, weight: .medium))

@@ -26,10 +26,10 @@ struct AICommitScopeSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             Text(aiCommitText("Generate commit message")).font(.headline)
             Text(aiCommitText("Choose which changes AI should describe."))
-            Picker(aiCommitText("Generation scope"), selection: $scope) {
-                Text(aiCommitText("Staged files only")).tag(AICommitScope.staged)
-                Text(aiCommitText("All workspace changes")).tag(AICommitScope.workspace)
-            }.pickerStyle(.radioGroup).labelsHidden()
+            VStack(alignment: .leading, spacing: 8) {
+                KeyViewProxy(label: aiCommitText("Staged files only"), checked: scope == .staged, radio: true) { scope = .staged }
+                KeyViewProxy(label: aiCommitText("All workspace changes"), checked: scope == .workspace, radio: true) { scope = .workspace }
+            }.accessibilityLabel(aiCommitText("Generation scope"))
             Text(aiCommitText("Workspace scope includes staged, unstaged, and untracked changes. Unchanged and ignored files are excluded. No files are staged or committed."))
                 .font(.caption).foregroundStyle(.secondary)
             KeyViewProxy(label: aiCommitText("Remember my choice"), checked: remember) { remember.toggle() }

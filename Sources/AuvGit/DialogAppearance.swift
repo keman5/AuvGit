@@ -121,8 +121,14 @@ private struct AuvGitAlertView<Message: View>: View {
             }.frame(maxWidth: .infinity)
         }.buttonStyle(AuvGitDialogButtonStyle()).padding(24).frame(width: 360).fixedSize(horizontal: false, vertical: true)
             .onExitCommand {
-                guard let cancel = buttons.first(where: { $0.role == .cancel && !$0.isDisabled }) else { return }
-                cancel.action(); close()
+                if let cancel = buttons.first(where: { $0.role == .cancel }) {
+                    guard !cancel.isDisabled else { return }
+                    cancel.action(); close()
+                } else if buttons.count == 1, let button = buttons.first, button.role == nil, !button.isDisabled {
+                    // Dismiss acknowledgement-only notices without confirming
+                    // an operation or invoking its affirmative callback.
+                    close()
+                }
             }
     }
 }

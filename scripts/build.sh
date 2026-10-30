@@ -2,6 +2,10 @@
 set -euo pipefail
 cd "${0:A:h:h}"
 if command -v go >/dev/null 2>&1; then go clean -cache; fi
+if [[ "${1:-}" == --test-dialog-audit ]]; then
+  swift test --build-system native --filter "${AUVGIT_DIALOG_AUDIT_FILTER:-DialogOperationAuditTests|DialogAppearanceTests|NativeFocusBridgeTests|NativeFocusAppearanceTests|DialogButtonWidthTests|DisabledDialogButtonTests|RemoteAuthenticationLayoutTests|WorkspaceCommitTests|RepositoryContextTargetingTests|RepositoryCreationOperationTests|HistoryResetTests|AICommitInputPolicyTests|NativeSelectAllTests}"
+  exit
+fi
 if [[ "${1:-}" == --test-history-reset ]]; then
   swift test --build-system native --filter 'HistoryResetTests|DialogAppearanceTests.testAdvancedReset'
   exit
