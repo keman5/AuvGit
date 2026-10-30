@@ -174,7 +174,20 @@ public actor GitRepository {
             // Once a rename is staged, its old path is absent from both disk and index.
             !renameOrigins.contains(path) || tracked.contains(path) || (try? FileManager.default.attributesOfItem(atPath: url.appendingPathComponent(path).path)) != nil
         }.sorted()
-        if !targets.isEmpty { _ = try await run(["add", "--"] + targets) }
+        let obstructed = targets.filter { path in
+            var parent = URL(fileURLWithPath: path, relativeTo: url).deletingLastPathComponent()
+            while parent.path.hasPrefix(url.path + "/") {
+                let type = try? FileManager.default.attributesOfItem(atPath: parent.path)[.type] as? FileAttributeType
+                if let type, type != .typeDirectory { return true }
+                parent.deleteLastPathComponent()
+            }
+            return false
+        }
+        // A replaced directory's old children must be removed without traversing its new symlink/file.
+        let additions = targets.filter { !obstructed.contains($0) }
+        if !additions.isEmpty { _ = try await run(["add", "--"] + additions) }
+        let removals = obstructed.filter { tracked.contains($0) }
+        if !removals.isEmpty { _ = try await run(["update-index", "--force-remove", "--"] + removals) }
     }
     public func unstage(paths: [String]) async throws {
         guard !paths.isEmpty else { return }

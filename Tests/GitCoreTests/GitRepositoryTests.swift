@@ -2,6 +2,37 @@ import XCTest
 @testable import GitCore
 
 final class GitRepositoryTests: XCTestCase {
+    func testStageDirectoryReplacedBySymlinkOrFileWithoutFollowingTarget() async throws {
+        for replacement in ["symlink", "broken-symlink", "file"] {
+            for stageReplacement in [false, true] {
+                let (url, repo) = try await fixture()
+                defer { try? FileManager.default.removeItem(at: url) }
+                let folder = url.appendingPathComponent("profiles")
+                let destination = url.appendingPathComponent("new-profiles")
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+                try "old".write(to: folder.appendingPathComponent("theme.json"), atomically: true, encoding: .utf8)
+                try "sibling".write(to: folder.appendingPathComponent("other.json"), atomically: true, encoding: .utf8)
+                try "target".write(to: destination.appendingPathComponent("theme.json"), atomically: true, encoding: .utf8)
+                try await repo.stage(paths: ["profiles"]); try await repo.commit(message: "Base")
+                try FileManager.default.removeItem(at: folder)
+                if replacement == "file" {
+                    try "replacement".write(to: folder, atomically: true, encoding: .utf8)
+                } else {
+                    try FileManager.default.createSymbolicLink(atPath: folder.path,
+                        withDestinationPath: replacement == "symlink" ? "new-profiles" : "missing-profiles")
+                }
+                let paths = stageReplacement ? ["profiles", "profiles/theme.json", "profiles/other.json"] : ["profiles/theme.json"]
+                try await repo.stage(paths: paths)
+                let staged = try await GitProcess.run(at: url, arguments: ["diff", "--cached", "--name-only", "-z"])
+                let expected = stageReplacement ? ["profiles", "profiles/other.json", "profiles/theme.json"] : ["profiles/theme.json"]
+                XCTAssertEqual(Set(staged.text.split(separator: "\0").map(String.init)), Set(expected))
+                XCTAssertEqual(try String(contentsOf: destination.appendingPathComponent("theme.json"), encoding: .utf8), "target")
+                if stageReplacement { try await repo.stage(paths: paths) }
+            }
+        }
+    }
+
     func testCreateBranchAtCommitSwitchesWhenRequestedAndPreservesDraft() async throws {
         let (url, repo) = try await fixture()
         defer { try? FileManager.default.removeItem(at: url) }
