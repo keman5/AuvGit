@@ -281,6 +281,7 @@ struct KeyViewProxy: NSViewRepresentable {
     var prominent = false
     var minimumWidth: CGFloat = 0
     var tint: NSColor? = nil
+    var escapeAction: (() -> Void)? = nil
     let action: () -> Void
     private var nativeControlSize: NSControl.ControlSize {
         guard checked != nil else { return .regular }
@@ -321,6 +322,7 @@ struct KeyViewProxy: NSViewRepresentable {
             }
         }
         var activate: (() -> Void)?
+        var escapeAction: (() -> Void)?
         var declaredKeyEquivalent: String?
         var isPrimaryAction = false
         var isCheckbox = false
@@ -377,9 +379,10 @@ struct KeyViewProxy: NSViewRepresentable {
             super.keyDown(with: event)
         }
         override func performKeyEquivalent(with event: NSEvent) -> Bool {
-            if declaredKeyEquivalent == "\u{1b}", event.keyCode == 53,
+            if event.keyCode == 53,
                event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty, isEnabled {
-                invoke(nil); return true
+                if let escapeAction { escapeAction(); return true }
+                if declaredKeyEquivalent == "\u{1b}" { invoke(nil); return true }
             }
             return super.performKeyEquivalent(with: event)
         }
@@ -401,6 +404,7 @@ struct KeyViewProxy: NSViewRepresentable {
     func updateNSView(_ button: Button, context: Context) {
         button.title = label; button.setAccessibilityLabel(label)
         button.isEnabled = enabled; button.activate = action
+        button.escapeAction = escapeAction
         button.keyEquivalent = keyEquivalent.isEmpty && prominent && checked == nil ? "\r" : keyEquivalent; button.keyEquivalentModifierMask = []
         button.declaredKeyEquivalent = button.keyEquivalent
         button.isPrimaryAction = prominent && checked == nil

@@ -40,6 +40,7 @@ struct TagManagementView: View {
             HStack(alignment: .center, spacing: 12) {
                 DesignPageHeading(title: workflowText("Tag Management"), subtitle: designText("View and manage repository Git tags"))
                 Button { showCreate = true } label: { Label(workflowText("Create tag"), systemImage: "plus") }.buttonStyle(.borderedProminent)
+                    .accessibilityLabel(workflowText("Create tag"))
                 Button { fetch() } label: { Label(workflowText("Fetch tags"), systemImage: "arrow.down.to.line") }.disabled(remotes.isEmpty)
             }.padding(.horizontal, 24).padding(.vertical, 14)
             Divider()
@@ -116,7 +117,8 @@ struct TagManagementView: View {
                 DialogButton(workflowText("Close"), prominent: true, role: .cancel) { dismiss() }
             }.buttonStyle(AuvGitDialogButtonStyle()).frame(maxWidth: .infinity).padding(.horizontal, 24).padding(.vertical, 14)
         }.tint(.blue).background(Color(nsColor: .windowBackgroundColor)).disabled(store.isBusy).interactiveDismissDisabled(store.isBusy).frame(width: 1020, height: 700)
-        .task { await reload() }
+        // Rehosting a sheet cancels SwiftUI .task; keep these finite reads alive.
+        .onAppear { Task { await reload() } }
         .auvGitSheet(isPresented: $showCreate) { createSheet }
         .auvGitAlert(item: $pending) { request in
             AuvGitAlert(title: workflowText("Confirm repository change"), message: request.name + "\n" + request.remote + "\n" + output, buttons: [

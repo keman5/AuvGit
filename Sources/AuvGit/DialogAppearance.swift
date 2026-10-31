@@ -115,7 +115,8 @@ private struct AuvGitAlertView<Message: View>: View {
                         keyEquivalent: button.role == .cancel ? "\u{1b}" :
                             index == DialogAppearance.defaultButtonIndex(buttons) ? "\r" : "",
                         prominent: index == DialogAppearance.defaultButtonIndex(buttons),
-                        minimumWidth: AuvGitDialogButtonStyle.minimumWidth) { button.action(); close() }
+                        minimumWidth: AuvGitDialogButtonStyle.minimumWidth,
+                        escapeAction: buttons.count == 1 && button.role == nil ? close : nil) { button.action(); close() }
                         .disabled(button.isDisabled)
                 }
             }.frame(maxWidth: .infinity)
@@ -251,6 +252,8 @@ private final class DialogSheetShell {
         panel.animationBehavior = .none
         panel.hasShadow = true
         let content = original.contentView
+        let preserveFocus = NativeFocusAppearance.hasExplicitFocus(in: original)
+        let keyboardFocus = NativeFocusAppearance.isVisible(in: original)
         let responder = original.firstResponder as? NSView
         let editor = responder as? NSTextView
         let editingControl = editor?.delegate as? NSView
@@ -261,9 +264,16 @@ private final class DialogSheetShell {
         original.alphaValue = 0
         original.addChildWindow(panel, ordered: .above)
         panel.makeKeyAndOrderFront(nil)
-        if let target = editingControl ?? responder, target.window === panel {
+        if preserveFocus, let target = editingControl ?? responder, target.window === panel {
+            let appearance = NativeFocusAppearance.forWindow(panel)
+            if keyboardFocus { appearance.beginNavigation() }
+            else { appearance.preserveExplicitFocus() }
             panel.makeFirstResponder(target)
             if let selection, let editor = panel.firstResponder as? NSTextView { editor.setSelectedRange(selection) }
+        } else {
+            // AppKit may have automatically selected a control in the native
+            // sheet. Rehosting must not turn that into an explicit focus request.
+            panel.makeFirstResponder(panel)
         }
         DialogAppearance.configureDefaultButton(in: panel)
         let center = NotificationCenter.default

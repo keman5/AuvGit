@@ -332,13 +332,13 @@ final class NativeFocusBridgeTests: XCTestCase {
     private final class SearchInputModel: ObservableObject {
         @Published var options = ComparisonSearchOptions(query: "🙂existing")
         @Published var replacement = "replacement"
+        @Published var presented = false
     }
     private struct SearchInputFixture: View {
         @ObservedObject var model: SearchInputModel
-        @State private var presented = false
         var body: some View {
-            KeyViewProxy(label: "Search") { presented = true }
-                .popover(isPresented: $presented) {
+            KeyViewProxy(label: "Search") { model.presented = true }
+                .popover(isPresented: $model.presented) {
                     ComparisonSearchPopover(options: $model.options, replacement: $model.replacement,
                         matchCount: 0, onNavigate: { _ in })
                 }
@@ -357,7 +357,7 @@ final class NativeFocusBridgeTests: XCTestCase {
         let host = NSHostingView(rootView: SearchInputFixture(model: model))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 260), styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false; window.contentView = host; window.makeKeyAndOrderFront(nil)
-        defer { window.close() }
+        defer { model.presented = false; window.close() }
         drain(host)
         NSRunningApplication.current.activate(options: [.activateAllWindows])
         app.activate(ignoringOtherApps: true)
@@ -369,9 +369,10 @@ final class NativeFocusBridgeTests: XCTestCase {
         }
         XCTAssertTrue(app.isActive)
         func buttons(_ view: NSView) -> [NSButton] { (view as? NSButton).map { [$0] } ?? view.subviews.flatMap(buttons) }
+        let previouslyVisible = Set(app.windows.filter(\.isVisible).map(ObjectIdentifier.init))
         try XCTUnwrap(buttons(host).first { $0.title == "Search" }).performClick(nil)
         try await Task.sleep(for: .milliseconds(250))
-        let popupHost = try XCTUnwrap(app.windows.filter { $0 !== window && $0.isVisible }.compactMap(\.contentView)
+        let popupHost = try XCTUnwrap(app.windows.filter { $0 !== window && $0.isVisible && !previouslyVisible.contains(ObjectIdentifier($0)) }.compactMap(\.contentView)
             .first { fields($0).contains { $0.accessibilityLabel() == comparisonSearchText("Find") } })
         let popup = try XCTUnwrap(popupHost.window)
         let query = try XCTUnwrap(fields(popupHost).first { $0.accessibilityLabel() == comparisonSearchText("Find") })

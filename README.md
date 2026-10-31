@@ -2,6 +2,8 @@
 
 参考 SmartGit 工作布局的原生 macOS Git 客户端。当前首版重点为工作区操作、代码对比与提交历史。
 
+开发与测试须遵守[开发约定](docs/DEVELOPMENT.md)，组件测试默认在后台执行，不抢焦点、不干扰前台应用。
+
 ## 本地运行
 
 要求 macOS 14+、Swift 6 / Xcode Command Line Tools、系统 Git。

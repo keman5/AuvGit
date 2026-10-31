@@ -38,6 +38,10 @@ final class NativeFocusAppearance: ObservableObject {
         return windows.object(forKey: window)?.isVisible ?? false
     }
 
+    static func hasExplicitFocus(in window: NSWindow) -> Bool {
+        windows.object(forKey: window)?.hasInteracted == true
+    }
+
     /// AppKit may leave the SwiftUI root, rather than the window, as responder.
     /// Both represent an idle dialog; text input and controls own their keys.
     static func hasContainerResponder(in window: NSWindow) -> Bool {

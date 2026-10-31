@@ -730,7 +730,16 @@ final class RepositoryStore: ObservableObject {
                     throw GitError("fatal: not a git repository (or any of the parent directories): .git")
                 }
                 let prepared = try await prepareRepositoryView(repo, viewState: session.repositories[repo.url.path] ?? session.repositories[url.path] ?? defaultViewState(),
-                    loadsWorkspaceComparison: !followsCurrentBranch, includesTree: showsWorkspaceTree)
+                    loadsWorkspaceComparison: !followsCurrentBranch, includesTree: showsWorkspaceTree,
+                    onFileStatus: { [weak self] prepared in
+                        // An empty main panel can show status immediately. Keep an existing
+                        // project's complete presentation intact during an uncached switch.
+                        guard let self, self.followsCurrentBranch, fallback.repository == nil,
+                              !Task.isCancelled, self.openingVersion == version else { return }
+                        self.repository = repo; self.repositoryURL = repo.url
+                        self.restoreHistorySnapshot(prepared.currentHistorySnapshot())
+                        self.initialWorkspaceSelectionReady = prepared.initialWorkspaceSelectionReady
+                    })
                 defer { prepared.closeTransientSession() }
                 guard !Task.isCancelled, openingVersion == version else { return }
                 repository = repo; repositoryURL = repo.url
@@ -809,7 +818,8 @@ final class RepositoryStore: ObservableObject {
             diffRight: saved.diffRight, diffTitle: saved.diffTitle, diffArguments: saved.diffArguments, retainedBytes: saved.diffText.utf8.count,
             workspaceStatusFailure: saved.workspaceStatusFailure)
     }
-    private func prepareRepositoryView(_ repo: GitRepository, viewState: RepositoryViewState, loadsWorkspaceComparison: Bool, includesTree: Bool) async throws -> RepositoryStore {
+    private func prepareRepositoryView(_ repo: GitRepository, viewState: RepositoryViewState, loadsWorkspaceComparison: Bool, includesTree: Bool,
+                                       onFileStatus: ((RepositoryStore) -> Void)? = nil) async throws -> RepositoryStore {
         let prepared = RepositoryStore(persistsSession: false, followsCurrentBranch: followsCurrentBranch, usesCheckedHistoryScope: usesCheckedHistoryScope)
         var completed = false
         defer { if !completed { prepared.closeTransientSession() } }
@@ -818,7 +828,7 @@ final class RepositoryStore: ObservableObject {
         prepared.showMergedCommits = showMergedCommits
         prepared.applyViewState(viewState)
         prepared.selectFirstHistoryCommit = followsCurrentBranch
-        await prepared.refresh(opening: true, loadsWorkspaceComparison: loadsWorkspaceComparison)
+        await prepared.refresh(opening: true, loadsWorkspaceComparison: loadsWorkspaceComparison, onFileStatus: onFileStatus)
         if !followsCurrentBranch, let hash = prepared.selectedCommit,
            (try? await repo.workflowRevision(hash)) != nil {
             let path = prepared.selectedCommitPath
@@ -931,6 +941,7 @@ final class RepositoryStore: ObservableObject {
         do {
             let freshFiles = try await repository.status()
             guard !Task.isCancelled, openingVersion == version else { return false }
+            applyFileStatus(freshFiles)
             let state = try await repository.changeState(files: freshFiles)
             guard !Task.isCancelled, openingVersion == version else { return false }
             let needsComparison = followsCurrentBranch && mode == "workspace" &&
@@ -1044,7 +1055,8 @@ final class RepositoryStore: ObservableObject {
             await refresh(knownFiles: newFiles, knownState: state)
         } catch { /* A canceled background read never becomes an operation error. */ }
     }
-    func refresh(knownFiles: [GitFile]? = nil, knownState: RepositoryChangeState? = nil, opening: Bool = false, reuseMetadata: Bool = false, loadsWorkspaceComparison: Bool = true) async {
+    func refresh(knownFiles: [GitFile]? = nil, knownState: RepositoryChangeState? = nil, opening: Bool = false, reuseMetadata: Bool = false,
+                 loadsWorkspaceComparison: Bool = true, onFileStatus: ((RepositoryStore) -> Void)? = nil) async {
         guard let repository, (!isBusy || opening), refreshingRepository != repository.url else { return }
         refreshingRepository = repository.url; let version = repoVersion
         let refreshVersion = UUID(); refreshReadVersion = refreshVersion
@@ -1061,6 +1073,7 @@ final class RepositoryStore: ObservableObject {
             let fileStatus = try await newFiles
             guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
             applyFileStatus(fileStatus)
+            onFileStatus?(self)
             async let stateRead: RepositoryChangeState = { if let knownState { return knownState }; return try await repository.changeState(files: fileStatus) }()
             let cachedDiffIsCurrent = opening && knownState == lastObservedState && displayedDiffIdentity == requestedDiffIdentity
             let shouldLoadWorkspaceDiff = loadsWorkspaceComparison && mode == "workspace" && !cachedDiffIsCurrent

@@ -51,138 +51,142 @@ struct RebaseWorkflowView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            DesignPageHeading(title: designText("Interactive Rebase"), subtitle: sessionText("Rebase plan help"), icon: "arrow.triangle.branch")
-            HStack(alignment: .bottom, spacing: 18) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(designText("Current branch")).font(.system(size: 13, weight: .semibold))
-                    Label(store.branch.isEmpty ? "HEAD" : store.branch, systemImage: "arrow.triangle.branch")
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(10)
-                        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
-                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(nsColor: .separatorColor).opacity(0.6)))
-                }
-                Image(systemName: "arrow.right").foregroundStyle(.secondary).padding(.bottom, 12)
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(sessionText("Base revision")).font(.system(size: 13, weight: .semibold))
-                    HStack {
-                        StableTextField(sessionText("Base revision"), text: $base).textFieldStyle(.roundedBorder)
-                            .onChange(of: base) { _, _ in loadRequest = UUID(); captured = nil; todo = ""; messages = [:]; originalMessages = [:]; metadata = [:]; messageSelection = nil }
-                        Menu {
-                            Button("HEAD") { base = "HEAD" }
-                            ForEach(store.branches.filter { !$0.isRemote }, id: \.name) { branch in Button(branch.name) { base = branch.name } }
-                        } label: { Image(systemName: "chevron.down") }.menuStyle(.borderlessButton).fixedSize()
-                    }.padding(.vertical, 5)
-                }
-                Button(sessionText("Load Git topology plan")) { load() }.disabled(base.isEmpty).padding(.bottom, 5)
-            }.disabled(store.isBusy)
-            DesignCard {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Label(designText("Commit list, oldest first"), systemImage: "list.bullet").font(.system(size: 14, weight: .semibold))
-                        DesignActionChip(title: "\(planRows.filter { $0.hash != nil }.count)")
-                        Spacer()
-                    }
-                    Divider()
-                    if captured == nil {
-                        VStack(spacing: 10) {
-                            if store.isBusy { ProgressView().controlSize(.small) }
-                            Text(panelText("Load a base revision to edit its rebase plan.")).foregroundStyle(.secondary)
-                        }.frame(maxWidth: .infinity, minHeight: 135)
-                    } else {
-                        HStack {
-                            Text(designText("Action")).padding(.leading, 24).frame(width: 142, alignment: .leading)
-                            Text(workflowText("Commit hash")).frame(width: 100, alignment: .leading)
-                            Text(designText("Commit message")).frame(maxWidth: .infinity, alignment: .leading)
-                            Text(designText("Author")).frame(width: 110, alignment: .leading)
-                            Text(designText("Date")).frame(width: 125, alignment: .leading)
-                        }.font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 8)
-                        ScrollView {
-                            LazyVStack(spacing: 0) {
-                                ForEach(planRows) { row in
-                                    HStack(spacing: 12) {
-                                        VStack(spacing: 2) {
-                                            Button { moveRow(row.line, by: -1) } label: { Image(systemName: "chevron.up") }.disabled(row.line == 0)
-                                            Button { moveRow(row.line, by: 1) } label: { Image(systemName: "chevron.down") }.disabled(row.line >= todo.components(separatedBy: "\n").count - 1)
-                                        }.buttonStyle(.plain).font(.system(size: 8)).foregroundStyle(.secondary).frame(width: 12)
-                                        if row.hash != nil {
-                                            Picker(designText("Action"), selection: Binding(get: { row.command }, set: { setCommand($0, line: row.line) })) {
-                                                ForEach(["pick", "reword", "squash", "fixup", "edit", "drop"], id: \.self) { Text($0).tag($0) }
-                                            }.labelsHidden().tint(actionColor(row.command)).frame(width: 118)
-                                                .background(actionColor(row.command).opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
-                                        } else { DesignActionChip(title: row.command, color: actionColor(row.command)).frame(width: 118, alignment: .leading) }
-                                        Text(row.hash.map { String($0.prefix(8)) } ?? "—").font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary).frame(width: 100, alignment: .leading)
-                                        Text(row.subject).font(.system(size: 12)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-                                        Text(rowMetadata(row)?.author ?? "").font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).frame(width: 110, alignment: .leading)
-                                        Text(rowMetadata(row).map { preferencesDate($0.date, style: "relative") } ?? "").font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 125, alignment: .leading)
-                                    }.padding(.horizontal, 8).padding(.vertical, 9)
-                                        .background(row.hash != nil && messageSelection == row.hash ? Color.blue.opacity(0.13) : Color.clear)
-                                        .contentShape(Rectangle()).onTapGesture { if let hash = row.hash { messageSelection = hash } }
-                                    Divider()
-                                }
-                            }
-                        }.frame(minHeight: 130, maxHeight: 250)
-                        DisclosureGroup(designText("Edit complete Git plan")) {
-                            TextEditor(text: $todo).font(.system(size: 12, design: .monospaced)).frame(height: 120)
-                        }.font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }.disabled(store.isBusy)
-            HStack(alignment: .top, spacing: 16) {
-                DesignCard(designText("Commit message preview")) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        if !targets.isEmpty {
-                            Picker(sessionText("Complete commit message"), selection: $messageSelection) {
-                                Text(designText("Select a commit to preview its message")).tag(Optional<String>.none)
-                                ForEach(targets) { target in Text(target.command + " " + String(target.hash.prefix(12))).tag(Optional(target.hash)) }
-                            }.labelsHidden()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    DesignPageHeading(title: designText("Interactive Rebase"), subtitle: sessionText("Rebase plan help"), icon: "arrow.triangle.branch")
+                    HStack(alignment: .bottom, spacing: 18) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(designText("Current branch")).font(.system(size: 13, weight: .semibold))
+                            Label(store.branch.isEmpty ? "HEAD" : store.branch, systemImage: "arrow.triangle.branch")
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(10)
+                                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
+                                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(nsColor: .separatorColor).opacity(0.6)))
                         }
-                        if let selectedRow {
+                        Image(systemName: "arrow.right").foregroundStyle(.secondary).padding(.bottom, 12)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(sessionText("Base revision")).font(.system(size: 13, weight: .semibold))
                             HStack {
-                                Text((selectedRow.hash.map { String($0.prefix(8)) } ?? "") + "  " + selectedRow.subject).font(.system(size: 12)).lineLimit(1)
+                                StableTextField(sessionText("Base revision"), text: $base).textFieldStyle(.roundedBorder)
+                                    .onChange(of: base) { _, _ in loadRequest = UUID(); captured = nil; todo = ""; messages = [:]; originalMessages = [:]; metadata = [:]; messageSelection = nil }
+                                Menu {
+                                    Button("HEAD") { base = "HEAD" }
+                                    ForEach(store.branches.filter { !$0.isRemote }, id: \.name) { branch in Button(branch.name) { base = branch.name } }
+                                } label: { Image(systemName: "chevron.down") }.menuStyle(.borderlessButton).fixedSize()
+                            }.padding(.vertical, 5)
+                        }
+                        Button(sessionText("Load Git topology plan")) { load() }.disabled(base.isEmpty).padding(.bottom, 5)
+                    }.disabled(store.isBusy)
+                    DesignCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Label(designText("Commit list, oldest first"), systemImage: "list.bullet").font(.system(size: 14, weight: .semibold))
+                                DesignActionChip(title: "\(planRows.filter { $0.hash != nil }.count)")
                                 Spacer()
-                                DesignActionChip(title: selectedRow.command, color: actionColor(selectedRow.command))
+                            }
+                            Divider()
+                            if captured == nil {
+                                VStack(spacing: 10) {
+                                    if store.isBusy { ProgressView().controlSize(.small) }
+                                    Text(panelText("Load a base revision to edit its rebase plan.")).foregroundStyle(.secondary)
+                                }.frame(maxWidth: .infinity, minHeight: 135)
+                            } else {
+                                HStack {
+                                    Text(designText("Action")).padding(.leading, 24).frame(width: 142, alignment: .leading)
+                                    Text(workflowText("Commit hash")).frame(width: 100, alignment: .leading)
+                                    Text(designText("Commit message")).frame(maxWidth: .infinity, alignment: .leading)
+                                    Text(designText("Author")).frame(width: 110, alignment: .leading)
+                                    Text(designText("Date")).frame(width: 125, alignment: .leading)
+                                }.font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 8)
+                                ScrollView {
+                                    LazyVStack(spacing: 0) {
+                                        ForEach(planRows) { row in
+                                            HStack(spacing: 12) {
+                                                VStack(spacing: 2) {
+                                                    Button { moveRow(row.line, by: -1) } label: { Image(systemName: "chevron.up") }.disabled(row.line == 0)
+                                                    Button { moveRow(row.line, by: 1) } label: { Image(systemName: "chevron.down") }.disabled(row.line >= todo.components(separatedBy: "\n").count - 1)
+                                                }.buttonStyle(.plain).font(.system(size: 8)).foregroundStyle(.secondary).frame(width: 12)
+                                                if row.hash != nil {
+                                                    Picker(designText("Action"), selection: Binding(get: { row.command }, set: { setCommand($0, line: row.line) })) {
+                                                        ForEach(["pick", "reword", "squash", "fixup", "edit", "drop"], id: \.self) { Text($0).tag($0) }
+                                                    }.labelsHidden().tint(actionColor(row.command)).frame(width: 118)
+                                                        .background(actionColor(row.command).opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
+                                                } else { DesignActionChip(title: row.command, color: actionColor(row.command)).frame(width: 118, alignment: .leading) }
+                                                Text(row.hash.map { String($0.prefix(8)) } ?? "—").font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary).frame(width: 100, alignment: .leading)
+                                                Text(row.subject).font(.system(size: 12)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                                                Text(rowMetadata(row)?.author ?? "").font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).frame(width: 110, alignment: .leading)
+                                                Text(rowMetadata(row).map { preferencesDate($0.date, style: "relative") } ?? "").font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 125, alignment: .leading)
+                                            }.padding(.horizontal, 8).padding(.vertical, 9)
+                                                .background(row.hash != nil && messageSelection == row.hash ? Color.blue.opacity(0.13) : Color.clear)
+                                                .contentShape(Rectangle()).onTapGesture { if let hash = row.hash { messageSelection = hash } }
+                                            Divider()
+                                        }
+                                    }
+                                }.frame(minHeight: 130, maxHeight: 250)
+                                DisclosureGroup(designText("Edit complete Git plan")) {
+                                    TextEditor(text: $todo).font(.system(size: 12, design: .monospaced)).frame(height: 120)
+                                }.font(.caption).foregroundStyle(.secondary)
                             }
                         }
-                        if messageSelection == nil {
-                            Text(designText("Select a commit to preview its message")).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 150, alignment: .center)
-                        } else {
-                            TextEditor(text: Binding(get: { messageSelection.flatMap { messages[$0] ?? originalMessages[$0] } ?? "" }, set: { if canEditMessage, let key = messageSelection { messages[key] = $0 } }))
-                                .font(.system(size: 12)).frame(height: 160).disabled(!canEditMessage || store.isBusy)
-                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(nsColor: .separatorColor).opacity(0.6)))
-                            Text(designText(canEditMessage ? "This message will be included in the confirmed plan" : "Choose reword or squash to edit this message")).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                }.frame(maxWidth: .infinity)
-                VStack(spacing: 14) {
-                    DesignCard(sessionText("Explicit exec commands")) {
-                        HStack(spacing: 8) {
-                            StableTextField(designText("Command to insert in the plan"), text: $execCommand).textFieldStyle(.roundedBorder)
-                            Button { insertExec() } label: { Image(systemName: "plus") }.help(designText("Add exec command"))
-                                .disabled(execCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || captured == nil || store.isBusy)
-                        }
-                    }
-                    DesignCard(designText("Planned commits")) {
-                        ScrollView {
-                            VStack(spacing: 9) {
-                                ForEach(planRows.filter { $0.command != "drop" }) { row in
-                                    HStack(spacing: 9) {
-                                        Circle().fill(Color.blue).frame(width: 7, height: 7)
-                                        Text(row.hash.map { String($0.prefix(8)) } ?? "—").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).frame(width: 64, alignment: .leading)
-                                        Text(row.subject).font(.system(size: 11)).lineLimit(1)
-                                        Spacer(minLength: 0)
-                                        DesignActionChip(title: row.command, color: actionColor(row.command))
+                    }.disabled(store.isBusy)
+                    HStack(alignment: .top, spacing: 16) {
+                        DesignCard(designText("Commit message preview")) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                if !targets.isEmpty {
+                                    Picker(sessionText("Complete commit message"), selection: $messageSelection) {
+                                        Text(designText("Select a commit to preview its message")).tag(Optional<String>.none)
+                                        ForEach(targets) { target in Text(target.command + " " + String(target.hash.prefix(12))).tag(Optional(target.hash)) }
+                                    }.labelsHidden()
+                                }
+                                if let selectedRow {
+                                    HStack {
+                                        Text((selectedRow.hash.map { String($0.prefix(8)) } ?? "") + "  " + selectedRow.subject).font(.system(size: 12)).lineLimit(1)
+                                        Spacer()
+                                        DesignActionChip(title: selectedRow.command, color: actionColor(selectedRow.command))
                                     }
                                 }
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                        }.frame(height: 120)
+                                if messageSelection == nil {
+                                    Text(designText("Select a commit to preview its message")).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 150, alignment: .center)
+                                } else {
+                                    TextEditor(text: Binding(get: { messageSelection.flatMap { messages[$0] ?? originalMessages[$0] } ?? "" }, set: { if canEditMessage, let key = messageSelection { messages[key] = $0 } }))
+                                        .font(.system(size: 12)).frame(height: 160).disabled(!canEditMessage || store.isBusy)
+                                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(nsColor: .separatorColor).opacity(0.6)))
+                                    Text(designText(canEditMessage ? "This message will be included in the confirmed plan" : "Choose reword or squash to edit this message")).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }.frame(maxWidth: .infinity)
+                        VStack(spacing: 14) {
+                            DesignCard(sessionText("Explicit exec commands")) {
+                                HStack(spacing: 8) {
+                                    StableTextField(designText("Command to insert in the plan"), text: $execCommand).textFieldStyle(.roundedBorder)
+                                    Button { insertExec() } label: { Image(systemName: "plus") }.help(designText("Add exec command"))
+                                        .disabled(execCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || captured == nil || store.isBusy)
+                                }
+                            }
+                            DesignCard(designText("Planned commits")) {
+                                ScrollView {
+                                    VStack(spacing: 9) {
+                                        ForEach(planRows.filter { $0.command != "drop" }) { row in
+                                            HStack(spacing: 9) {
+                                                Circle().fill(Color.blue).frame(width: 7, height: 7)
+                                                Text(row.hash.map { String($0.prefix(8)) } ?? "—").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).frame(width: 64, alignment: .leading)
+                                                Text(row.subject).font(.system(size: 11)).lineLimit(1)
+                                                Spacer(minLength: 0)
+                                                DesignActionChip(title: row.command, color: actionColor(row.command))
+                                            }
+                                        }
+                                    }.frame(maxWidth: .infinity, alignment: .leading)
+                                }.frame(height: 120)
+                            }
+                        }.frame(maxWidth: .infinity)
                     }
-                }.frame(maxWidth: .infinity)
+                    if !output.isEmpty {
+                        ScrollView { Text(output).font(.system(.caption, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 70)
+                    }
+                    Label(designText("Rebase rewrites commit history and may change commit IDs"), systemImage: "exclamationmark.triangle")
+                        .font(.system(size: 12)).foregroundStyle(.red).padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.red.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+                }.frame(maxWidth: .infinity, alignment: .leading)
             }
-            if !output.isEmpty {
-                ScrollView { Text(output).font(.system(.caption, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 70)
-            }
-            Label(designText("Rebase rewrites commit history and may change commit IDs"), systemImage: "exclamationmark.triangle")
-                .font(.system(size: 12)).foregroundStyle(.red).padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.red.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
             HStack(spacing: 10) {
                 if store.isBusy { ProgressView().controlSize(.small) }
                 if let onClose { DialogButton(workflowText("Close"), role: .cancel, action: onClose).disabled(store.isBusy) }

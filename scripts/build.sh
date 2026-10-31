@@ -3,7 +3,7 @@ set -euo pipefail
 cd "${0:A:h:h}"
 if command -v go >/dev/null 2>&1; then go clean -cache; fi
 if [[ "${1:-}" == --test-dialog-audit ]]; then
-  swift test --build-system native --filter "${AUVGIT_DIALOG_AUDIT_FILTER:-DialogOperationAuditTests|DialogAppearanceTests|NativeFocusBridgeTests|NativeFocusAppearanceTests|DialogButtonWidthTests|DisabledDialogButtonTests|RemoteAuthenticationLayoutTests|WorkspaceCommitTests|RepositoryContextTargetingTests|RepositoryCreationOperationTests|HistoryResetTests|AICommitInputPolicyTests|NativeSelectAllTests}"
+  swift test --build-system native --filter "${AUVGIT_DIALOG_AUDIT_FILTER:-DialogOperationAuditTests|DialogAppearanceTests|NativeFocusBridgeTests|NativeFocusAppearanceTests|DialogButtonWidthTests|DisabledDialogButtonTests|RemoteAuthenticationLayoutTests|WorkspaceCommitTests|RepositoryContextTargetingTests|RepositoryCreationOperationTests|HistoryResetTests|AICommitInputPolicyTests|NativeSelectAllTests|RepositoryWorkflowTests|InteractiveRebaseTests|ComparisonExtrasTests|RepositoryContextTests|NetworkAuthenticationPolicyTests|GuardedForcePushTests|PullRecoveryTests|CloneDestinationTests|CloneAuthenticationTests|CloneCredentialSecurityTests|ComparisonSearchTests|ExternalComparisonConfigurationTests}"
   exit
 fi
 if [[ "${1:-}" == --test-history-reset ]]; then
@@ -75,7 +75,7 @@ INSTALL_APP=true
 case "${1:-}" in
   "") ;;
   --no-install) INSTALL_APP=false ;;
-  *) print -u2 "Usage: $0 [--no-install|--test-localizations|--test-dialog-focus|--test-clone-dialogs|--test-performance-review|--test-dialog-buttons|--test-file-sorting|--test-refresh|--test-workspace-preview]"; exit 1 ;;
+  *) print -u2 "Usage: $0 [--no-install|--test-localizations|--test-dialog-focus|--test-dialog-audit|--test-clone-dialogs|--test-performance-review|--test-dialog-buttons|--test-file-sorting|--test-refresh|--test-workspace-preview]"; exit 1 ;;
 esac
 python3 scripts/check-localizations.py
 rm -rf -- "$PWD/.artifacts"

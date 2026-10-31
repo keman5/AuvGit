@@ -32,7 +32,7 @@ struct OperationLogView: View {
                                 Text(text(record.fullOutputAvailable ? "Preview truncated at 32K characters. Full sanitized output is available." : "Preview truncated at 32K characters. Full output cache has expired.")).font(.caption).foregroundStyle(.secondary)
                             }
                             HStack {
-                                Button(text("View full output")) { fullRecord = record }.disabled(!fullOutputAvailable(record))
+                                Button(text("View full output")) { fullRecord = record }.disabled(!fullOutputAvailable(record)).accessibilityLabel(text("View full output"))
                                 Button(text("Copy full output")) { copy(record) }.disabled(!fullOutputAvailable(record))
                                 Button(text("Export output")) { export(record) }.disabled(!fullOutputAvailable(record))
                             }.controlSize(.small)
@@ -49,6 +49,7 @@ struct OperationLogView: View {
                                 Text(String(format: "%.2fs", record.duration)).foregroundStyle(.secondary)
                             }.font(.caption)
                         }.disclosureGroupStyle(OperationLogDisclosureStyle())
+                            .accessibilityLabel(record.command.isEmpty ? record.operation : "git " + record.operation)
                         Divider()
                     }
                 }

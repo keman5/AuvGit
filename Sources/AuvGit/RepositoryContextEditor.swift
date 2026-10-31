@@ -60,7 +60,9 @@ struct RepositoryContextEditor: View {
                 DialogButton(repositoryContextText("Save"), prominent: true) { save() }
                     .disabled(!loaded || store.isBusy || (target.editor == .remote && (selectedRemote == nil || fetchURL.isEmpty)))
             }.buttonStyle(AuvGitDialogButtonStyle()).frame(maxWidth: .infinity)
-        }.padding(20).frame(width: target.editor == .ignore ? 580 : 360).task { await load() }
+        }.padding(20).frame(width: target.editor == .ignore ? 580 : 360)
+        // Rehosting a sheet cancels SwiftUI .task; keep this finite read alive.
+        .onAppear { Task { await load() } }
     }
     private func selectRemote() {
         fetchIndex = 0; fetchURL = selectedRemote?.fetchURLs.first ?? ""; pushURL = selectedRemote?.pushURLs.first ?? ""; editPush = false

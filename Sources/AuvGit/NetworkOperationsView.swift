@@ -168,7 +168,8 @@ struct NetworkOperationsView: View {
             }.buttonStyle(AuvGitDialogButtonStyle()).frame(maxWidth: .infinity).padding(.horizontal, 24).padding(.vertical, 16)
         }.tint(.blue).background(Color(nsColor: .windowBackgroundColor)).frame(width: 800, height: 720)
         .interactiveDismissDisabled(task != nil)
-        .task { await loadCredentials(); await loadRepositoryContext() }
+        // Rehosting a sheet cancels SwiftUI .task; keep these finite reads alive.
+        .onAppear { Task { await loadCredentials(); await loadRepositoryContext() } }
         .onChange(of: operation) { _, _ in previewReady = false; events = []; output = "" }
         .onChange(of: store.repositoryURL) { _, _ in authentication.cancel() }
         .onDisappear { task?.cancel(); authentication.cancel() }

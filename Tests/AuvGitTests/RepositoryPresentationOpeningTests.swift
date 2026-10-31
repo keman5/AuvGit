@@ -4,6 +4,93 @@ import XCTest
 
 @MainActor
 final class RepositoryPresentationOpeningTests: XCTestCase {
+    func testColdOpeningPublishesFilesBeforeBlockedMetadata() async throws {
+        try await checkFilesPublishBeforeMetadata(cached: false)
+    }
+
+    func testCachedOpeningPublishesFreshFilesBeforeBlockedMetadata() async throws {
+        try await checkFilesPublishBeforeMetadata(cached: true)
+    }
+
+    func testCancellingColdOpeningAfterFilePublicationRestoresEmptyPanel() async throws {
+        try await checkFilesPublishBeforeMetadata(cached: false, cancelAfterPublication: true)
+    }
+
+    private func checkFilesPublishBeforeMetadata(cached: Bool, cancelAfterPublication: Bool = false) async throws {
+        let directory = root()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let target = try await repository(directory, "target")
+        let backgroundKey = "preferences.backgroundRefresh"
+        let previousBackground = UserDefaults.standard.object(forKey: backgroundKey)
+        UserDefaults.standard.set(false, forKey: backgroundKey)
+        defer {
+            if let previousBackground { UserDefaults.standard.set(previousBackground, forKey: backgroundKey) }
+            else { UserDefaults.standard.removeObject(forKey: backgroundKey) }
+        }
+        let store = RepositoryStore(persistsSession: false, followsCurrentBranch: true)
+        defer { store.closeTransientSession() }
+        if cached {
+            await store.open(target)
+            let other = try await repository(directory, "other")
+            await store.open(other)
+        }
+        await store.cancelBackgroundRepositorySync()
+        try "new content\n".write(to: target.appendingPathComponent("new.txt"), atomically: true, encoding: .utf8)
+        let wrapper = directory.appendingPathComponent("git-wrapper")
+        try """
+        #!/bin/sh
+        for arg in "$@"; do
+            if [ "$arg" = "show-ref" ]; then
+                touch .git/metadata-blocked
+                attempts=0
+                while [ ! -f .git/release-metadata ] && [ "$attempts" -lt 500 ]; do
+                    sleep 0.01
+                    attempts=$((attempts + 1))
+                done
+            fi
+        done
+        exec /usr/bin/git "$@"
+        """.write(to: wrapper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
+        let key = "auvgit.git.executablePath", previous = UserDefaults.standard.object(forKey: "auvgit.git.executablePath")
+        UserDefaults.standard.set(wrapper.path, forKey: key)
+        let release = target.appendingPathComponent(".git/release-metadata")
+        defer {
+            try? Data().write(to: release)
+            if let previous { UserDefaults.standard.set(previous, forKey: key) }
+            else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        let started = Date(), opening = try XCTUnwrap(store.requestOpen(target))
+        let blocked = target.appendingPathComponent(".git/metadata-blocked")
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline {
+            if FileManager.default.fileExists(atPath: blocked.path), store.files.contains(where: { $0.path == "new.txt" }) { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: blocked.path), "Exercise a genuinely blocked metadata read")
+        XCTAssertEqual(store.repositoryURL?.path, target.path)
+        XCTAssertEqual(store.files.map(\.path), ["new.txt"], "Fresh file status must not wait for metadata or history")
+        XCTAssertTrue(store.initialWorkspaceSelectionReady)
+        XCTAssertTrue(store.isBusy, "Repository writes must remain blocked until opening finishes")
+        print("\(cached ? "Cached" : "Cold") opening file publication before metadata: \(Date().timeIntervalSince(started))s")
+        if cancelAfterPublication {
+            opening.cancel()
+            await opening.value
+            XCTAssertNil(store.repository)
+            XCTAssertNil(store.repositoryURL)
+            XCTAssertTrue(store.files.isEmpty)
+            XCTAssertFalse(store.isBusy)
+            XCTAssertNil(store.error)
+            return
+        }
+        try Data().write(to: release)
+        await opening.value
+        XCTAssertFalse(store.isBusy)
+        XCTAssertNil(store.error)
+        XCTAssertEqual(store.commits.first?.subject, "Fixture")
+        XCTAssertEqual(store.selectedPaths, ["new.txt"])
+    }
+
     private func root() -> URL { FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString) }
     private func repository(_ root: URL, _ name: String) async throws -> URL {
         let directory = name.isEmpty ? root : root.appendingPathComponent(name)
