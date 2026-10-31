@@ -7,6 +7,8 @@ import GitCore
 final class WorkspaceProjects: ObservableObject {
     @Published private(set) var active: RepositoryStore
     @Published private(set) var sessions: [RepositoryStore]
+    @Published private(set) var residentSessionIDs: Set<UUID> = []
+    private var residentOrder: [UUID] = []
     private var observers: [ObjectIdentifier: AnyCancellable] = [:]
     private var sessionObservers: [ObjectIdentifier: AnyCancellable] = [:]
     private var creationObservers: [ObjectIdentifier: AnyCancellable] = [:]
@@ -23,13 +25,15 @@ final class WorkspaceProjects: ObservableObject {
         let initial = supplied ?? RepositoryStore()
         active = initial
         sessions = [initial]
+        residentSessionIDs = [initial.sessionIdentity]; residentOrder = [initial.sessionIdentity]
         attach(initial)
     }
 
     private func attach(_ store: RepositoryStore) {
         store.workspaceProjects = self
-        observers[ObjectIdentifier(store)] = store.objectWillChange.sink { [weak self] _ in
-            self?.objectWillChange.send()
+        observers[ObjectIdentifier(store)] = store.objectWillChange.sink { [weak self, weak store] _ in
+            guard let self, self.active === store else { return }
+            self.objectWillChange.send()
         }
         sessionObservers[ObjectIdentifier(store)] = store.objectWillChange
             .debounce(for: .milliseconds(500), scheduler: RunLoop.main)
@@ -54,7 +58,12 @@ final class WorkspaceProjects: ObservableObject {
         }
         let shouldActivate = active === source
         source.flushSession()
-        if shouldActivate { active = target }
+        if shouldActivate {
+            residentOrder.removeAll { $0 == target.sessionIdentity }; residentOrder.append(target.sessionIdentity)
+            residentOrder = Array(residentOrder.suffix(3))
+            residentSessionIDs = Set(residentOrder)
+            active = target
+        }
         // An operation owns this session until completion; selecting it must not
         // refresh, cancel, or replace the repository captured by that operation.
         if target.isBusy { return Task {} }
@@ -90,13 +99,10 @@ struct WorkspaceProjectsView: View {
         } else {
             ZStack {
                 ForEach(projects.sessions, id: \.sessionIdentity) { store in
-                    MainWindow(store: store, usesBorderlessToolbar: usesBorderlessToolbar,
-                        shellToolbarModel: shellToolbarModel)
-                        .opacity(projects.active === store ? 1 : 0)
-                        .allowsHitTesting(projects.active === store)
-                        .disabled(projects.active !== store)
-                        .accessibilityHidden(projects.active !== store)
-                        .zIndex(projects.active === store ? 1 : 0)
+                    WorkspaceProjectHost(store: store, isActive: projects.active === store,
+                        retainsPanels: projects.residentSessionIDs.contains(store.sessionIdentity),
+                        usesBorderlessToolbar: usesBorderlessToolbar, shellToolbarModel: shellToolbarModel)
+                        .equatable()
                 }
             }
         }
@@ -119,5 +125,25 @@ struct WorkspaceProjectsView: View {
                     RepositoryCreationAlerts(creation: creation)
                 }
             }
+    }
+}
+
+/// Operations, authentication and drafts retain their owner while only the three
+/// most recently used projects keep tables and TextKit surfaces mounted.
+private struct WorkspaceProjectHost: View, Equatable {
+    let store: RepositoryStore
+    let isActive: Bool
+    let retainsPanels: Bool
+    let usesBorderlessToolbar: Bool
+    let shellToolbarModel: BorderlessToolbarModel?
+    static func == (a: Self, b: Self) -> Bool {
+        a.store === b.store && a.isActive == b.isActive && a.retainsPanels == b.retainsPanels
+            && a.usesBorderlessToolbar == b.usesBorderlessToolbar && a.shellToolbarModel === b.shellToolbarModel
+    }
+    var body: some View {
+        MainWindow(store: store, usesBorderlessToolbar: usesBorderlessToolbar,
+            shellToolbarModel: shellToolbarModel, retainsPanels: retainsPanels)
+            .opacity(isActive ? 1 : 0).allowsHitTesting(isActive).disabled(!isActive)
+            .accessibilityHidden(!isActive).zIndex(isActive ? 1 : 0)
     }
 }

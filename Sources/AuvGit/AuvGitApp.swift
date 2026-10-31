@@ -104,6 +104,8 @@ final class RepositoryStore: ObservableObject {
         let mainHistoryHead: String?
         let historyScope: [String]?
         let commits: [GitCommit]
+        var incomingCommits: [GitCommit] = []
+        var hasMoreIncoming = true
         let loadedCount: Int
         let hasMore: Bool
         let localUnpushedCommitHashes: Set<String>?
@@ -205,6 +207,7 @@ final class RepositoryStore: ObservableObject {
         fileObserver = nil
         filesystemRefresh?.cancel(); filesystemRefresh = nil
         searchTask?.cancel(); searchTask = nil
+        historyTask?.cancel(); historyTask = nil; detailTask?.cancel(); detailTask = nil
         diffTask?.cancel(); diffTask = nil
         repoVersion = UUID(); historyVersion = UUID(); detailVersion = UUID(); diffVersion = UUID()
         accessedURL?.stopAccessingSecurityScopedResource(); accessedURL = nil
@@ -253,6 +256,7 @@ final class RepositoryStore: ObservableObject {
         openRepositories.removeAll { $0 == path }
         guard repositoryURL?.path == path else { flushSession(); return }
         cancelAutomaticRefresh()
+        historyTask?.cancel(); detailTask?.cancel(); diffTask?.cancel()
         fileObserver = nil; filesystemRefresh?.cancel(); repository = nil; repositoryURL = nil
         files = []; commits = []; localUnpushedCommitHashes = nil; branches = []; stashes = []; commitFiles = []; selectedPaths = []; selectedCommit = nil; selectedCommitPath = nil
         commitMessage = ""; amend = false; recentCommitMessages = []; accessedURL?.stopAccessingSecurityScopedResource(); accessedURL = nil
@@ -473,6 +477,10 @@ final class RepositoryStore: ObservableObject {
     private var repoVersion = UUID()
     private var diffVersion = UUID()
     private var diffTask: Task<Void, Never>?
+    private var historyTask: Task<Void, Never>?
+    private var detailTask: Task<Void, Never>?
+    private var incomingHistory: [GitCommit] = []
+    private var incomingHistoryHasMore = true
     private var historyVersion = UUID()
     private var selectFirstHistoryCommit = false
     private var historyMemoryCache: [String: HistoryMemorySnapshot] = [:]
@@ -613,6 +621,7 @@ final class RepositoryStore: ObservableObject {
             flushSession()
             refreshReadVersion = UUID(); refreshingRepository = nil
             repoVersion = UUID(); historyVersion = UUID(); detailVersion = UUID(); diffVersion = UUID()
+            historyTask?.cancel(); historyTask = nil; detailTask?.cancel(); detailTask = nil
             diffTask?.cancel(); diffTask = nil; fileObserver = nil
             filesystemRefresh?.cancel(); searchTask?.cancel()
             openingRepositoryPath = url.path; isRestoringViewState = true; isBusy = true
@@ -671,6 +680,7 @@ final class RepositoryStore: ObservableObject {
             flushSession()
             refreshReadVersion = UUID(); refreshingRepository = nil
             repoVersion = UUID(); historyVersion = UUID(); detailVersion = UUID(); diffVersion = UUID()
+            historyTask?.cancel(); historyTask = nil; detailTask?.cancel(); detailTask = nil
             diffTask?.cancel(); diffTask = nil
             fileObserver = nil; filesystemRefresh?.cancel(); searchTask?.cancel()
             openingRepositoryPath = url.path
@@ -1340,7 +1350,7 @@ final class RepositoryStore: ObservableObject {
         return HistoryMemorySnapshot(
             files: files, filesGeneration: filesGeneration, branches: branches, branch: branch, stashes: stashes,
             observedState: lastObservedState, historyState: lastHistoryState, mainHistoryHead: lastMainHistoryHead,
-            historyScope: loadedHistoryScope, commits: commits,
+            historyScope: loadedHistoryScope, commits: commits, incomingCommits: incomingHistory, hasMoreIncoming: incomingHistoryHasMore,
             loadedCount: historyLoadedCount,
             hasMore: hasMore,
             localUnpushedCommitHashes: localUnpushedCommitHashes,
@@ -1368,6 +1378,7 @@ final class RepositoryStore: ObservableObject {
         branches = snapshot.branches; branch = snapshot.branch; stashes = snapshot.stashes
         repositoryOperation = snapshot.observedState?.operation
         recreatableConflicts = snapshot.observedState?.recreatableConflicts ?? []
+        incomingHistory = snapshot.incomingCommits; incomingHistoryHasMore = snapshot.hasMoreIncoming
         lastObservedState = snapshot.observedState; lastHistoryState = snapshot.historyState; lastMainHistoryHead = snapshot.mainHistoryHead
         if usesCheckedHistoryScope { configureCheckedHistoryRefs() }
         commits = snapshot.commits
@@ -1404,6 +1415,14 @@ final class RepositoryStore: ObservableObject {
         Task { await loadHistory(reset: true) }
     }
     func loadHistory(reset: Bool) async {
+        guard !Task.isCancelled, reset || !loadingHistory else { return }
+        historyTask?.cancel()
+        let task = Task { await performLoadHistory(reset: reset) }
+        historyTask = task
+        await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+    }
+    private func performLoadHistory(reset: Bool) async {
+        guard !Task.isCancelled else { return }
         guard let repository else { return }
         if !reset, loadingHistory { return }
         let version = UUID(); historyVersion = version; loadingHistory = true
@@ -1415,23 +1434,34 @@ final class RepositoryStore: ObservableObject {
             else if historyPinnedCommit == nil, historyStashHash == nil, historyRef?.hasPrefix("refs/tags/") != true {
                 stashHashes = HistoryBranchScope.selectedStashHashes(checkedHistoryRefs ?? [HistoryBranchScope.allStashes], stashes: stashes)
             } else { stashHashes = [] }
-            let rows = try await repository.log(limit: requestedCount + 1, skip: skip, search: historySearch, path: followsCurrentBranch ? nil : historyPath, ref: followsCurrentBranch ? "HEAD" : (historyPinnedCommit ?? historyRef), author: historyAuthor, firstParent: followsCurrentBranch && !showMergedCommits, refs: followsCurrentBranch || historyPinnedCommit != nil || historyStashHash != nil || historyRef?.hasPrefix("refs/tags/") == true ? nil : checkedHistoryRefs.map { HistoryBranchScope.revisionRefs($0, branches: branches, stashes: stashes) }, stashHashes: stashHashes, includeRecyclable: !followsCurrentBranch && historyPinnedCommit == nil && historyStashHash == nil && historyRef?.hasPrefix("refs/tags/") != true && checkedHistoryRefs?.contains(HistoryBranchScope.recyclable) == true)
-            guard historyVersion == version else { return }
+            let requestedSearch = historySearch, requestedAuthor = historyAuthor
+            let requestedPath = followsCurrentBranch ? nil : historyPath
+            let requestedRef = followsCurrentBranch ? "HEAD" : (historyPinnedCommit ?? historyRef)
+            let firstParent = followsCurrentBranch && !showMergedCommits
+            let requestedRefs = followsCurrentBranch || historyPinnedCommit != nil || historyStashHash != nil || historyRef?.hasPrefix("refs/tags/") == true ? nil : checkedHistoryRefs.map { HistoryBranchScope.revisionRefs($0, branches: branches, stashes: stashes) }
+            let includeRecyclable = !followsCurrentBranch && historyPinnedCommit == nil && historyStashHash == nil && historyRef?.hasPrefix("refs/tags/") != true && checkedHistoryRefs?.contains(HistoryBranchScope.recyclable) == true
+            async let localRows = repository.log(limit: requestedCount + 1, skip: skip, search: requestedSearch,
+                path: requestedPath, ref: requestedRef, author: requestedAuthor, firstParent: firstParent,
+                refs: requestedRefs, stashHashes: stashHashes, includeRecyclable: includeRecyclable)
+            let includesIncoming = historyPinnedCommit == nil && historyStashHash == nil && historyPath == nil && historyRef?.hasPrefix("refs/tags/") != true
+            let previousIncoming = reset ? [] : incomingHistory
+            let readIncoming = includesIncoming && (reset || incomingHistoryHasMore)
+            let remoteRefs = readIncoming ? visibleHistoryRemoteBranchNames.map { "refs/remotes/" + $0 }.sorted() : []
+            async let incomingPage = repository.log(limit: requestedCount + 1, skip: previousIncoming.count,
+                search: requestedSearch, author: requestedAuthor, refs: remoteRefs, incomingOnly: true)
+            let (rows, incomingRows) = try await (localRows, incomingPage)
+            guard !Task.isCancelled, historyVersion == version else { return }
             let page = Array(rows.prefix(requestedCount))
-            let existing = reset ? page : commits + page.filter { row in !commits.contains(where: { $0.hash == row.hash }) }
-            let incoming: [GitCommit]
-            var hasMoreIncoming = false
-            if historyPinnedCommit == nil, historyStashHash == nil, historyPath == nil, historyRef?.hasPrefix("refs/tags/") != true {
-                let incomingLimit = reset ? requestedCount : commits.count + requestedCount
-                let incomingRows = try await repository.log(limit: incomingLimit + 1, search: historySearch, author: historyAuthor, refs: visibleHistoryRemoteBranchNames.map { "refs/remotes/" + $0 }.sorted(), incomingOnly: true)
-                incoming = Array(incomingRows.prefix(incomingLimit))
-                hasMoreIncoming = incomingRows.count > incomingLimit
-            } else { incoming = [] }
-            guard historyVersion == version else { return }
+            let existingHashes = Set(commits.map(\.hash))
+            let existing = reset ? page : commits + page.filter { !existingHashes.contains($0.hash) }
+            let incoming = includesIncoming ? previousIncoming + Array(incomingRows.prefix(requestedCount)) : []
+            let hasMoreIncoming = readIncoming ? incomingRows.count > requestedCount : (includesIncoming && incomingHistoryHasMore)
             let incomingHashes = Set(incoming.map(\.hash))
             let updatedCommits = incoming + existing.filter { !incomingHashes.contains($0.hash) }
             let unpushed = try await repository.unpublishedCommitHashes(in: updatedCommits)
             guard historyVersion == version else { return }
+            guard !Task.isCancelled else { return }
+            incomingHistory = incoming; incomingHistoryHasMore = hasMoreIncoming
             if commits != updatedCommits { commits = updatedCommits }
             historyLoadedCount = skip + page.count
             hasMore = rows.count > requestedCount || hasMoreIncoming
@@ -1482,6 +1512,14 @@ final class RepositoryStore: ObservableObject {
         searchTask = Task { try? await Task.sleep(nanoseconds: 250_000_000); guard !Task.isCancelled else { return }; await loadHistory(reset: true) }
     }
     func loadCommitFiles() async {
+        guard !Task.isCancelled else { return }
+        detailTask?.cancel()
+        let task = Task { await performLoadCommitFiles() }
+        detailTask = task
+        await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+    }
+    private func performLoadCommitFiles() async {
+        guard !Task.isCancelled else { return }
         guard mode == "history" else { return }
         let version = UUID(); detailVersion = version; commitFiles = []; selectedCommitPath = nil
         guard let repository, let selectedCommit else { await loadDiff(); return }
@@ -1490,14 +1528,14 @@ final class RepositoryStore: ObservableObject {
             activeDetailStashHash = historyStashHash == selectedCommit ? selectedCommit : stashes.first(where: { $0.hash == selectedCommit })?.hash
             if activeDetailStashHash == selectedCommit {
                 let stash = try await StashHistory.files(repository: repository, hash: selectedCommit)
-                guard detailVersion == version else { return }
+                guard !Task.isCancelled, detailVersion == version else { return }
                 stashUntrackedPaths = stash.untracked
                 result = stash.files
             } else { stashUntrackedPaths = []; result = try await repository.commitFiles(hash: selectedCommit) }
-            guard detailVersion == version else { return }
+            guard !Task.isCancelled, detailVersion == version else { return }
             commitFiles = result; selectedCommitPath = result.first?.path
             await loadDiff()
-        } catch { if detailVersion == version { report(error) } }
+        } catch { if !Task.isCancelled, !(error is CancellationError), detailVersion == version { report(error) } }
     }
     func comparisonRevision(for path: String) -> String? {
         guard let hash = selectedCommit else { return nil }
@@ -1608,6 +1646,7 @@ final class RepositoryStore: ObservableObject {
     func operation(_ name: String, refreshFilesOnly: Bool = false, onFailure: ((Error) -> Void)? = nil, body: @escaping (GitRepository) async throws -> Void) {
         guard let repository, workspaceStatusFailure == nil, !isBusy, pendingRepositoryPath == nil else { return }
         cancelAutomaticRefresh()
+        historyTask?.cancel(); historyTask = nil; detailTask?.cancel(); detailTask = nil
         diffTask?.cancel(); diffTask = nil
         refreshReadVersion = UUID(); refreshingRepository = nil; diffVersion = UUID(); historyVersion = UUID()
         isBusy = true; beginUserOperation(name)

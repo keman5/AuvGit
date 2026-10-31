@@ -247,6 +247,7 @@ struct DiffTextSurface: NSViewRepresentable {
                 scroll.contentView.scroll(to: changedDocument && scrollsToFirstChange ? .zero : position)
             }
             coordinator.searchOptions = nil
+            coordinator.searchDocuments = nil
             coordinator.syncing = false
         }
         coordinator.syncing = true
@@ -268,41 +269,16 @@ struct DiffTextSurface: NSViewRepresentable {
         coordinator.alignWrappedRows()
         if restored { coordinator.refreshOverviews() }
         if coordinator.searchOptions != searchOptions {
-            coordinator.searchOptions = searchOptions
-            coordinator.matches = []
-            var failure: String?
-            for (column, scroll) in coordinator.scrolls.enumerated() where !scroll.isHidden {
-                guard let view = scroll.documentView as? NSTextView, let storage = view.textStorage else { continue }
-                view.layoutManager?.removeTemporaryAttribute(.backgroundColor, forCharacterRange: NSRange(location: 0, length: storage.length))
-                let string = storage.string as NSString
-                storage.enumerateAttribute(.auvGitDiffDecoration, in: NSRange(location: 0, length: storage.length)) { decoration, sourceRange, _ in
-                    guard decoration as? Bool != true else { return }
-                    switch ComparisonSearch.matches(in: string.substring(with: sourceRange), options: searchOptions) {
-                    case .failure(let error): failure = error.localizedDescription
-                    case .success(let ranges):
-                        for item in ranges {
-                            let range = NSRange(location: sourceRange.location + item.location, length: item.length)
-                            coordinator.matches.append((column, range))
-                            view.layoutManager?.addTemporaryAttribute(.backgroundColor, value: NSColor.systemYellow.withAlphaComponent(0.35), forCharacterRange: range)
-                        }
-                    }
-                }
+            coordinator.startSearch(searchOptions) { count, error in
+                self.matchCount = count; self.matchIndex = 0; self.searchError = error
             }
-            coordinator.matchIndex = -1
-            let count = coordinator.matches.count, error = failure
-            if matchCount != count || searchError != error || matchIndex != 0 { DispatchQueue.main.async { self.matchCount = count; self.matchIndex = 0; self.searchError = error } }
         }
         if coordinator.searchStep != searchStep {
             let direction = searchStep > coordinator.searchStep ? 1 : -1
             coordinator.searchStep = searchStep
-            if !coordinator.matches.isEmpty {
-                coordinator.matchIndex = coordinator.matchIndex < 0 ? (direction > 0 ? 0 : coordinator.matches.count - 1) : (coordinator.matchIndex + direction + coordinator.matches.count) % coordinator.matches.count
-                let (column, range) = coordinator.matches[coordinator.matchIndex]
-                coordinator.navigate(column: column, range: range)
-                let current = coordinator.matchIndex + 1
-                DispatchQueue.main.async { self.matchIndex = current }
-            }
+            coordinator.navigateSearch(direction: direction) { self.matchIndex = $0 }
         }
+
         if scrollsToFirstChange, !coordinator.pendingFirstScroll, let firstIndex = coordinator.hunkRanges.firstIndex(where: { $0[0].length > 0 || $0[1].length > 0 }) {
             let first = coordinator.hunkRanges[firstIndex]
             coordinator.pendingFirstScroll = true
@@ -470,12 +446,79 @@ struct DiffTextSurface: NSViewRepresentable {
             trimDocumentCache()
             return cached != nil
         }
+        func startSearch(_ options: ComparisonSearchOptions, completion: @escaping (Int, String?) -> Void) {
+            searchTask?.cancel(); searchOptions = options
+            let generation = UUID(); searchGeneration = generation
+            matches = []; matchIndex = -1
+            for scroll in scrolls { (scroll.documentView as? ReadOnlyDiffTextView)?.searchMatches = [] }
+            guard !options.query.isEmpty else {
+                searching = false; DispatchQueue.main.async { completion(0, nil) }; return
+            }
+            if searchDocuments == nil {
+                searchDocuments = scrolls.map { scroll in
+                    guard !scroll.isHidden, let view = scroll.documentView as? NSTextView, let storage = view.textStorage else { return SearchDocument(text: "", segments: []) }
+                    var segments: [NSRange] = []
+                    storage.enumerateAttribute(.auvGitDiffDecoration, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+                        if value as? Bool != true { segments.append(range) }
+                    }
+                    return SearchDocument(text: view.string, segments: segments)
+                }
+            }
+            let documents = searchDocuments ?? []
+            searching = true
+            let worker = Task.detached(priority: .userInitiated) { () -> Result<[[NSRange]], Error> in
+                Result {
+                    let expression = try ComparisonSearch.expression(for: options)
+                    return try documents.map { document in
+                        let source = document.text as NSString
+                        return try document.segments.flatMap { segment -> [NSRange] in
+                            try Task.checkCancellation()
+                            return try ComparisonSearch.matches(in: source.substring(with: segment),
+                                range: NSRange(location: 0, length: segment.length), expression: expression)
+                                .map { NSRange(location: segment.location + $0.location, length: $0.length) }
+                        }
+                    }
+                }
+            }
+            searchTask = Task { @MainActor [weak self] in
+                let result = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
+                guard !Task.isCancelled, let self, self.searchGeneration == generation else { return }
+                self.searching = false
+                switch result {
+                case .success(let columns):
+                    self.matches = columns.enumerated().flatMap { column, ranges in ranges.map { (column, $0) } }
+                    for (column, scroll) in self.scrolls.enumerated() {
+                        (scroll.documentView as? ReadOnlyDiffTextView)?.searchMatches = columns[column]
+                    }
+                    completion(self.matches.count, nil)
+                case .failure(let error): completion(0, error.localizedDescription)
+                }
+                if let (direction, report) = self.pendingSearchNavigation {
+                    self.pendingSearchNavigation = nil; self.navigateSearch(direction: direction, completion: report)
+                }
+            }
+        }
+        func navigateSearch(direction: Int, completion: @escaping (Int) -> Void) {
+            if searching { pendingSearchNavigation = (direction, completion); return }
+            guard !matches.isEmpty else { return }
+            matchIndex = matchIndex < 0 ? (direction > 0 ? 0 : matches.count - 1) : (matchIndex + direction + matches.count) % matches.count
+            let (column, range) = matches[matchIndex]
+            navigate(column: column, range: range)
+            let current = matchIndex + 1
+            DispatchQueue.main.async { completion(current) }
+        }
         var style = ""
         var scrolls: [NSScrollView] = [], observers: [NSObjectProtocol] = []
         var syncing = false, split = true, dark = false
         var synchronized = true, lineNumbers = true
         var wraps: Bool? = nil
         var fontSize: CGFloat = 12
+        struct SearchDocument { let text: String; let segments: [NSRange] }
+        var searchDocuments: [SearchDocument]?
+        private var searchTask: Task<Void, Never>?
+        private var searchGeneration = UUID()
+        private var searching = false
+        private var pendingSearchNavigation: (Int, (Int) -> Void)?
         var searchOptions: ComparisonSearchOptions?
         var pendingFirstScroll = false
         var searchStep = 0, matchIndex = -1
@@ -654,7 +697,7 @@ struct DiffTextSurface: NSViewRepresentable {
                 view.setFrameSize(NSSize(width: wraps == true ? scrolls[index].contentSize.width : max(view.frame.width, scrolls[index].contentSize.width), height: view.frame.height))
             }
         }
-        deinit { observers.forEach(NotificationCenter.default.removeObserver) }
+        deinit { searchTask?.cancel(); observers.forEach(NotificationCenter.default.removeObserver) }
     }
 }
 
@@ -704,6 +747,7 @@ final class ReadOnlyDiffTextView: NSTextView {
         updateInsertionPointStateAndRestartTimer(true)
         needsDisplay = true
     }
+    var searchMatches: [NSRange] = [] { didSet { needsDisplay = true } }
     var highlightedRow: Int?
     private func drawMissingRows(in rect: NSRect) {
         guard let storage = textStorage, let layout = layoutManager, let container = textContainer, storage.length > 0 else { return }
@@ -721,6 +765,7 @@ final class ReadOnlyDiffTextView: NSTextView {
         }
     }
     override func drawBackground(in rect: NSRect) {
+        defer { ComparisonSearchHighlight.draw(searchMatches, in: self, dirtyRect: rect) }
         super.drawBackground(in: rect)
         guard let storage = textStorage, let layout = layoutManager, let container = textContainer, storage.length > 0 else { return }
         let origin = textContainerOrigin

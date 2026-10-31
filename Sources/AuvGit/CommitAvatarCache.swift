@@ -42,13 +42,16 @@ final class CommitAvatarCache {
         if let task = pending[url] { return await task.value }
         let loader = self.loader
         let task = Task { @MainActor () -> NSImage? in
-            guard let data = await loader(url), data.count <= 1_048_576,
-                  let source = CGImageSourceCreateWithData(data as CFData, nil),
-                  let pixels = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            guard let data = await loader(url), data.count <= 1_048_576 else { return nil }
+            let pixels = await Task.detached(priority: .utility) { () -> CGImage? in
+                guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+                return CGImageSourceCreateThumbnailAtIndex(source, 0, [
                     kCGImageSourceCreateThumbnailFromImageAlways: true,
                     kCGImageSourceThumbnailMaxPixelSize: 80,
                     kCGImageSourceShouldCacheImmediately: true
-                  ] as CFDictionary) else { return nil }
+                ] as CFDictionary)
+            }.value
+            guard let pixels else { return nil }
             return NSImage(cgImage: pixels, size: NSSize(width: pixels.width, height: pixels.height))
         }
         pending[url] = task

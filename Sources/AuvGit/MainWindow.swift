@@ -13,6 +13,7 @@ struct MainWindow: View {
     @State private var resetRequest: HistoryResetRequest?
     var usesBorderlessToolbar = false
     var shellToolbarModel: BorderlessToolbarModel? = nil
+    var retainsPanels = true
     @StateObject private var fileFocus = WorkspaceFileFocus()
     @StateObject private var historyFocus = WorkspaceFileFocus()
     @StateObject private var sidebarFocus = WorkspaceFileFocus()
@@ -74,18 +75,20 @@ struct MainWindow: View {
                     shellCommandControl(command, showsText: text)
                 }.background(WorkspaceFileFocusRegion(focus: fileFocus, toolbar: true).allowsHitTesting(false).accessibilityHidden(true))
             }
-            VSplitView {
-                HSplitView {
-                    sidebar.frame(minWidth: 190, idealWidth: 225, maxWidth: 245)
-                    if store.repository != nil || store.pendingRepositoryPath != nil { workspace.frame(minWidth: 640) }
-                    else { welcome.frame(maxWidth: .infinity, maxHeight: .infinity) }
-                }.frame(minHeight: terminals.visible ? 464 : 450)
-                if terminals.visible, let directory = store.repositoryURL {
-                    TerminalPane(terminals: terminals, store: store, directory: directory)
-                        .frame(minHeight: 160, idealHeight: 240)
-                        .id(TerminalConfiguration.identity(for: directory))
+            if retainsPanels {
+                VSplitView {
+                    HSplitView {
+                        sidebar.frame(minWidth: 190, idealWidth: 225, maxWidth: 245)
+                        if store.repository != nil || store.pendingRepositoryPath != nil { workspace.frame(minWidth: 640) }
+                        else { welcome.frame(maxWidth: .infinity, maxHeight: .infinity) }
+                    }.frame(minHeight: terminals.visible ? 464 : 450)
+                    if terminals.visible, let directory = store.repositoryURL {
+                        TerminalPane(terminals: terminals, store: store, directory: directory)
+                            .frame(minHeight: 160, idealHeight: 240)
+                            .id(TerminalConfiguration.identity(for: directory))
+                    }
                 }
-            }
+            } else { Color.clear.frame(minHeight: 450) }
             Divider()
             HStack(spacing: 8) {
                 if store.isBusy || store.creationOperation.busy { ProgressView().controlSize(.mini) }

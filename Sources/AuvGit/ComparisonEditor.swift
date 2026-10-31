@@ -172,6 +172,9 @@ struct ComparisonEditor: NSViewRepresentable {
         fileprivate var panes: [Pane] = []
         fileprivate var paneCache: [String: Pane] = [:]
         var alignedTexts: [String] = []
+        private var naturalLayouts: [String: (text: String, geometry: String, heights: [Double])] = [:]
+        private var appliedPadding: [String: (text: String, geometry: String, before: Double, after: [Double])] = [:]
+        private(set) var naturalLayoutBuildCount = 0
         private var cachedAlignmentTexts: [String] = []
         private var cachedAlignmentBaseline = -1
         private var cachedConflictMode = false
@@ -180,6 +183,15 @@ struct ComparisonEditor: NSViewRepresentable {
         private var cachedConflictBlocks: [ConflictDraft.Block] = []
         private var diffTexts: [String] = []
         private var cachedDiffs: [String: TextLineDiff] = [:]
+        private var searchTask: Task<Void, Never>?
+        private var searchGeneration = UUID()
+        private var searchTexts: [String] = []
+        private var completedSearch: ComparisonSearchOptions?
+        private var searchMatches: [String: [NSRange]] = [:]
+        private var pendingSearchNavigation: Bool?
+        private(set) var decorationBuildCount = 0
+        private(set) var searchBuildCount = 0
+        private(set) var searching = false
         private var syntaxCache: [String: (String, String, [SyntaxToken])] = [:]
         private(set) var alignmentBuildCount = 0
         var alignmentGeometry = ""
@@ -204,7 +216,7 @@ struct ComparisonEditor: NSViewRepresentable {
         var lineDiffs: [String: TextLineDiff] = [:]
         weak var active: NSTextView?
         init(_ model: ComparisonEditor) { self.model = model; lastNavigation = model.navigation; lastChangeNavigation = model.changeNavigation }
-        deinit { NotificationCenter.default.removeObserver(self) }
+        deinit { searchTask?.cancel(); NotificationCenter.default.removeObserver(self) }
 
         func update(_ value: ComparisonEditor) {
             updating = true
@@ -215,7 +227,7 @@ struct ComparisonEditor: NSViewRepresentable {
             let paneConfigurationChanged = model.columns != value.columns || model.wrapLines != value.wrapLines || model.showLineNumbers != value.showLineNumbers
             let settings = "\(value.fontName)|\(value.fontSize)|\(value.tabWidth)|\(value.syntaxHighlight)|\(value.characterDiff)|\(value.showWhitespace)|\(value.highlightCurrentLine)|\(value.additionColor)|\(value.deletionColor)|\(value.modificationColor)|\(value.colorScheme)"
             let preferencesChanged = preferenceSignature != settings
-            if preferencesChanged || rebuild { alignmentGeometry = "" }
+            if preferencesChanged || rebuild { alignmentGeometry = ""; naturalLayouts = [:]; appliedPadding = [:] }
             preferenceSignature = settings
             if previousSearch != value.effectiveSearch { searchIndices = [:]; scheduleSearchStatus() }
             model = value
@@ -292,7 +304,7 @@ struct ComparisonEditor: NSViewRepresentable {
                 }
                 (split as? ComparisonSplitView)?.resetDistribution()
             }
-            var changed = preferencesChanged || rebuild || previousSearch != value.effectiveSearch || previousLanguage != value.languagePath
+            var changed = preferencesChanged || rebuild || previousLanguage != value.languagePath
             for (pane, column) in zip(panes, value.columns) where rebuild || preferencesChanged || paneConfigurationChanged {
                 pane.title.stringValue = column.title
                 pane.title.toolTip = column.title
@@ -343,6 +355,7 @@ struct ComparisonEditor: NSViewRepresentable {
                 pane.needsLayout = true
             }
             if changed { decorate() }
+            if changed || previousSearch != value.effectiveSearch { requestSearch() }
             updateConflictGutters()
             scheduleAlignment()
             scheduleCommandState()
@@ -553,6 +566,7 @@ struct ComparisonEditor: NSViewRepresentable {
             pane.gutter.needsDisplay = true
             model.onEdit(pane.id, text.string)
             decorate()
+            requestSearch()
             scheduleSearchStatus()
             updateConflictGutters()
             scheduleAlignment()
@@ -641,24 +655,33 @@ struct ComparisonEditor: NSViewRepresentable {
             alignmentGeometry = geometry
             let baseline = model.resolver != nil ? (panes.firstIndex(where: { $0.id == "worktree" }) ?? 0) : 0
             let alignment = currentAlignment(texts, baseline: baseline)
-            for pane in panes {
-                guard let storage = pane.text.textStorage else { continue }
-                pane.invalidateDocumentSize()
-                let paragraph = (pane.text.defaultParagraphStyle?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
-                paragraph.paragraphSpacing = 0
-                paragraph.paragraphSpacingBefore = 0
-                storage.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: storage.length))
-                pane.text.textContainerInset.height = ComparisonEditorMetrics.textInset.height
-                if let container = pane.text.textContainer { pane.text.layoutManager?.ensureLayout(for: container) }
-            }
-            let heights = panes.map { pane -> [Double] in
-                guard let layout = pane.text.layoutManager else { return [] }
-                let fallback = Double(layout.defaultLineHeight(for: pane.text.font ?? .monospacedSystemFont(ofSize: 12, weight: .regular)))
-                return pane.gutter.starts.indices.map { line in
-                    let top = pane.y(forLine: line)
-                    let bottom = line + 1 < pane.gutter.starts.count ? pane.y(forLine: line + 1) : layout.usedRect(for: pane.text.textContainer!).maxY + ComparisonEditorMetrics.textInset.height
-                    return max(fallback, Double(bottom - top))
-                }
+            var naturalLayoutsMeasured: Set<String> = []
+            let heights = panes.enumerated().map { index, pane -> [Double] in
+                let naturalGeometry = "\(model.wrapLines)|\(model.fontName)|\(model.fontSize)|\(model.tabWidth)|" + (model.wrapLines ? String(describing: pane.text.textContainer?.containerSize.width) : "unwrapped")
+                if let cached = naturalLayouts[pane.id], cached.text == texts[index], cached.geometry == naturalGeometry { return cached.heights }
+                let font = pane.text.font ?? .monospacedSystemFont(ofSize: 12, weight: .regular)
+                let fallback = Double(pane.text.layoutManager?.defaultLineHeight(for: font) ?? font.pointSize)
+                let measured: [Double]
+                if !model.wrapLines {
+                    // Unwrapped logical lines have one font height. No full-document
+                    // natural-layout pass is needed before applying alignment spacers.
+                    measured = Array(repeating: fallback, count: pane.gutter.starts.count)
+                } else if let storage = pane.text.textStorage, let layout = pane.text.layoutManager, let container = pane.text.textContainer {
+                    let paragraph = (pane.text.defaultParagraphStyle?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+                    paragraph.paragraphSpacing = 0; paragraph.paragraphSpacingBefore = 0
+                    storage.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: storage.length))
+                    pane.text.textContainerInset.height = ComparisonEditorMetrics.textInset.height
+                    layout.ensureLayout(for: container)
+                    naturalLayoutsMeasured.insert(pane.id)
+                    measured = pane.gutter.starts.indices.map { line in
+                        let top = pane.y(forLine: line)
+                        let bottom = line + 1 < pane.gutter.starts.count ? pane.y(forLine: line + 1) : layout.usedRect(for: container).maxY + ComparisonEditorMetrics.textInset.height
+                        return max(fallback, Double(bottom - top))
+                    }
+                } else { measured = Array(repeating: fallback, count: pane.gutter.starts.count) }
+                naturalLayoutBuildCount += 1
+                naturalLayouts[pane.id] = (texts[index], naturalGeometry, measured)
+                return measured
             }
             let padding = alignment.padding(lineHeights: heights)
             var sharedHeight: CGFloat = 2 * ComparisonEditorMetrics.textInset.height
@@ -670,7 +693,17 @@ struct ComparisonEditor: NSViewRepresentable {
             }
             for (index, pane) in panes.enumerated() {
                 guard let storage = pane.text.textStorage else { continue }
+                if let applied = appliedPadding[pane.id], applied.text == texts[index], applied.geometry == geometry,
+                   applied.before == padding.before[index], applied.after == padding.after[index] {
+                    pane.alignedHeight = sharedHeight; pane.fitDocument(); continue
+                }
+                pane.invalidateDocumentSize()
                 storage.beginEditing()
+                if !naturalLayoutsMeasured.contains(pane.id) {
+                    let paragraph = (pane.text.defaultParagraphStyle?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+                    paragraph.paragraphSpacing = 0; paragraph.paragraphSpacingBefore = 0
+                    storage.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: storage.length))
+                }
                 for line in pane.gutter.starts.indices where padding.after[index][line] > 0 {
                     let start = pane.gutter.starts[line]
                     let end = line + 1 < pane.gutter.starts.count ? pane.gutter.starts[line + 1] : storage.length
@@ -681,7 +714,10 @@ struct ComparisonEditor: NSViewRepresentable {
                 }
                 storage.endEditing()
                 pane.text.textContainerInset.height = ComparisonEditorMetrics.textInset.height + padding.before[index]
-                if let container = pane.text.textContainer { pane.text.layoutManager?.ensureLayout(for: container) }
+                if !naturalLayoutsMeasured.contains(pane.id) || padding.after[index].contains(where: { $0 > 0 }) {
+                    if let container = pane.text.textContainer { pane.text.layoutManager?.ensureLayout(for: container) }
+                }
+                appliedPadding[pane.id] = (texts[index], geometry, padding.before[index], padding.after[index])
                 pane.alignedHeight = sharedHeight
                 pane.fitDocument()
                 pane.gutter.needsDisplay = true
@@ -792,8 +828,7 @@ struct ComparisonEditor: NSViewRepresentable {
         }
         func decorate() {
             guard let baseline = panes.first else { return }
-            searchTotals = [:]
-            defer { scheduleSearchStatus() }
+            decorationBuildCount += 1
             panes.forEach { $0.text.missingLineAnchors = [:] }
             lineDiffs = [:]
             var lineChanges: [String: Set<Int>] = [:]
@@ -935,15 +970,6 @@ struct ComparisonEditor: NSViewRepresentable {
                     }
                 }
                 changedRanges[pane.id] = changes.sorted { $0.location < $1.location }
-                if case .success(let matches) = ComparisonSearch.matches(in: pane.text.string, options: model.effectiveSearch) {
-                    searchTotals[pane.id] = matches.count
-                    for match in matches {
-                        if match.length > 0 { layout.addTemporaryAttribute(.backgroundColor, value: NSColor.systemYellow.withAlphaComponent(0.45), forCharacterRange: match) }
-                    }
-                    for line in ComparisonSearch.matchingLines(matches: matches, starts: pane.gutter.starts, length: content.length) {
-                        pane.gutter.lineBackgrounds[line] = NSColor.systemYellow.withAlphaComponent(0.45)
-                    }
-                }
                 pane.scroll.invalidateChangeBackgrounds()
             }
         }
@@ -1049,10 +1075,52 @@ struct ComparisonEditor: NSViewRepresentable {
             panes[focus].text.window?.makeFirstResponder(panes[focus].text); active = panes[focus].text
             reportCursor(in: panes[focus])
         }
+        private func requestSearch() {
+            searchTask?.cancel()
+            let generation = UUID(); searchGeneration = generation
+            let texts = paneTexts(), ids = panes.map(\.id), starts = panes.map { $0.gutter.starts }
+            let options = model.effectiveSearch
+            searching = false
+            searchTexts = texts; completedSearch = nil; searchIndices = [:]; searchTotals = [:]; searchMatches = [:]
+            panes.forEach { $0.text.searchMatches = []; $0.gutter.searchLines = []; $0.gutter.needsDisplay = true }
+            scheduleSearchStatus()
+            guard !options.query.isEmpty else { completedSearch = options; return }
+            searchBuildCount += 1; searching = true
+            let worker = Task.detached(priority: .userInitiated) { () -> Result<[([NSRange], Set<Int>)], Error> in
+                Result {
+                    let expression = try ComparisonSearch.expression(for: options)
+                    return try zip(texts, starts).map { text, lineStarts in
+                        let matches = try ComparisonSearch.matches(in: text, range: NSRange(location: 0, length: text.utf16.count), expression: expression)
+                        return (matches, ComparisonSearch.matchingLines(matches: matches, starts: lineStarts, length: text.utf16.count))
+                    }
+                }
+            }
+            searchTask = Task { @MainActor [weak self] in
+                let result = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
+                guard !Task.isCancelled, let self, self.searchGeneration == generation else { return }
+                self.searching = false
+                self.completedSearch = options
+                if case .success(let results) = result {
+                    for (index, pane) in self.panes.enumerated() where ids.indices.contains(index) && ids[index] == pane.id {
+                        self.searchMatches[pane.id] = results[index].0
+                        self.searchTotals[pane.id] = results[index].0.count
+                        pane.text.searchMatches = results[index].0
+                        pane.gutter.searchLines = results[index].1; pane.gutter.needsDisplay = true
+                    }
+                }
+                self.scheduleSearchStatus()
+                if let forward = self.pendingSearchNavigation {
+                    self.pendingSearchNavigation = nil; self.navigate(forward: forward)
+                }
+            }
+        }
         func navigate(forward: Bool) {
+            guard completedSearch == model.effectiveSearch, searchTexts == paneTexts() else {
+                pendingSearchNavigation = forward; return
+            }
             guard let text = historyTarget()?.text ?? focusedText ?? active ?? panes.first?.text,
                   let pane = panes.first(where: { $0.text === text }),
-                  case .success(let matches) = ComparisonSearch.matches(in: text.string, options: model.effectiveSearch), !matches.isEmpty else { return }
+                  let matches = searchMatches[pane.id], !matches.isEmpty else { return }
             let current = searchIndices[pane.id]
             let index = current.map { ($0 + (forward ? 1 : matches.count - 1)) % matches.count } ?? (forward ? 0 : matches.count - 1)
             searchIndices[pane.id] = index
@@ -1170,6 +1238,7 @@ final class ComparisonTextView: UndoableComparisonTextView {
     var conflictBlocks: [ConflictDraft.Block] = []
     var selectedConflict = 0
     var missingLineAnchors: [Int: NSColor] = [:]
+    var searchMatches: [NSRange] = [] { didSet { needsDisplay = true } }
     var lineBackgrounds: [Int: NSColor] = [:] { didSet { needsDisplay = true } }
     func missingChangeY(at line: Int) -> CGFloat {
         guard line > 0, let layout = layoutManager, let container = textContainer else { return ComparisonEditorMetrics.textInset.height }
@@ -1186,6 +1255,7 @@ final class ComparisonTextView: UndoableComparisonTextView {
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
         drawChangeBackgrounds(in: rect, width: bounds.width)
+        ComparisonSearchHighlight.draw(searchMatches, in: self, dirtyRect: rect)
         drawInteractionBackgrounds(in: rect)
     }
     func drawChangeBackgrounds(in rect: NSRect, width: CGFloat) {
@@ -1479,6 +1549,7 @@ private final class LineGutter: NSView {
     private var content = ""
     fileprivate var starts = [0]
     var lineBackgrounds: [Int: NSColor] = [:]
+    var searchLines = Set<Int>()
     var changedLines = Set<Int>()
     var firstLine = 1
     var showsLineNumbers = true
@@ -1565,6 +1636,10 @@ private final class LineGutter: NSView {
             let y = rect.minY + inset.height - visible.minY
             if let color = self.lineBackgrounds[line] {
                 color.setFill()
+                NSRect(x: 0, y: y, width: self.bounds.width, height: used.height).intersection(self.bounds).fill()
+            }
+            if self.searchLines.contains(line) {
+                NSColor.systemYellow.withAlphaComponent(0.45).setFill()
                 NSRect(x: 0, y: y, width: self.bounds.width, height: used.height).intersection(self.bounds).fill()
             }
             let selectedLine = self.starts.lastIndex(where: { $0 <= text.selectedRange().location }) ?? 0

@@ -8,6 +8,7 @@ struct WorkspaceConflictPreview: View {
     var repositoryPath: String = ""
     var onOpenEditorSearch: ((ComparisonSearchOptions, String) -> Void)? = nil
     var onOpenEditorLine: ((String, Int) -> Void)? = nil
+    @StateObject private var blockCache = WorkspaceConflictBlockCache()
     @StateObject private var navigationCommands = ComparisonEditingCommands()
     @State private var compact = false
     @State private var searchOptions = ComparisonSearchOptions()
@@ -21,7 +22,7 @@ struct WorkspaceConflictPreview: View {
     @State private var showBase = false
     @StateObject private var resolver = ComparisonResolverState()
 
-    private var blocks: [ConflictDraft.Block] { ConflictDraft.blocks(in: snapshot.worktree.text ?? "") }
+    private var blocks: [ConflictDraft.Block] { blockCache.blocks(in: snapshot.worktree.text ?? "") }
     private func column(_ id: String, _ title: String, _ content: FileRevisionContent?) -> ComparisonEditorColumn {
         ComparisonEditorColumn(id: id, title: URL(fileURLWithPath: snapshot.path).lastPathComponent + " — " + compareText(title), text: content?.text ?? "", isEditable: false,
             message: content?.text != nil ? nil : content?.unavailableReason.map { compareText($0) } ?? compareText("File does not exist in this version"), detail: content?.objectID.map { String($0.prefix(8)) } ?? designCompareText("Read-only"))
@@ -29,9 +30,8 @@ struct WorkspaceConflictPreview: View {
     private var columns: [ComparisonEditorColumn] {
         [column("ours", "Ours (Stage 2)", snapshot.ours), column("worktree", "Merge Result (Read-only)", snapshot.worktree), column("theirs", "Theirs (Stage 3)", snapshot.theirs)]
     }
-    private var matches: [NSRange] { (try? ComparisonSearch.matches(in: snapshot.worktree.text ?? "", options: searchOptions).get()) ?? [] }
     private var searchError: String? {
-        if case .failure(let error) = ComparisonSearch.matches(in: snapshot.worktree.text ?? "", options: searchOptions) { return comparisonSearchText("Invalid regular expression") + ": " + error.localizedDescription }
+        if case .failure(let error) = ComparisonSearch.matches(in: "", options: searchOptions) { return comparisonSearchText("Invalid regular expression") + ": " + error.localizedDescription }
         return nil
     }
     private func selectConflict(_ index: Int) {
@@ -73,7 +73,7 @@ struct WorkspaceConflictPreview: View {
                 Button { showSearch.toggle() } label: { ComparisonToolbarIcon(name: "magnifyingglass") }.buttonStyle(ComparisonToolbarButtonStyle())
                     .help(comparisonSearchText("Search and replace")).accessibilityLabel(comparisonSearchText("Search and replace"))
                     .popover(isPresented: $showSearch) {
-                        ComparisonSearchPopover(options: $searchOptions, replacement: $replacement, matchCount: matches.count, matchIndex: navigationCommands.searchCurrent,
+                        ComparisonSearchPopover(options: $searchOptions, replacement: $replacement, matchCount: navigationCommands.searchTotal, matchIndex: navigationCommands.searchCurrent,
                             onNavigate: { forward in compact = false; navigation += forward ? 1 : -1 },
                             onOpenEditor: onOpenEditorSearch.map { action in { action(searchOptions, replacement) } }, error: searchError, onClose: { showSearch = false; DispatchQueue.main.async { navigationCommands.focusEditor() } })
                     }
@@ -99,5 +99,14 @@ struct WorkspaceConflictPreview: View {
                 CompareBasePanel(column: column("base", "Base (Stage 1)", base), wraps: wraps, numbers: numbers, expanded: $showBase)
             }
         }.background(ComparisonKeyboardRegion(action: performShortcut)).onChange(of: snapshot.path) { _, _ in resolver.selectedBlock = 0 }
+    }
+}
+
+private final class WorkspaceConflictBlockCache: ObservableObject {
+    private var text: String?
+    private var cached: [ConflictDraft.Block] = []
+    func blocks(in value: String) -> [ConflictDraft.Block] {
+        if text != value { text = value; cached = ConflictDraft.blocks(in: value) }
+        return cached
     }
 }

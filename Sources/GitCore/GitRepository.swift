@@ -2,6 +2,27 @@ import Foundation
 
 public actor GitRepository {
     public nonisolated let url: URL
+    private var fileHistoryCache: [String: [GitCommit]] = [:]
+    private var fileHistoryCosts: [String: Int] = [:]
+    private var fileHistoryIdentity: String?
+    private var fileHistoryOrder: [String] = []
+    private var publicationCache: (identity: String, hashes: Set<String>)?
+    private var shallowFile: URL?
+    private(set) var fileHistoryTraversalCount = 0
+    private(set) var publicationTraversalCount = 0
+
+    /// References, detached HEAD and shallow boundaries determine reachability.
+    private func historyReferenceIdentity() async throws -> String {
+        async let refs = run(["show-ref", "--head"], allowedCodes: [0, 1]).text
+        async let head = run(["symbolic-ref", "--quiet", "HEAD"], allowedCodes: [0, 1]).text
+        let referenceState = try await head + refs
+        if shallowFile == nil {
+            let path = try await run(["rev-parse", "--git-path", "shallow"]).text.trimmingCharacters(in: .newlines)
+            shallowFile = URL(fileURLWithPath: path, relativeTo: url.appendingPathComponent("", isDirectory: true)).standardizedFileURL
+        }
+        let shallow = shallowFile.flatMap { try? Data(contentsOf: $0) } ?? Data()
+        return referenceState + "\0" + String(decoding: shallow, as: UTF8.self)
+    }
     public init(url: URL) { self.url = url.standardizedFileURL }
     public static func open(_ url: URL) async throws -> GitRepository {
         let result = try await GitProcess.run(at: url, arguments: ["rev-parse", "--show-toplevel"])
@@ -49,15 +70,67 @@ public actor GitRepository {
     /// size. Remote-tracking refs reflect the most recent fetch or push.
     public func unpublishedCommitHashes(in commits: [GitCommit]) async throws -> Set<String> {
         guard !commits.isEmpty else { return [] }
+        let identity = try await historyReferenceIdentity()
+        if let cached = publicationCache, cached.identity == identity {
+            return cached.hashes.intersection(commits.map(\.hash))
+        }
         let head = try await run(["rev-parse", "--verify", "HEAD"], allowedCodes: [0, 128])
         let revisions = head.code == 0 ? ["HEAD"] : []
         let output = try await run(["rev-list", "--branches"] + revisions + ["--not", "--remotes", "--"])
-        return Set(output.text.split(separator: "\n").map(String.init)).intersection(commits.map(\.hash))
+        try Task.checkCancellation()
+        let hashes = Set(output.text.split(separator: "\n").map(String.init))
+        publicationTraversalCount += 1
+        publicationCache = (identity, hashes)
+        return hashes.intersection(commits.map(\.hash))
     }
+
     public func worktrees() async throws -> [GitWorktree] {
         GitWorktree.parsePorcelain(try await run(["worktree", "list", "--porcelain", "-z"]).data)
     }
     public func log(limit: Int = 200, skip: Int = 0, search: String = "", path: String? = nil, ref: String? = nil, author: String = "", firstParent: Bool = false, refs: [String]? = nil, stashHashes: [String] = [], includeRecyclable: Bool = false, incomingOnly: Bool = false) async throws -> [GitCommit] {
+        guard let path else {
+            return try await readLog(limit: limit, skip: skip, search: search, path: nil, ref: ref, author: author,
+                firstParent: firstParent, refs: refs, stashHashes: stashHashes, includeRecyclable: includeRecyclable, incomingOnly: incomingOnly)
+        }
+        try validatePath(path)
+        var identity = try await historyReferenceIdentity()
+        // Reflog selectors and the recyclable scope may change while every
+        // ordinary ref returns to its previous hash. Resolve those dependencies.
+        for revision in (refs ?? []) + (ref.map { [$0] } ?? []) where revision.contains("@{") {
+            identity += "\0" + (try await validatedCommit(revision))
+        }
+        if includeRecyclable { identity += "\0" + (try await recyclableCommitHashes()).sorted().joined(separator: "\n") }
+        if fileHistoryIdentity != identity {
+            fileHistoryCache = [:]; fileHistoryCosts = [:]; fileHistoryOrder = []; fileHistoryIdentity = identity
+        }
+        // Encode fields to keep paths and revision names unambiguous. Filters and
+        // pagination do not change rename traversal, so share the complete result.
+        let key = String(decoding: try JSONEncoder().encode([path, ref ?? "", String(firstParent), String(includeRecyclable), String(incomingOnly)]
+            + (refs.map { ["refs"] + $0.sorted() } ?? ["default"]) + ["stashes"] + stashHashes.sorted()), as: UTF8.self)
+        let rows: [GitCommit]
+        if let cached = fileHistoryCache[key] {
+            rows = cached
+        } else {
+            rows = try await readLog(limit: limit, skip: 0, search: "", path: path, ref: ref, author: "",
+                firstParent: firstParent, refs: refs, stashHashes: stashHashes, includeRecyclable: includeRecyclable, incomingOnly: incomingOnly)
+            try Task.checkCancellation()
+            fileHistoryTraversalCount += 1
+            fileHistoryCache[key] = rows
+            fileHistoryCosts[key] = rows.reduce(0) { $0 + $1.body.utf8.count + $1.subject.utf8.count + 512 }
+        }
+        fileHistoryOrder.removeAll { $0 == key }; fileHistoryOrder.append(key)
+        // Long commit messages must not turn a file-history cache into unbounded memory.
+        while fileHistoryOrder.count > 8 || fileHistoryCosts.values.reduce(0, +) > 32 * 1024 * 1024 {
+            guard !fileHistoryOrder.isEmpty else { break }
+            let oldest = fileHistoryOrder.removeFirst()
+            fileHistoryCache.removeValue(forKey: oldest); fileHistoryCosts.removeValue(forKey: oldest)
+        }
+        let matching = rows.lazy.filter { (search.isEmpty || $0.body.range(of: search, options: .caseInsensitive) != nil)
+            && (author.isEmpty || $0.author.range(of: author, options: .caseInsensitive) != nil) }
+        return Array(matching.dropFirst(max(0, skip)).prefix(max(0, limit)))
+    }
+    private func readLog(limit: Int, skip: Int, search: String, path: String?, ref: String?, author: String,
+                         firstParent: Bool, refs: [String]?, stashHashes: [String], includeRecyclable: Bool, incomingOnly: Bool) async throws -> [GitCommit] {
         if let refs, refs.isEmpty, stashHashes.isEmpty, !includeRecyclable { return [] }
         var args = ["log", "--topo-order", "-z", "--format=%H%x00%P%x00%an%x00%at%x00%s%x00%B%x00%D%x00%ae%x00%cn%x00%ce%x00%ct"]
         if firstParent { args.append("--first-parent") }
@@ -111,12 +184,6 @@ public actor GitRepository {
         var result: [GitCommit] = []
         for i in stride(from: 0, to: max(0, tokens.count - 10), by: 11) {
             result.append(GitCommit(hash: tokens[i], parents: tokens[i+1].split(separator: " ").map(String.init), author: tokens[i+2], date: Date(timeIntervalSince1970: Double(tokens[i+3]) ?? 0), subject: tokens[i+4], body: tokens[i+5], refs: tokens[i+6].split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }, authorEmail: tokens[i+7], committer: tokens[i+8], committerEmail: tokens[i+9], committedDate: Date(timeIntervalSince1970: Double(tokens[i+10]) ?? 0)))
-        }
-        if path != nil {
-            // Git's --skip/--grep can skip the rename needed by --follow. Traverse
-            // the complete file history before filtering and paginating it.
-            let matching = result.filter { (search.isEmpty || $0.body.range(of: search, options: .caseInsensitive) != nil) && (author.isEmpty || $0.author.range(of: author, options: .caseInsensitive) != nil) }
-            return Array(matching.dropFirst(max(0, skip)).prefix(max(0, limit)))
         }
         return result
     }

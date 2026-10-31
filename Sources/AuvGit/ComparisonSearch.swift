@@ -10,13 +10,33 @@ struct ComparisonSearchOptions: Equatable {
 func comparisonSearchText(_ key: String) -> String { L10n.text(key, table: "ComparisonSearch") }
 
 enum ComparisonSearch {
+    private static let expressions: NSCache<NSString, NSRegularExpression> = {
+        let cache = NSCache<NSString, NSRegularExpression>(); cache.countLimit = 32; return cache
+    }()
+    static func expression(for options: ComparisonSearchOptions) throws -> NSRegularExpression {
+        let key = "\(options.caseSensitive)|\(options.regularExpression)|" + options.query
+        if let cached = expressions.object(forKey: key as NSString) { return cached }
+        let pattern = options.regularExpression ? options.query : NSRegularExpression.escapedPattern(for: options.query)
+        let expression = try NSRegularExpression(pattern: pattern, options: options.caseSensitive ? [.anchorsMatchLines] : [.anchorsMatchLines, .caseInsensitive])
+        expressions.setObject(expression, forKey: key as NSString)
+        return expression
+    }
     static func matches(in text: String, options: ComparisonSearchOptions) -> Result<[NSRange], Error> {
-        guard !options.query.isEmpty else { return .success([]) }
-        do {
-            let pattern = options.regularExpression ? options.query : NSRegularExpression.escapedPattern(for: options.query)
-            let expression = try NSRegularExpression(pattern: pattern, options: options.caseSensitive ? [.anchorsMatchLines] : [.anchorsMatchLines, .caseInsensitive])
-            return .success(expression.matches(in: text, range: NSRange(location: 0, length: text.utf16.count)).map(\.range))
-        } catch { return .failure(error) }
+        Result {
+            guard !options.query.isEmpty else { return [] }
+            return try matches(in: text, range: NSRange(location: 0, length: text.utf16.count), expression: expression(for: options))
+        }
+    }
+    static func matches(in text: String, range: NSRange, expression: NSRegularExpression) throws -> [NSRange] {
+        try Task.checkCancellation()
+        var ranges: [NSRange] = []
+        // ICU progress callbacks allow even a slow regex to observe cancellation.
+        expression.enumerateMatches(in: text, options: [.reportProgress], range: range) { match, _, stop in
+            if Task.isCancelled { stop.pointee = true }
+            else if let match { ranges.append(match.range) }
+        }
+        try Task.checkCancellation()
+        return ranges
     }
     // Scan ordered matches and line starts together instead of scanning the whole document per match.
     static func matchingLines(matches: [NSRange], starts: [Int], length: Int) -> Set<Int> {
@@ -39,8 +59,7 @@ enum ComparisonSearch {
     static func replacing(in text: String, options: ComparisonSearchOptions, replacement: String, all: Bool, selected: NSRange? = nil) -> Result<String, Error> {
         do {
             guard !options.query.isEmpty else { return .success(text) }
-            let pattern = options.regularExpression ? options.query : NSRegularExpression.escapedPattern(for: options.query)
-            let expression = try NSRegularExpression(pattern: pattern, options: options.caseSensitive ? [.anchorsMatchLines] : [.anchorsMatchLines, .caseInsensitive])
+            let expression = try expression(for: options)
             let matches = expression.matches(in: text, range: NSRange(location: 0, length: text.utf16.count))
             guard !matches.isEmpty else { return .success(text) }
             let targets = all ? matches : [matches.first(where: { $0.range == selected }) ?? matches.first(where: { $0.range.location >= (selected?.location ?? 0) }) ?? matches[0]]

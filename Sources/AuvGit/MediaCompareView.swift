@@ -8,26 +8,35 @@ private func advancedText(_ key: String) -> String { L10n.text(key, table: "Adva
 
 enum StaticImagePreview {
     static let maximumPixels = 64_000_000
-    private static let images: NSCache<NSData, NSImage> = {
-        let cache = NSCache<NSData, NSImage>()
-        cache.countLimit = 12; cache.totalCostLimit = 64 * 1024 * 1024
-        return cache
+    final class Preview: NSObject {
+        let image: NSImage?
+        let dimensions: (Int, Int)?
+        let pages: Int?
+        init(image: NSImage?, dimensions: (Int, Int)?, pages: Int?) {
+            self.image = image; self.dimensions = dimensions; self.pages = pages
+        }
+    }
+    private static let previews: NSCache<NSData, Preview> = {
+        let cache = NSCache<NSData, Preview>(); cache.countLimit = 12; cache.totalCostLimit = 64 * 1024 * 1024; return cache
     }()
     static func dimensions(_ data: Data) -> (Int, Int)? {
+        if let cached = previews.object(forKey: data as NSData) { return cached.dimensions }
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
               let height = properties[kCGImagePropertyPixelHeight] as? NSNumber else { return nil }
         return (width.intValue, height.intValue)
     }
-    static func image(_ data: Data) -> NSImage? {
-        guard data.count <= FileComparisonLimits.previewBytes else { return nil }
+    static func image(_ data: Data) -> NSImage? { preview(data).image }
+    static func preview(_ data: Data) -> Preview {
+        guard data.count <= FileComparisonLimits.previewBytes else { return Preview(image: nil, dimensions: nil, pages: nil) }
         let key = data as NSData
-        if let image = images.object(forKey: key) { return image }
-        guard let image = decode(data) else { return nil }
-        let pixels = image.representations.map { $0.pixelsWide * $0.pixelsHigh }.max() ?? 0
-        images.setObject(image, forKey: key, cost: data.count + pixels * 4)
-        return image
+        if let cached = previews.object(forKey: key) { return cached }
+        let image = decode(data)
+        let entry = Preview(image: image, dimensions: dimensions(data), pages: SafeStaticDocument.pdfPageCount(data))
+        let pixels = image?.representations.map { $0.pixelsWide * $0.pixelsHigh }.max() ?? 0
+        previews.setObject(entry, forKey: key, cost: data.count + pixels * 4)
+        return entry
     }
     private static func decode(_ data: Data) -> NSImage? {
         if let document = SafeStaticDocument.image(data) { return document }
@@ -41,6 +50,48 @@ enum StaticImagePreview {
               width.doubleValue * height.doubleValue <= Double(maximumPixels),
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 2048, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceShouldCacheImmediately: false] as CFDictionary) else { return nil }
         return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
+    }
+}
+
+actor StaticPreviewWorker {
+    static let shared = StaticPreviewWorker()
+    private var tail: Task<StaticImagePreview.Preview, Never>?
+    private var tailID: UUID?
+    private struct Pending {
+        let id: UUID
+        let task: Task<StaticImagePreview.Preview, Never>
+        var waiters: Set<UUID>
+    }
+    private var pending: [Data: Pending] = [:]
+    func load(_ data: Data) async -> StaticImagePreview.Preview {
+        let waiter = UUID()
+        let entry: Pending
+        if var existing = pending[data] {
+            existing.waiters.insert(waiter); pending[data] = existing; entry = existing
+        } else {
+            let preceding = tail
+            let task = Task.detached(priority: .userInitiated) {
+                _ = await preceding?.value
+                guard !Task.isCancelled else { return StaticImagePreview.Preview(image: nil, dimensions: nil, pages: nil) }
+                return autoreleasepool { StaticImagePreview.preview(data) }
+            }
+            entry = Pending(id: UUID(), task: task, waiters: [waiter])
+            pending[data] = entry; tail = task; tailID = entry.id
+        }
+        let value = await withTaskCancellationHandler { await entry.task.value } onCancel: {
+            Task { await self.release(data, id: entry.id, waiter: waiter) }
+        }
+        release(data, id: entry.id, waiter: waiter)
+        // A cancelled caller can leave a native decoder running. Retain the queue
+        // dependency until that decoder actually returns, including with no waiters.
+        if tailID == entry.id { tail = nil; tailID = nil }
+        return value
+    }
+    private func release(_ data: Data, id: UUID, waiter: UUID) {
+        guard var entry = pending[data], entry.id == id else { return }
+        entry.waiters.remove(waiter)
+        if entry.waiters.isEmpty { entry.task.cancel(); pending[data] = nil }
+        else { pending[data] = entry }
     }
 }
 
@@ -63,6 +114,12 @@ struct FileContentSummary: View {
 struct StaticComparisonView: View {
     let snapshot: FileComparisonSnapshot
     var showsControls = true
+    private struct Request: Equatable { let path: String; let data: [Data?] }
+    @State private var loadedRequest: Request?
+    @State private var previews: [String: StaticImagePreview.Preview] = [:]
+    private var request: Request {
+        Request(path: snapshot.path, data: [snapshot.head.data, snapshot.index.data, snapshot.worktree.data, snapshot.base?.data, snapshot.ours?.data, snapshot.theirs?.data])
+    }
     private var summaries: [(String, FileRevisionContent)] {
         if snapshot.isConflict {
             return [(compareText("Ours (HEAD)"), snapshot.ours ?? snapshot.head), (advancedText("worktree"), snapshot.worktree), (advancedText("theirs"), snapshot.theirs ?? snapshot.index)]
@@ -71,13 +128,25 @@ struct StaticComparisonView: View {
         return [(labels.0, snapshot.previewTarget != nil || snapshot.presentation.leftRevision == .head ? snapshot.head : snapshot.index), (labels.1, snapshot.worktree)]
     }
     var body: some View {
-        if MediaCompareView.supports(snapshot) { MediaCompareView(snapshot: snapshot, showsControls: showsControls) }
-        else {
-            HStack(spacing: 1) {
-                ForEach(Array(summaries.enumerated()), id: \.offset) { _, revision in
-                    VStack { Text(revision.0).font(.caption); FileContentSummary(content: revision.1) }
-                }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        Group {
+            if loadedRequest != request { ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            else if previews.values.contains(where: { $0.image != nil }) { MediaCompareView(snapshot: snapshot, showsControls: showsControls, previews: previews) }
+            else {
+                HStack(spacing: 1) {
+                    ForEach(Array(summaries.enumerated()), id: \.offset) { _, revision in
+                        VStack { Text(revision.0).font(.caption); FileContentSummary(content: revision.1) }
+                    }
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }.task(id: request) {
+            let requested = request
+            var loaded: [String: StaticImagePreview.Preview] = [:]
+            for (id, data) in zip(["head", "index", "worktree", "base", "ours", "theirs"], requested.data) {
+                guard !Task.isCancelled else { return }
+                if let data { loaded[id] = await StaticPreviewWorker.shared.load(data) }
+            }
+            guard !Task.isCancelled else { return }
+            previews = loaded; loadedRequest = requested
         }
     }
 }
@@ -85,13 +154,11 @@ struct StaticComparisonView: View {
 struct MediaCompareView: View {
     let snapshot: FileComparisonSnapshot
     var showsControls = true
+    var previews: [String: StaticImagePreview.Preview] = [:]
     @State private var overlay = false
     @State private var opacity = 0.5
     @State private var left = "head"
     @State private var right = "worktree"
-    static func supports(_ snapshot: FileComparisonSnapshot) -> Bool {
-        [snapshot.head, snapshot.index, snapshot.worktree, snapshot.base, snapshot.ours, snapshot.theirs].compactMap { $0 }.contains { content in content.data.flatMap(StaticImagePreview.image) != nil }
-    }
     static func previewLabels(_ snapshot: FileComparisonSnapshot) -> (String, String) {
         switch snapshot.previewTarget {
         case .worktree: return (advancedText("index"), advancedText("worktree"))
@@ -124,18 +191,18 @@ struct MediaCompareView: View {
             }
             if overlay {
                 ZStack {
-                    if let data = revisions.first(where: { $0.0 == left })?.2.data, let image = StaticImagePreview.image(data) { Image(nsImage: image).resizable().scaledToFit() }
-                    if let data = revisions.first(where: { $0.0 == right })?.2.data, let image = StaticImagePreview.image(data) { Image(nsImage: image).resizable().scaledToFit().opacity(opacity) }
+                    if let image = previews[left]?.image { Image(nsImage: image).resizable().scaledToFit() }
+                    if let image = previews[right]?.image { Image(nsImage: image).resizable().scaledToFit().opacity(opacity) }
                 }.padding(12).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 HStack(alignment: .top, spacing: 12) {
                     ForEach(revisions.filter { $0.0 == left || $0.0 == right }, id: \.0) { revision in
                         VStack(spacing: 8) {
                             Text(revision.1).font(.system(size: 12, weight: .semibold))
-                            if let data = revision.2.data, let image = StaticImagePreview.image(data) {
-                                let dimensions = StaticImagePreview.dimensions(data)
+                            if let data = revision.2.data, let image = previews[revision.0]?.image {
+                                let dimensions = previews[revision.0]?.dimensions
                                 Text("\(dimensions?.0 ?? Int(image.size.width)) × \(dimensions?.1 ?? Int(image.size.height)) · \(data.count) B").font(.caption).foregroundStyle(.secondary)
-                                if let pages = SafeStaticDocument.pdfPageCount(data) { Text(L10n.text("PDF page 1 of %@", table: "StaticPreview", arguments: [String(pages)])).font(.caption).foregroundStyle(.secondary) }
+                                if let pages = previews[revision.0]?.pages { Text(L10n.text("PDF page 1 of %@", table: "StaticPreview", arguments: [String(pages)])).font(.caption).foregroundStyle(.secondary) }
                                 Image(nsImage: image).resizable().scaledToFit()
                             } else { FileContentSummary(content: revision.2) }
                         }.frame(maxWidth: .infinity, maxHeight: .infinity)
