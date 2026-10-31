@@ -78,7 +78,7 @@ enum GitProcess {
         return try await withTaskCancellationHandler {
             do {
                 try Task.checkCancellation()
-                let result = try await Task.detached(priority: .userInitiated) {
+                let result = try await Task.detached(priority: Task.currentPriority) {
                     try runBlocking(at: directory, arguments: actualArguments, allowedCodes: allowedCodes, timeout: timeout ?? GitRuntimePreferences.shared.timeout, executable: commandExecutable, progress: streamedProgress, outputFile: outputFile, outputPrefixBytes: outputPrefixBytes, inputFile: inputFile, literalPathspecs: literalPathspecs, environmentOverrides: environmentOverrides, noninteractive: noninteractive, sshCommand: sshCommand, cancellation: cancellation)
                 }.value
                 if logCommand { GitCommandLog.record(directory: directory, executable: commandExecutable, arguments: actualArguments, output: result.text + "\n" + result.error, error: nil, exitCode: result.code, started: started) }

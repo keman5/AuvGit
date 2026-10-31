@@ -19,27 +19,59 @@ final class ComparisonActionRail: NSView {
     var pointsRight = true
     var color: NSColor = .systemBlue
     private var entries: [Entry] = []
-    private var buttons: [NSButton] = []
+    private var buttons: [Int: NSButton] = [:]
+    private var geometry: [(NSRect?, NSRect?)] = []
+    private var geometryIndex: [(index: Int, lower: CGFloat, upper: CGFloat)] = []
+    private var geometryPrefixUpper: [CGFloat] = []
+    private var geometryKeys: [GeometryKey] = []
+    private var storageObservers: [NSObjectProtocol] = []
+    private var geometryInvalid = true
+    private struct GeometryKey: Equatable {
+        let identity: ObjectIdentifier
+        let size: NSSize
+        let inset: NSSize
+        let containerSize: NSSize
+        let laidCharacters: Int
+        let font: NSFont?
+    }
+    private var geometryTexts: [NSTextView] = []
     private var connectors: [(NSBezierPath, NSColor)] = []
     override var isFlipped: Bool { true }
+    deinit { storageObservers.forEach(NotificationCenter.default.removeObserver) }
+    /// Call when custom paragraph/layout metrics change without editing storage.
+    func invalidateDocumentGeometry() { geometryInvalid = true }
     func setEntries(_ value: [Entry]) {
+        buttons.values.forEach { $0.removeFromSuperview() }
+        buttons.removeAll(keepingCapacity: true)
+        storageObservers.forEach(NotificationCenter.default.removeObserver)
+        storageObservers.removeAll()
         entries = value
-        let previous = buttons
-        previous.dropFirst(value.count).forEach { $0.removeFromSuperview() }
-        buttons = value.enumerated().map { index, entry in
-            let button = previous.indices.contains(index) ? previous[index] : NSButton(title: "", target: self, action: #selector(accept(_:)))
-            let font = entry.sourceText?.font ?? entry.text.font ?? .monospacedSystemFont(ofSize: 12, weight: .regular)
-            button.image = NSImage(systemSymbolName: entry.deletesContent ? "xmark" : pointsRight ? "chevron.right.2" : "chevron.left.2", accessibilityDescription: nil)?
-                .withSymbolConfiguration(.init(pointSize: max(8, font.pointSize - 3), weight: .regular))
-            button.tag = index
-            button.isBordered = false
-            button.contentTintColor = DiffVisualStyle.actionColor
-            button.toolTip = entry.title
-            button.setAccessibilityLabel(entry.title)
-            if button.superview == nil { addSubview(button) }
-            return button
+        var identities = Set<ObjectIdentifier>()
+        geometryTexts = value.flatMap { [$0.text, $0.sourceText].compactMap { $0 } }.filter {
+            identities.insert(ObjectIdentifier($0)).inserted
         }
+        for text in geometryTexts {
+            if let storage = text.textStorage {
+                storageObservers.append(NotificationCenter.default.addObserver(forName: NSTextStorage.didProcessEditingNotification, object: storage, queue: nil) { [weak self] _ in
+                    self?.geometryInvalid = true
+                })
+            }
+        }
+        geometryInvalid = true
         refresh()
+    }
+    private func makeButton(for index: Int) -> NSButton {
+        let entry = entries[index]
+        let button = NSButton(title: "", target: self, action: #selector(accept(_:)))
+        let font = entry.sourceText?.font ?? entry.text.font ?? .monospacedSystemFont(ofSize: 12, weight: .regular)
+        button.image = NSImage(systemSymbolName: entry.deletesContent ? "xmark" : pointsRight ? "chevron.right.2" : "chevron.left.2", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: max(8, font.pointSize - 3), weight: .regular))
+        button.tag = index
+        button.isBordered = false
+        button.contentTintColor = DiffVisualStyle.actionColor
+        button.toolTip = entry.title
+        button.setAccessibilityLabel(entry.title)
+        return button
     }
     @objc private func accept(_ button: NSButton) {
         guard entries.indices.contains(button.tag) else { return }
@@ -90,24 +122,64 @@ final class ComparisonActionRail: NSView {
         return path
     }
     func refresh() {
+        let keys = geometryTexts.map {
+            GeometryKey(identity: ObjectIdentifier($0), size: $0.frame.size, inset: $0.textContainerInset,
+                        containerSize: $0.textContainer?.containerSize ?? .zero,
+                        laidCharacters: $0.layoutManager?.firstUnlaidCharacterIndex() ?? 0, font: $0.font)
+        }
+        if geometryInvalid || keys != geometryKeys {
+            geometry = entries.map { entry in
+                (Self.documentRect(entry.range, in: entry.text, insertionLine: entry.insertionLine),
+                 entry.sourceText.flatMap { text in entry.sourceRange.flatMap { Self.documentRect($0, in: text, insertionLine: entry.sourceInsertionLine) } })
+            }
+            geometryIndex = geometry.enumerated().compactMap { index, pair in
+                guard let target = pair.0 else { return nil }
+                let source = pair.1 ?? target
+                return (index, min(target.minY, source.minY), max(target.maxY, source.maxY))
+            }.sorted { $0.lower < $1.lower }
+            var maximum = -CGFloat.infinity
+            geometryPrefixUpper = geometryIndex.map { maximum = max(maximum, $0.upper); return maximum }
+            geometryKeys = keys
+            geometryInvalid = false
+        }
         connectors.removeAll(keepingCapacity: true)
-        for (entry, button) in zip(entries, buttons) {
-            guard let document = Self.documentRect(entry.range, in: entry.text, insertionLine: entry.insertionLine) else { button.isHidden = true; continue }
+        var visibleButtons = Set<Int>()
+        let bridge = oppositeRail.flatMap { $0.bounds.width > 0 ? bounds.union(convert($0.bounds, from: $0)) : nil } ?? bounds
+        // Translation changes during scrolling, while document intervals stay fixed.
+        // Use a conservative interval across both panes so crossing curves survive.
+        let offsets = geometryTexts.map { convert(NSPoint.zero, from: $0).y }
+        let lower = bounds.minY - (offsets.max() ?? 0)
+        let upper = bounds.maxY - (offsets.min() ?? 0)
+        var start = 0, end = geometryIndex.count
+        while start < end {
+            let middle = (start + end) / 2
+            if geometryPrefixUpper[middle] < lower { start = middle + 1 } else { end = middle }
+        }
+        for item in geometryIndex.dropFirst(start) {
+            if item.lower > upper { break }
+            guard item.upper >= lower else { continue }
+            let index = item.index, entry = entries[index]
+            guard let document = geometry[index].0 else { continue }
             let rect = convert(document, from: entry.text)
             var source = rect
-            if let sourceText = entry.sourceText, let sourceRange = entry.sourceRange {
-                guard let document = Self.documentRect(sourceRange, in: sourceText, insertionLine: entry.sourceInsertionLine) else { button.isHidden = true; continue }
+            if let sourceText = entry.sourceText, entry.sourceRange != nil {
+                guard let document = geometry[index].1 else { continue }
                 source = convert(document, from: sourceText)
             }
+            // A bridge can cross the viewport even when both endpoints are outside.
+            let bridgeTop = min(rect.minY, source.minY), bridgeBottom = max(rect.maxY, source.maxY)
+            guard bridgeBottom >= bounds.minY, bridgeTop <= bounds.maxY else { continue }
             let tint = entry.tint ?? (entry.deletesContent ? NSColor.systemRed : color)
             // Both editable panes clip the same bridge instead of drawing mirrored curves.
-            let bridge = oppositeRail.flatMap { $0.bounds.width > 0 ? bounds.union(convert($0.bounds, from: $0)) : nil } ?? bounds
             let path = Self.connectorPath(left: pointsRight ? source : rect, right: pointsRight ? rect : source, width: bridge.width)
             path.transform(using: AffineTransform(translationByX: bridge.minX, byY: 0))
             connectors.append((path, tint))
             var host = self
             if !entry.deletesContent, let oppositeRail, oppositeRail.bounds.width > 0,
                entry.range.length > 0 || oppositeRail.bounds.width >= ComparisonEditorMetrics.actionRailWidth { host = oppositeRail }
+            let button = buttons[index] ?? makeButton(for: index)
+            buttons[index] = button
+            visibleButtons.insert(index)
             if button.superview !== host { host.addSubview(button) }
             let anchor = host.convert(entry.deletesContent ? rect : source, from: self)
             let top = anchor.minY
@@ -124,6 +196,9 @@ final class ComparisonActionRail: NSView {
             let inset = !entry.deletesContent && entry.range.length == 0 && host !== self ? buttonWidth : 0
             let x = onLeft ? 2 + inset : max(0, host.bounds.width - buttonWidth - 2 - inset)
             button.frame = NSRect(x: x, y: center - halfHeight, width: buttonWidth, height: buttonHeight)
+        }
+        for index in Array(buttons.keys) where !visibleButtons.contains(index) {
+            buttons.removeValue(forKey: index)?.removeFromSuperview()
         }
         needsDisplay = true
     }

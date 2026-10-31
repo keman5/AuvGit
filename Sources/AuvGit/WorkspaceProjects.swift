@@ -35,9 +35,10 @@ final class WorkspaceProjects: ObservableObject {
             guard let self, self.active === store else { return }
             self.objectWillChange.send()
         }
-        sessionObservers[ObjectIdentifier(store)] = store.objectWillChange
-            .debounce(for: .milliseconds(500), scheduler: RunLoop.main)
-            .sink { [weak self] _ in self?.sessions.first?.flushSession() }
+        if !store.persistsWorkspaceSession {
+            sessionObservers[ObjectIdentifier(store)] = store.sessionChanges
+                .sink { [weak self] _ in self?.sessions.first?.requestSessionSave() }
+        }
         creationObservers[ObjectIdentifier(store)] = store.creationOperation.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }

@@ -6,6 +6,99 @@ import AppKit
 
 @MainActor
 final class ForegroundRefreshTests: XCTestCase {
+    func testWorktreeRefreshWithoutSnapshotStillLoadsStashes() async throws {
+        let root = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = GitRepository(url: root)
+        try "stashed content\n".write(to: root.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+        _ = try await repository.workflowRead(["stash", "push", "-m", "first-refresh"])
+        let store = RepositoryStore(persistsSession: false)
+        defer { store.closeTransientSession() }
+        store.repository = repository; store.repositoryURL = repository.url
+        await store.refreshIfChanged(worktreeOnly: true)
+        XCTAssertEqual(store.stashes.count, 1)
+        XCTAssertTrue(store.stashes.first?.subject.contains("first-refresh") == true)
+        XCTAssertNil(store.error)
+    }
+
+    func testFullRefreshUpgradesAnInFlightWorktreeOnlyRead() async throws {
+        let root = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = RepositoryStore(persistsSession: false)
+        defer { store.closeTransientSession() }
+        let repository = GitRepository(url: root)
+        store.repository = repository; store.repositoryURL = repository.url
+        await store.refresh()
+        let wrapper = root.appendingPathComponent(".git/scope-git")
+        try """
+        #!/bin/sh
+        echo "$*" >> .git/scope-trace
+        for arg in "$@"; do
+          if [ "$arg" = status ] && mkdir .git/scope-started 2>/dev/null; then
+            trap 'exit 143' TERM
+            attempts=0
+            while [ ! -f .git/scope-release ] && [ "$attempts" -lt 300 ]; do
+              sleep 0.01
+              attempts=$((attempts + 1))
+            done
+          fi
+        done
+        exec /usr/bin/git "$@"
+        """.write(to: wrapper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
+        let key = "auvgit.git.executablePath", previous = UserDefaults.standard.object(forKey: key)
+        UserDefaults.standard.set(wrapper.path, forKey: key)
+        defer { restoreGit(previous) }
+        let light = Task { await store.refreshIfChanged(worktreeOnly: true) }
+        defer { light.cancel() }
+        let deadline = Date().addingTimeInterval(3)
+        let marker = root.appendingPathComponent(".git/scope-started")
+        while !FileManager.default.fileExists(atPath: marker.path), Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: marker.path))
+        let full = Task { await store.refreshIfChanged() }
+        defer { full.cancel() }
+        await Task.yield()
+        _ = try await repository.workflowRead(["checkout", "-b", "scope-upgrade"])
+        try Data().write(to: root.appendingPathComponent(".git/scope-release"))
+        await light.value; await full.value
+        let actualBranch = try await repository.currentBranch()
+        XCTAssertEqual(actualBranch, "scope-upgrade")
+        let trace = (try? String(contentsOf: root.appendingPathComponent(".git/scope-trace"), encoding: .utf8)) ?? ""
+        XCTAssertEqual(store.branch, "scope-upgrade", "The full request must read HEAD after the lighter request completes. Commands:\n\(trace)")
+        XCTAssertNil(store.error)
+    }
+
+    func testWorktreeOnlyRefreshKeepsMetadataAndIndexReadsCached() async throws {
+        let root = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = RepositoryStore(persistsSession: false)
+        defer { store.closeTransientSession() }
+        store.repository = GitRepository(url: root); store.repositoryURL = root
+        await store.refresh()
+        let wrapper = root.appendingPathComponent(".git/event-count-git")
+        try """
+        #!/bin/sh
+        for arg in "$@"; do
+          case "$arg" in
+            status|show-ref|ls-files|for-each-ref) echo "$arg" >> .git/event-reads ;;
+          esac
+        done
+        exec /usr/bin/git "$@"
+        """.write(to: wrapper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
+        let key = "auvgit.git.executablePath", previous = UserDefaults.standard.object(forKey: key)
+        UserDefaults.standard.set(wrapper.path, forKey: key)
+        defer { restoreGit(previous) }
+        try "changed\n".write(to: root.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+        await store.refreshIfChanged(worktreeOnly: true)
+        XCTAssertEqual(store.files.map(\.path), ["file.txt"])
+        let reads = try String(contentsOf: root.appendingPathComponent(".git/event-reads"), encoding: .utf8).split(separator: "\n")
+        XCTAssertEqual(reads.filter { $0 == "status" }.count, 1)
+        XCTAssertFalse(reads.contains("show-ref"))
+        XCTAssertFalse(reads.contains("ls-files"))
+        XCTAssertFalse(reads.contains("for-each-ref"))
+    }
+
     func testActivationReplacesBlockedAutomaticReadAndStagingRemainsResponsive() async throws {
         let root = try await fixture()
         defer { try? FileManager.default.removeItem(at: root) }

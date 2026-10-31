@@ -2,6 +2,30 @@ import XCTest
 @testable import GitCore
 
 final class RepositoryChangeStateTests: XCTestCase {
+    func testDroppingAnOlderStashChangesHistoryEvenWhenItsTipIsUnchanged() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for args in [["init", "-b", "main"], ["config", "user.name", "Test"], ["config", "user.email", "test@example.invalid"], ["config", "commit.gpgsign", "false"]] {
+            _ = try await GitProcess.run(at: root, arguments: args)
+        }
+        let repository = GitRepository(url: root), file = root.appendingPathComponent("tracked.txt")
+        try "base\n".write(to: file, atomically: true, encoding: .utf8)
+        try await repository.stage(paths: ["tracked.txt"])
+        try await repository.commit(message: "Base")
+        for text in ["older\n", "newer\n"] {
+            try text.write(to: file, atomically: true, encoding: .utf8)
+            _ = try await GitProcess.run(at: root, arguments: ["stash", "push", "-m", text])
+        }
+        let before = try await repository.changeState(files: repository.status())
+        let tip = try await repository.workflowRevision("refs/stash")
+        _ = try await GitProcess.run(at: root, arguments: ["stash", "drop", "stash@{1}"])
+        let after = try await repository.changeState(files: repository.status())
+        let newTip = try await repository.workflowRevision("refs/stash")
+        XCTAssertEqual(tip, newTip)
+        XCTAssertNotEqual(before.history, after.history)
+    }
+
     func testIgnoredActivityDirtyContentAndRefs() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

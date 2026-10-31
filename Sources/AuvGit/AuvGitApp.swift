@@ -139,7 +139,10 @@ final class RepositoryStore: ObservableObject {
     private var filesystemRefresh: Task<Void, Never>?
     private var filesystemRefreshing = false
     private var filesystemPending = false
+    private var pendingFilesystemChanges = RepositoryFileObserver.Changes()
+    private var observedMetadataDirectories: [String] = []
     private var automaticRefreshTask: Task<Void, Never>?
+    private var automaticRefreshWorktreeOnly = false
     private var automaticRefreshVersion = UUID()
     private(set) var applicationActive = true
     private var lastAutomaticRefresh = Date.distantPast
@@ -151,6 +154,9 @@ final class RepositoryStore: ObservableObject {
     private var commandObserver: AnyCancellable?
     private var failureObserver: AnyCancellable?
     private var lastSavedSession: Data?
+    private var lastPersistedSession: RepositorySession?
+    private let sessionSaveRequests = PassthroughSubject<Void, Never>()
+    private(set) var sessionEncodingCount = 0
     var isRestoringViewState = false
     let followsCurrentBranch: Bool
     private let usesCheckedHistoryScope: Bool
@@ -193,8 +199,10 @@ final class RepositoryStore: ObservableObject {
         guard persistsSession else { return }
         let recovery = RepositorySession.recover(primary: UserDefaults.standard.data(forKey: sessionKey), backup: UserDefaults.standard.data(forKey: sessionKey + ".backup"))
         session = recovery.session; openRepositories = AuvGitPreferences.restoreRepositories ? session.openRepositories : []; lastSavedSession = recovery.source
+        lastPersistedSession = recovery.source == nil ? nil : recovery.session
         if let corrupt = recovery.corruptPrimary { UserDefaults.standard.set(corrupt, forKey: sessionKey + ".corrupt") }
-        sessionObserver = objectWillChange.debounce(for: .milliseconds(500), scheduler: RunLoop.main).sink { [weak self] _ in self?.flushSession() }
+        sessionObserver = Publishers.Merge(sessionChanges, sessionSaveRequests.eraseToAnyPublisher())
+            .debounce(for: .milliseconds(500), scheduler: RunLoop.main).sink { [weak self] _ in self?.flushSession() }
     }
     /// A Log window owns this transient store, not the main workspace session.
     func closeTransientSession() {
@@ -221,6 +229,26 @@ final class RepositoryStore: ObservableObject {
         value.stagedDiff = stagedDiff; value.ignoreWhitespace = ignoreWhitespace
         return value
     }
+    var sessionChanges: AnyPublisher<Void, Never> {
+        Publishers.MergeMany([
+            $repositoryURL.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $openRepositories.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $commitMessage.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $amend.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $historySearch.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $historyAuthor.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $historyPath.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $historyRef.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $selectedPaths.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $selectedCommit.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $selectedCommitPath.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $mode.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $fileFilter.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $stagedDiff.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $ignoreWhitespace.dropFirst().map { _ in () }.eraseToAnyPublisher()
+        ]).eraseToAnyPublisher()
+    }
+    func requestSessionSave() { sessionSaveRequests.send() }
     func flushSession() {
         if !persistsSession, let owner = workspaceProjects?.sessions.first, owner !== self {
             owner.flushSession()
@@ -234,14 +262,18 @@ final class RepositoryStore: ObservableObject {
             }
             session.openRepositories = Array(Set(workspaceProjects.sessions.flatMap(\.openRepositories))).sorted()
             session.activeRepository = workspaceProjects.active.repositoryURL?.path
-            if let data = try? session.encoded(), data != lastSavedSession {
-                if let previous = lastSavedSession { UserDefaults.standard.set(previous, forKey: sessionKey + ".backup") }
-                UserDefaults.standard.set(data, forKey: sessionKey); lastSavedSession = data
-            }
+            persistSessionIfChanged()
             return
         }
         session.openRepositories = openRepositories; session.activeRepository = repositoryURL?.path ?? (openRepositories.isEmpty ? nil : session.activeRepository)
-        if let data = try? session.encoded(), data != lastSavedSession { if let previous = lastSavedSession { UserDefaults.standard.set(previous, forKey: sessionKey + ".backup") }; UserDefaults.standard.set(data, forKey: sessionKey); lastSavedSession = data }
+        persistSessionIfChanged()
+    }
+    private func persistSessionIfChanged() {
+        guard lastPersistedSession != session else { return }
+        sessionEncodingCount += 1
+        guard let data = try? session.encoded() else { return }
+        if let previous = lastSavedSession, previous != data { UserDefaults.standard.set(previous, forKey: sessionKey + ".backup") }
+        UserDefaults.standard.set(data, forKey: sessionKey); lastSavedSession = data; lastPersistedSession = session
     }
     private func applyViewState(_ value: RepositoryViewState) {
         commitMessage = value.commitMessage; amend = value.amend; historySearch = value.historySearch; historyAuthor = value.historyAuthor
@@ -563,7 +595,7 @@ final class RepositoryStore: ObservableObject {
     func clearSessionDrafts() {
         session.repositories = [:]; commitMessage = ""; amend = false
         for suffix in ["", ".backup", ".corrupt"] { UserDefaults.standard.removeObject(forKey: sessionKey + suffix) }
-        lastSavedSession = nil; flushSession()
+        lastSavedSession = nil; lastPersistedSession = nil; flushSession()
     }
     func chooseRepository() {
         let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false
@@ -579,6 +611,7 @@ final class RepositoryStore: ObservableObject {
     }
     @discardableResult
     func requestOpenInSession(_ url: URL, promptsIfUnavailable: Bool = true) -> Task<Void, Never>? {
+        pauseProjectPreparation()
         guard canOpenRepository else { return nil }
         openingTask?.cancel()
         let version = UUID(); openingVersion = version
@@ -865,24 +898,40 @@ final class RepositoryStore: ObservableObject {
         return prepared
     }
     private var projectPreparationTask: Task<Void, Never>?
+    private var projectPreparationVersion = UUID()
     @discardableResult
     func prepareRecentProjects() -> Task<Void, Never>? {
         guard followsCurrentBranch, applicationActive else { return nil }
         if let task = projectPreparationTask { return task }
         var seen = Set<String>()
-        let paths = (Array(openRepositories.reversed()) + recentPaths).filter { seen.insert($0).inserted }
-        projectPreparationTask = Task(priority: .utility) {
-            defer { projectPreparationTask = nil }
+        let paths = Array((Array(openRepositories.reversed()) + recentPaths)
+            .filter { $0 != repositoryURL?.path && seen.insert($0).inserted }.prefix(3))
+        let preparationVersion = UUID(); projectPreparationVersion = preparationVersion
+        projectPreparationTask = Task(priority: .utility) { [self] in
+            defer { if projectPreparationVersion == preparationVersion { projectPreparationTask = nil } }
+            // Let foreground presentation settle; optional work has a small idle budget.
+            do { try await Task.sleep(for: .milliseconds(750)) } catch { return }
+            let deadline = Date().addingTimeInterval(3)
+            let budgetTask = Task { @MainActor [weak self] in
+                do { try await Task.sleep(for: .seconds(3)) } catch { return }
+                guard let self, projectPreparationVersion == preparationVersion else { return }
+                projectPreparationTask?.cancel()
+            }
+            defer { budgetTask.cancel() }
+            @MainActor func mayPrepare() -> Bool {
+                let foreground = workspaceProjects?.active ?? self
+                return !Task.isCancelled && applicationActive && !foreground.isBusy && foreground.pendingRepositoryPath == nil && Date() < deadline
+            }
             // Load every saved presentation before a slow Git read or comparison can delay another project.
             for path in paths where path != repositoryURL?.path && historyMemoryCache[path] == nil {
-                guard !Task.isCancelled else { return }
+                guard mayPrepare() else { return }
                 if let saved = await loadSavedPresentation(URL(fileURLWithPath: path)),
                    path != repositoryURL?.path, recentPaths.contains(path) || openRepositories.contains(path) {
                     storeHistorySnapshot(saved, for: path, persist: false)
                 }
             }
             for path in paths {
-                guard !Task.isCancelled else { return }
+                guard mayPrepare() else { return }
                 if path == repositoryURL?.path || historyMemoryCache[path] != nil { continue }
                 let url = URL(fileURLWithPath: path)
                 let missing = await Task.detached(priority: .utility) { Self.repositoryRootIsMissing(url) }.value
@@ -901,8 +950,8 @@ final class RepositoryStore: ObservableObject {
                 await Task.yield()
             }
             // Fill optional previews only after all primary lists can already switch.
-            for path in paths {
-                guard !Task.isCancelled else { return }
+            for path in paths.prefix(1) {
+                guard mayPrepare() else { return }
                 guard path != repositoryURL?.path, let snapshot = historyMemoryCache[path],
                       snapshot.workspaceStatusFailure == nil else { continue }
                 do {
@@ -926,6 +975,12 @@ final class RepositoryStore: ObservableObject {
         }
         return projectPreparationTask
     }
+    private func pauseProjectPreparation() {
+        for store in Self.stores.allObjects where store.projectPreparationTask != nil {
+            store.projectPreparationVersion = UUID()
+            store.projectPreparationTask?.cancel(); store.projectPreparationTask = nil
+        }
+    }
     private func restoreInterruptedOpening() {
         guard let fallback = openingFallback else { return }
         repository = fallback.repository; repositoryURL = fallback.url
@@ -942,8 +997,10 @@ final class RepositoryStore: ObservableObject {
             guard let paths = try? await (gitDirectory, commonPath), version == repoVersion, repositoryURL == root else { return }
             let gitPath = paths.0.trimmingCharacters(in: .newlines), common = paths.1.trimmingCharacters(in: .newlines)
             let commonURL = common.hasPrefix("/") ? URL(fileURLWithPath: common) : root.appendingPathComponent(common).standardizedFileURL
-            fileObserver = RepositoryFileObserver(paths: Array(Set([root.path, gitPath, commonURL.path]))) { [weak self] in
-                Task { @MainActor [weak self] in self?.scheduleFilesystemRefresh(root: root) }
+            observedMetadataDirectories = Array(Set([gitPath, commonURL.path])).sorted { $0.count > $1.count }
+            pendingFilesystemChanges = .init()
+            fileObserver = RepositoryFileObserver(paths: Array(Set([root.path, gitPath, commonURL.path]))) { [weak self] changes in
+                Task { @MainActor [weak self] in self?.scheduleFilesystemRefresh(root: root, changes: changes) }
             }
         }
     }
@@ -967,8 +1024,9 @@ final class RepositoryStore: ObservableObject {
             return false
         }
     }
-    private func scheduleFilesystemRefresh(root: URL) {
+    private func scheduleFilesystemRefresh(root: URL, changes: RepositoryFileObserver.Changes? = nil) {
         guard AuvGitPreferences.backgroundRefresh, applicationActive, repositoryURL == root else { return }
+        if let changes { pendingFilesystemChanges.merge(changes) }
         if filesystemRefreshing { filesystemPending = true; return }
         guard filesystemRefresh == nil else { return }
         filesystemRefresh = Task {
@@ -978,10 +1036,18 @@ final class RepositoryStore: ObservableObject {
                 filesystemRefresh = nil; return
             }
             filesystemRefresh = nil
-            if isBusy { return } // The active write ends with its own refresh.
+            if isBusy { pendingFilesystemChanges = .init(); return } // Writes end with their own refresh.
             lastAutomaticRefresh = Date()
             filesystemRefreshing = true
-            await refreshIfChanged()
+            let changes = pendingFilesystemChanges; pendingFilesystemChanges = .init()
+            let scope = RepositoryEventScope.classify(changes, root: root, metadata: observedMetadataDirectories)
+            if scope.full { await refreshIfChanged() }
+            else if !scope.worktree.isEmpty, let repository {
+                let relevant = (try? await GitCommandLog.$suppressRoutineReads.withValue(true) {
+                    try await repository.relevantWorktreeEvents(scope.worktree)
+                }) ?? true
+                if relevant, !Task.isCancelled { await refreshIfChanged(worktreeOnly: true) }
+            }
             filesystemRefreshing = false
             if filesystemPending { filesystemPending = false; scheduleFilesystemRefresh(root: root) }
         }
@@ -994,8 +1060,15 @@ final class RepositoryStore: ObservableObject {
     }
     static func pollAllRepositories() async {
         await withTaskGroup(of: Void.self) { group in
-            for store in stores.allObjects {
+            var pending = stores.allObjects.makeIterator()
+            for _ in 0..<3 {
+                guard let store = pending.next() else { break }
                 group.addTask { guard !Task.isCancelled else { return }; await store.pollForChanges() }
+            }
+            while await group.next() != nil {
+                if !Task.isCancelled, let store = pending.next() {
+                    group.addTask { guard !Task.isCancelled else { return }; await store.pollForChanges() }
+                }
             }
         }
     }
@@ -1038,34 +1111,48 @@ final class RepositoryStore: ObservableObject {
         task.cancel()
         refreshReadVersion = UUID(); refreshingRepository = nil
     }
-    func refreshIfChanged() async {
+    func refreshIfChanged(worktreeOnly: Bool = false) async {
         guard applicationActive, !isBusy, !Task.isCancelled else { return }
-        if let task = automaticRefreshTask { await task.value; return }
+        if let task = automaticRefreshTask {
+            let requestedRepository = repository?.url
+            let needsFullCheck = !worktreeOnly && automaticRefreshWorktreeOnly
+            await task.value
+            // A HEAD/index event arriving during a content-only read must not
+            // disappear merely because that lighter read was already in flight.
+            if needsFullCheck, !Task.isCancelled, repository?.url == requestedRepository { await refreshIfChanged() }
+            return
+        }
         guard let repository, refreshingRepository != repository.url else { return }
         let generation = UUID(); automaticRefreshVersion = generation
+        automaticRefreshWorktreeOnly = worktreeOnly
         // Keep the read cancellable after its filesystem debounce task has finished.
         let task = Task {
             defer { if automaticRefreshVersion == generation { automaticRefreshTask = nil } }
-            await performAutomaticRefresh()
+            await performAutomaticRefresh(worktreeOnly: worktreeOnly)
         }
         automaticRefreshTask = task
         await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
     }
-    private func performAutomaticRefresh() async {
+    private func performAutomaticRefresh(worktreeOnly: Bool) async {
         guard applicationActive, let repository, !isBusy, !Task.isCancelled, refreshingRepository != repository.url else { return }
         let version = repoVersion, readVersion = refreshReadVersion
         do {
             let (newFiles, state) = try await GitCommandLog.$suppressRoutineReads.withValue(true) {
-                let newFiles = try await repository.status()
+                let newFiles = try await RepositoryReadCoordinator.shared.status(repository: repository)
                 guard applicationActive, !Task.isCancelled, version == repoVersion, readVersion == refreshReadVersion, !isBusy else { throw CancellationError() }
                 applyFileStatus(newFiles)
-                return try await (newFiles, repository.changeState(files: newFiles))
+                let state: RepositoryChangeState
+                if worktreeOnly, let previous = lastObservedState {
+                    state = await repository.worktreeChangeState(files: newFiles, previous: previous)
+                } else { state = try await RepositoryReadCoordinator.shared.changeState(repository: repository, files: newFiles) }
+                return (newFiles, state)
             }
             guard applicationActive, !Task.isCancelled, version == repoVersion, readVersion == refreshReadVersion, !isBusy, repositoryURL == repository.url, state != lastObservedState else { return }
-            await refresh(knownFiles: newFiles, knownState: state)
+            await refresh(knownFiles: newFiles, knownState: state, reuseMetadata: state.history == lastObservedState?.history,
+                          reuseStashes: worktreeOnly && lastObservedState != nil)
         } catch { /* A canceled background read never becomes an operation error. */ }
     }
-    func refresh(knownFiles: [GitFile]? = nil, knownState: RepositoryChangeState? = nil, opening: Bool = false, reuseMetadata: Bool = false,
+    func refresh(knownFiles: [GitFile]? = nil, knownState: RepositoryChangeState? = nil, opening: Bool = false, reuseMetadata: Bool = false, reuseStashes: Bool = false,
                  loadsWorkspaceComparison: Bool = true, onFileStatus: ((RepositoryStore) -> Void)? = nil) async {
         guard let repository, (!isBusy || opening), refreshingRepository != repository.url else { return }
         refreshingRepository = repository.url; let version = repoVersion
@@ -1076,10 +1163,9 @@ final class RepositoryStore: ObservableObject {
             let cachedBranches = branches, cachedBranch = branch
             async let newBranches = reuseMetadata ? cachedBranches : try await repository.branches()
             async let newBranch = reuseMetadata ? cachedBranch : try await repository.currentBranch()
-            async let newStashes = repository.stashes()
-            async let syncRead = GitCommandLog.$suppressRoutineReads.withValue(true) {
-                try? await repository.workflowRead(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
-            }
+            let cachedStashes = stashes
+            async let newStashes = reuseStashes ? cachedStashes : try await repository.stashes()
+            async let syncRead = RepositoryReadCoordinator.shared.syncCounts(repository: repository)
             let fileStatus = try await newFiles
             guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
             applyFileStatus(fileStatus)
@@ -1272,7 +1358,9 @@ final class RepositoryStore: ObservableObject {
                 guard !Self.stores.allObjects.contains(where: { $0.isBusy && ($0.repositoryURL == nil || $0.repositoryURL?.path == path) }) else { continue }
                 guard (recentPaths + openRepositories + [repositoryURL?.path].compactMap { $0 }).contains(path) else { continue }
                 let repo = GitRepository(url: URL(fileURLWithPath: path))
+                var contactedRemote = false
                 if isImmediate || now >= (nextRemoteSync[path] ?? .distantPast) {
+                    contactedRemote = true
                     do {
                         let authentication = RemoteAuthenticationCoordinator()
                         let remotes = (try await repo.workflowRead(["remote"])).split(separator: "\n").map(String.init)
@@ -1290,7 +1378,7 @@ final class RepositoryStore: ObservableObject {
                         nextRemoteSync[path] = Date().addingTimeInterval(300)
                     }
                 }
-                await refreshRecentRepositoryLocalState(path: path)
+                if contactedRemote { await refreshRecentRepositoryLocalState(path: path) }
             }
             recentSyncTask = nil
         }
@@ -1303,10 +1391,8 @@ final class RepositoryStore: ObservableObject {
         }
         guard mayPublish() else { return }
         let repo = GitRepository(url: URL(fileURLWithPath: path))
-        guard let files = try? await GitCommandLog.$suppressRoutineReads.withValue(true, operation: { try await repo.status() }) else { return }
-        let text = try? await GitCommandLog.$suppressRoutineReads.withValue(true) {
-            try await repo.workflowRead(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
-        }
+        guard let files = try? await RepositoryReadCoordinator.shared.status(repository: repo) else { return }
+        let text = await RepositoryReadCoordinator.shared.syncCounts(repository: repo)
         guard mayPublish() else { return }
         let counts = text?.split(whereSeparator: { $0.isWhitespace }).compactMap { Int($0) } ?? []
         publishRepositoryChangeCount(files.count, path: path)
@@ -1543,6 +1629,7 @@ final class RepositoryStore: ObservableObject {
     }
     func loadDiff() async {
         guard !Task.isCancelled else { return }
+        if persistsSession || workspaceProjects?.active === self { pauseProjectPreparation() }
         diffTask?.cancel()
         let task = Task { await performLoadDiff() }
         diffTask = task
@@ -1646,6 +1733,8 @@ final class RepositoryStore: ObservableObject {
     func operation(_ name: String, refreshFilesOnly: Bool = false, onFailure: ((Error) -> Void)? = nil, body: @escaping (GitRepository) async throws -> Void) {
         guard let repository, workspaceStatusFailure == nil, !isBusy, pendingRepositoryPath == nil else { return }
         cancelAutomaticRefresh()
+        pauseProjectPreparation()
+        RepositoryReadCoordinator.shared.invalidate(repository: repository.url)
         historyTask?.cancel(); historyTask = nil; detailTask?.cancel(); detailTask = nil
         diffTask?.cancel(); diffTask = nil
         refreshReadVersion = UUID(); refreshingRepository = nil; diffVersion = UUID(); historyVersion = UUID()
@@ -1668,6 +1757,8 @@ final class RepositoryStore: ObservableObject {
     func performRepositoryContextOperation(_ name: String, path: String, body: @escaping (GitRepository) async throws -> Void) async -> Bool {
         guard !isBusy else { return false }
         let target = GitRepository(url: URL(fileURLWithPath: path))
+        pauseProjectPreparation()
+        RepositoryReadCoordinator.shared.invalidate(repository: target.url)
         let label = name + " · " + target.url.lastPathComponent
         isBusy = true; beginUserOperation(label)
         await cancelBackgroundRepositorySync()

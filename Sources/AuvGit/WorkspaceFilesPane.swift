@@ -39,6 +39,7 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
     @State private var ignoredRepository: String?
     @State private var loadingIgnored = false
     @State private var ignoredRequestID = UUID()
+    @State private var ignoredTask: Task<Void, Never>?
     @State private var ignoredError: String?
     private typealias Row = WorkspaceFileRow
     @State private var visibleFiles: [Row] = []
@@ -178,7 +179,7 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
         content
         .onAppear { rebuildVisibleFiles(); if treeMode && showIgnored { treeMode = false } }
         .onChange(of: shortcutRequest?.id) { _, _ in performShortcut() }
-        .onChange(of: files) { _, _ in rebuildVisibleFiles(); if showIgnored { Task { await loadIgnored() } } }
+        .onChange(of: files) { _, _ in rebuildVisibleFiles(); if showIgnored { scheduleIgnored() } }
         .onChange(of: repository?.url.path) { _, _ in initialSelectionRepository = nil; rebuildVisibleFiles() }
         .onChange(of: initialSelectionReady) { _, _ in applyInitialSelection() }
         .onChange(of: filter) { _, _ in rebuildVisibleFiles() }
@@ -188,17 +189,17 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
     }
     var body: some View {
         filteredContent
-        .onDisappear { preparationTask?.cancel() }
+        .onDisappear { preparationTask?.cancel(); ignoredTask?.cancel(); ignoredRequestID = UUID() }
         .onChange(of: ignoredPaths) { _, _ in rebuildVisibleFiles() }
         .onChange(of: sortOrder) { _, _ in rebuildVisibleFiles() }
-        .task(id: (repository?.url.path ?? "") + "|\(showIgnored)") { await loadIgnored() }
+        .task(id: (repository?.url.path ?? "") + "|\(showIgnored)") { scheduleIgnored() }
         .onChange(of: showIgnored) { _, value in rebuildVisibleFiles(); if value { treeMode = false } }
         .onReceive(NotificationCenter.default.publisher(for: .auvGitWorktreeChanged)) { notification in
             refreshIgnored(notification)
         }
     }
     private func refreshIgnored(_ notification: Notification) {
-        if let root = notification.object as? URL, root == repository?.url, showIgnored { Task { await loadIgnored() } }
+        if let root = notification.object as? URL, root == repository?.url, showIgnored { scheduleIgnored() }
     }
     private func performShortcut() {
         switch shortcutRequest?.command {
@@ -285,6 +286,18 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
         for path in paths.sorted() { NSWorkspace.shared.open(repository.url.appendingPathComponent(path)) }
     }
     private func reveal(_ paths: Set<String>) { if let repository { NSWorkspace.shared.activateFileViewerSelecting(paths.sorted().map { repository.url.appendingPathComponent($0) }) } }
+    private func scheduleIgnored() {
+        ignoredTask?.cancel()
+        ignoredRequestID = UUID()
+        guard showIgnored, repository != nil else {
+            ignoredPaths = []; ignoredRepository = nil; ignoredError = nil; loadingIgnored = false
+            return
+        }
+        ignoredTask = Task {
+            do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+            await loadIgnored()
+        }
+    }
     private func loadIgnored() async {
         let requestID = UUID()
         ignoredRequestID = requestID

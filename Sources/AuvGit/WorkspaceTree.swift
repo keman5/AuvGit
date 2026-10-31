@@ -26,6 +26,12 @@ struct WorkspaceTree: View {
     @State private var error: String?
     @State private var loading = true
     @State private var reloadID = UUID()
+    @State private var reloadTask: Task<Void, Never>?
+    @State private var ignoredTask: Task<Void, Never>?
+    @State private var nodesGeneration = UUID()
+    @State private var preparedRows: [WorkspaceTreeRow] = []
+    @State private var preparedRowsKey: TreeRowsKey?
+    @State private var rowCache = WorkspaceTreeRowCache()
     @State private var stateID = UUID()
     @State private var stateRepositoryPath: String?
     @State private var trashed: [TrashedRepositoryFile] = []
@@ -50,27 +56,39 @@ struct WorkspaceTree: View {
             }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8)
             Divider()
             if let error { Text(error).foregroundStyle(.orange).font(.caption).padding(.horizontal, 12).padding(.vertical, 8).textSelection(.enabled) }
-            WorkspaceTreeTable(rows: WorkspaceTreeRows.flatten(filteredNodes, expanded: displayedExpansion), expanded: treeExpansion,
+            WorkspaceTreeTable(rows: displayedRows, expanded: treeExpansion,
                 selection: treeSelection, repository: repository, files: files, isBusy: isBusy || mutationBusy,
                 openFile: primaryAction ?? openFile, onAction: onAction, recreatableConflicts: recreatableConflicts)
                 .overlay { if loading && displayedNodes.isEmpty { ProgressView().controlSize(.small) } }
         }.disabled(isBusy || mutationBusy).task(id: repository.url.path) {
+            reloadTask?.cancel(); ignoredTask?.cancel()
             reloadID = UUID()
             stateID = UUID(); stateRepositoryPath = repository.url.path
             expandedPaths = []; selectedTreePaths = []; trashed = []; ignored = []
             error = nil; editorError = nil; showIgnored = false; showIgnoreEditor = false
             ignoreDraft = ""; expectedIgnore = nil
-            nodes = []; nodesRepositoryPath = nil; loading = true
+            nodes = []; nodesGeneration = UUID(); nodesRepositoryPath = nil; loading = true
             loadTrash()
             if let cached = WorkspaceTreeCache.shared.nodes(for: repository.url.path) {
-                nodes = cached; nodesRepositoryPath = repository.url.path
+                nodes = cached; nodesGeneration = UUID(); nodesRepositoryPath = repository.url.path
                 if isBusy { loading = false; return }
             }
-            await reload(stateID: stateID)
+            let owner = stateID
+            let task = Task { await reload(stateID: owner) }
+            reloadTask = task
+            await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
         }
             .onChange(of: refreshID) { _, _ in if !isBusy { scheduleReload() } }
             .onChange(of: isBusy) { wasBusy, busy in if wasBusy && !busy { scheduleReload() } }
-            .onDisappear { reloadID = UUID(); stateID = UUID() }
+            .onDisappear { reloadTask?.cancel(); ignoredTask?.cancel(); reloadID = UUID(); stateID = UUID() }
+            .task(id: rowsKey) {
+                let key = rowsKey
+                let source = displayedNodes
+                let worker = Task.detached(priority: .userInitiated) { WorkspaceTreeRows.prepare(source, visiblePaths: key.visiblePaths, expanded: key.expanded) }
+                let rows = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
+                guard !Task.isCancelled, key == rowsKey else { return }
+                preparedRows = rows; preparedRowsKey = key
+            }
             .onReceive(NotificationCenter.default.publisher(for: .auvGitWorktreeChanged)) { note in
                 if let changed = note.object as? URL, changed == repository.url { scheduleReload() }
             }
@@ -126,14 +144,21 @@ struct WorkspaceTree: View {
         }
         return nodes.isEmpty && loading ? WorkspaceTreeCache.shared.nodes(for: repository.url.path) ?? nodes : nodes
     }
-    private var filteredNodes: [WorkspaceFileNode] {
-        guard let visiblePaths else { return displayedNodes }
-        func filtered(_ node: WorkspaceFileNode) -> WorkspaceFileNode? {
-            if !node.isDirectory { return visiblePaths.contains(node.path) ? node : nil }
-            let children = node.children.compactMap(filtered)
-            return children.isEmpty ? nil : WorkspaceFileNode(path: node.path, isDirectory: true, children: children)
-        }
-        return displayedNodes.compactMap(filtered)
+    private struct TreeRowsKey: Equatable {
+        let repository: String
+        let generation: UUID
+        let visiblePaths: Set<String>?
+        let expanded: Set<String>
+    }
+    private var rowsKey: TreeRowsKey {
+        TreeRowsKey(repository: repository.url.path, generation: nodesGeneration, visiblePaths: visiblePaths, expanded: displayedExpansion)
+    }
+    private var displayedRows: [WorkspaceTreeRow] {
+        if preparedRowsKey == rowsKey { return preparedRows }
+        // Unfiltered collapsed snapshots are cheap and keep repository switches immediate.
+        // Filtering and expanding large trees is prepared by the cancellable task above.
+        return rowCache.rows(nodes: displayedNodes, repository: repository.url.path, generation: nodesGeneration,
+                             visiblePaths: visiblePaths, expanded: displayedExpansion)
     }
     private func loadIgnoreEditor() {
         do {
@@ -156,23 +181,29 @@ struct WorkspaceTree: View {
     private func changed() { NotificationCenter.default.post(name: .auvGitWorktreeChanged, object: repository.url) }
     private func loadIgnored() {
         let owner = stateID
-        Task {
+        ignoredTask?.cancel()
+        ignoredTask = Task {
             do {
+                try await Task.sleep(for: .milliseconds(100))
                 let paths = try await repository.ignoredWorkspacePaths()
-                guard owner == stateID, stateRepositoryPath == repository.url.path else { return }
+                guard !Task.isCancelled, owner == stateID, stateRepositoryPath == repository.url.path else { return }
                 ignored = paths; showIgnored = true
             } catch {
-                guard owner == stateID, stateRepositoryPath == repository.url.path else { return }
+                guard !Task.isCancelled, owner == stateID, stateRepositoryPath == repository.url.path else { return }
                 self.error = compareText(OperationFailure.message(error, repository: repository.url))
             }
         }
     }
     private func scheduleReload() {
         let owner = stateID
-        Task { await reload(stateID: owner) }
+        reloadTask?.cancel()
+        reloadTask = Task {
+            do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+            await reload(stateID: owner)
+        }
     }
     private func reload(stateID owner: UUID) async {
-        guard owner == stateID, stateRepositoryPath == repository.url.path else { return }
+        guard !Task.isCancelled, owner == stateID, stateRepositoryPath == repository.url.path else { return }
         let id = UUID()
         reloadID = id
         loading = true
@@ -181,14 +212,14 @@ struct WorkspaceTree: View {
             let result = try await repository.workspaceTree()
             guard !Task.isCancelled, reloadID == id, stateID == owner, stateRepositoryPath == repository.url.path else { return }
             WorkspaceTreeCache.shared.store(result, for: repository.url.path)
-            nodes = result; nodesRepositoryPath = repository.url.path; error = nil
+            nodes = result; nodesGeneration = UUID(); nodesRepositoryPath = repository.url.path; error = nil
         } catch {
             guard !Task.isCancelled, reloadID == id, stateID == owner, stateRepositoryPath == repository.url.path else { return }
             self.error = compareText(OperationFailure.message(error, repository: repository.url))
         }
     }
 }
-struct WorkspaceTreeRow: Identifiable {
+struct WorkspaceTreeRow: Identifiable, Sendable {
     let path: String
     let isDirectory: Bool
     let depth: Int
@@ -197,10 +228,23 @@ struct WorkspaceTreeRow: Identifiable {
 }
 
 enum WorkspaceTreeRows {
+    static func prepare(_ nodes: [WorkspaceFileNode], visiblePaths: Set<String>?, expanded: Set<String>) -> [WorkspaceTreeRow] {
+        guard !Task.isCancelled else { return [] }
+        guard let visiblePaths else { return flatten(nodes, expanded: expanded) }
+        func filtered(_ node: WorkspaceFileNode) -> WorkspaceFileNode? {
+            guard !Task.isCancelled else { return nil }
+            if !node.isDirectory { return visiblePaths.contains(node.path) ? node : nil }
+            let children = node.children.compactMap(filtered)
+            return children.isEmpty ? nil : WorkspaceFileNode(path: node.path, isDirectory: true, children: children)
+        }
+        return flatten(nodes.compactMap(filtered), expanded: expanded)
+    }
+
     static func flatten(_ nodes: [WorkspaceFileNode], expanded: Set<String>) -> [WorkspaceTreeRow] {
         var rows: [WorkspaceTreeRow] = []
         func append(_ nodes: [WorkspaceFileNode], depth: Int) {
             for node in nodes {
+                guard !Task.isCancelled else { return }
                 rows.append(WorkspaceTreeRow(path: node.path, isDirectory: node.isDirectory, depth: depth))
                 if node.isDirectory, expanded.contains(node.path) { append(node.children, depth: depth + 1) }
             }
@@ -249,5 +293,28 @@ final class WorkspaceTreeCache {
         guard nodeCount <= 50_000 else { return }
         entries.append((path, nodes, nodeCount))
         while entries.count > 32 || entries.reduce(0, { $0 + $1.count }) > 50_000 { entries.removeFirst() }
+    }
+}
+
+/// The small-tree synchronous path also serves the first frame when switching repositories.
+@MainActor
+final class WorkspaceTreeRowCache {
+    private var repository: String?
+    private var generation: UUID?
+    private var visiblePaths: Set<String>?
+    private var expanded: Set<String> = []
+    private var result: [WorkspaceTreeRow] = []
+    func rows(nodes: [WorkspaceFileNode], repository: String, generation: UUID, visiblePaths: Set<String>?, expanded: Set<String>) -> [WorkspaceTreeRow] {
+        if self.repository == repository, self.generation == generation, self.visiblePaths == visiblePaths, self.expanded == expanded { return result }
+        self.repository = repository; self.generation = generation; self.visiblePaths = visiblePaths; self.expanded = expanded
+        // Bound work on the rendering thread; the asynchronous preparation fills in large views.
+        var budget = 2_000
+        func isSmall(_ nodes: [WorkspaceFileNode]) -> Bool {
+            for node in nodes { budget -= 1; if budget < 0 { return false }; if !isSmall(node.children) { return false } }
+            return true
+        }
+        result = isSmall(nodes) ? WorkspaceTreeRows.prepare(nodes, visiblePaths: visiblePaths, expanded: expanded)
+            : (visiblePaths == nil ? WorkspaceTreeRows.flatten(Array(nodes.prefix(2_000)), expanded: []) : [])
+        return result
     }
 }

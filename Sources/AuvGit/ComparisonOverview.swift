@@ -88,21 +88,39 @@ private final class ComparisonChangeScroller: NSScroller {
 }
 final class ComparisonOverviewView: NSView {
     weak var scroll: NSScrollView?
-    var markers: [ComparisonOverviewMarker] = [] { didSet { if oldValue != markers { synchronizeMarkerButtons(); needsDisplay = true } } }
+    var markers: [ComparisonOverviewMarker] = [] { didSet { if oldValue != markers { markerImage = nil; synchronizeMarkerButtons(); needsDisplay = true } } }
     var onSelect: ((Int) -> Void)?
     var onNavigate: ((Double) -> Void)?
     var usesLocalViewport = true
+    private var markerImage: NSImage?
+    private var markerImageSize = NSSize.zero
+    private var markerImageAppearance: NSAppearance.Name?
     private var keyboardMarker = 0
     private var markerButtons: [Int: OverviewMarkerButton] = [:]
+    private var accessibilityMaterialized = false
     override var acceptsFirstResponder: Bool { true }
     override var isFlipped: Bool { true }
     override func draw(_ dirtyRect: NSRect) {
         NSColor.controlBackgroundColor.setFill(); bounds.fill()
         (scroll as? ComparisonOverviewScrollView)?.drawChangeBackground(in: self, rect: dirtyRect)
-        for marker in markers {
-            marker.color.withAlphaComponent(0.85).setFill()
-            NSRect(x: 2, y: bounds.height * marker.lower, width: max(1, bounds.width - 4), height: max(3, bounds.height * (marker.upper - marker.lower))).intersection(bounds).fill()
+        let appearance = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua])
+        if markerImage == nil || markerImageSize != bounds.size || markerImageAppearance != appearance {
+            let size = bounds.size
+            if size.width > 0, size.height > 0 {
+                let image = NSImage(size: size)
+                image.lockFocusFlipped(true)
+                for marker in markers {
+                    marker.color.withAlphaComponent(0.85).setFill()
+                    NSRect(x: 2, y: size.height * marker.lower, width: max(1, size.width - 4),
+                           height: max(3, size.height * (marker.upper - marker.lower))).intersection(NSRect(origin: .zero, size: size)).fill()
+                }
+                image.unlockFocus()
+                markerImage = image
+            }
+            markerImageSize = size
+            markerImageAppearance = appearance
         }
+        markerImage?.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         if usesLocalViewport, let scroll, let document = scroll.documentView, document.bounds.height > 0 {
             let visible = scroll.contentView.bounds
             NSColor.labelColor.withAlphaComponent(0.4).setStroke()
@@ -135,10 +153,17 @@ final class ComparisonOverviewView: NSView {
     override func accessibilityRole() -> NSAccessibility.Role? { .group }
     override func accessibilityLabel() -> String? { comparisonSearchText("Change overview") }
     override func accessibilityChildren() -> [Any]? {
-        markers.compactMap { markerButtons[$0.index] }
+        // Drawing and mouse navigation do not need thousands of native controls.
+        // Keep the concrete AppKit buttons when an accessibility client asks for them.
+        if !accessibilityMaterialized {
+            accessibilityMaterialized = true
+            synchronizeMarkerButtons()
+        }
+        return markers.compactMap { markerButtons[$0.index] }
     }
     override func accessibilityVisibleChildren() -> [Any]? { accessibilityChildren() }
     private func synchronizeMarkerButtons() {
+        guard accessibilityMaterialized else { return }
         let current = Set(markers.map(\.index))
         for index in Array(markerButtons.keys) where !current.contains(index) {
             markerButtons.removeValue(forKey: index)?.removeFromSuperview()
@@ -161,6 +186,7 @@ final class ComparisonOverviewView: NSView {
     }
     override func layout() { super.layout(); layoutMarkerButtons() }
     private func layoutMarkerButtons() {
+        guard !markerButtons.isEmpty else { return }
         for marker in markers {
             let height = min(bounds.height, max(6, bounds.height * (marker.upper - marker.lower)))
             let y = min(max(0, bounds.height * marker.lower), max(0, bounds.height - height))

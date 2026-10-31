@@ -2,6 +2,11 @@
 set -euo pipefail
 cd "${0:A:h:h}"
 if command -v go >/dev/null 2>&1; then go clean -cache; fi
+if [[ "${1:-}" == --test-performance-round2 ]]; then
+  # Background-only model fixtures and unshown component windows.
+  swift test --build-system native -c release --filter "${AUVGIT_ROUND2_TEST_FILTER:-RepositoryReadCoordinatorTests|RepositoryEventScopeTests|SessionSavePerformanceTests|ComparisonRailVirtualizationTests|ComparisonActionRailTests|ComparisonOverviewTests|ComparisonChromeGeometryTests|WorkspaceTreeCacheTests|WorkspaceTreeRenderingTests|WorkspaceFilePreparationTests|OperationLogContentTests|RepositoryQuietRefreshTests|ForegroundRefreshTests|LoadingPerformanceRegressionTests|RepositorySwitchLatencyTests|WorkspaceProjectsTests|GitProcessTests|RepositoryChangeStateTests}"
+  exit
+fi
 if [[ "${1:-}" == --test-loading-performance ]]; then
   # These suites use model fixtures and unshown windows only. Do not add tests
   # that activate the application or order a window in front of other apps.

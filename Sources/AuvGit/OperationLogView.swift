@@ -14,6 +14,8 @@ struct OperationLogView: View {
     @State private var activeDetail: UUID?
     @State private var fullRecord: GitCommandRecord?
     @State private var exportError: String?
+    @State private var outputTask: Task<Void, Never>?
+    @State private var outputGeneration = UUID()
     private func text(_ key: String) -> String { L10n.text(key, table: "OperationLog") }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -27,18 +29,14 @@ struct OperationLogView: View {
                             if value { expanded.insert(record.id); activeDetail = record.id }
                             else { expanded.remove(record.id) }
                         })) {
-                            let details = detailText(record)
-                            if record.previewTruncated {
-                                Text(text(record.fullOutputAvailable ? "Preview truncated at 32K characters. Full sanitized output is available." : "Preview truncated at 32K characters. Full output cache has expired.")).font(.caption).foregroundStyle(.secondary)
-                            }
+                            let available = fullOutputAvailable(record)
                             HStack {
-                                Button(text("View full output")) { fullRecord = record }.disabled(!fullOutputAvailable(record)).accessibilityLabel(text("View full output"))
-                                Button(text("Copy full output")) { copy(record) }.disabled(!fullOutputAvailable(record))
-                                Button(text("Export output")) { export(record) }.disabled(!fullOutputAvailable(record))
+                                Button(text("View full output")) { fullRecord = record }.disabled(!available).accessibilityLabel(text("View full output"))
+                                Button(text("Copy full output")) { copy(record) }.disabled(!available)
+                                Button(text("Export output")) { export(record) }.disabled(!available)
                             }.controlSize(.small)
-                            OperationLogTextView(content: details, focused: activeDetail == record.id, onFocus: { activeDetail = record.id })
-                                .frame(height: min(240, max(60, CGFloat(details.components(separatedBy: "\n").count) * 15 + 12)))
-                                .padding(.top, 8)
+                            OperationLogPreviewView(snapshot: snapshot(record), focused: activeDetail == record.id,
+                                onFocus: { activeDetail = record.id }).padding(.top, 8)
                         } label: {
                             HStack {
                                 Image(systemName: record.cancelled ? "minus.circle" : record.error == nil ? "checkmark.circle" : "exclamationmark.triangle").foregroundStyle(record.error == nil ? Color.secondary : .red)
@@ -56,25 +54,9 @@ struct OperationLogView: View {
             }
             if let exportError { Text(exportError).foregroundStyle(.red).textSelection(.enabled) }
         }.auvGitSheet(item: $fullRecord) { record in
-            VStack(alignment: .leading, spacing: 12) {
-                HStack { Text(text("Full sanitized output")).font(.headline); DialogButton(text("Close"), prominent: true, role: .cancel) { fullRecord = nil } }.buttonStyle(AuvGitDialogButtonStyle()).frame(maxWidth: .infinity)
-                OperationLogTextView(content: detailText(record, full: true), focused: false, onFocus: {})
-            }.padding(20).frame(width: 900, height: 600)
+            FullOperationLogView(snapshot: snapshot(record), title: text("Full sanitized output"), closeTitle: text("Close")) { fullRecord = nil }
         }.buttonBorderShape(.roundedRectangle(radius: 6)).padding(20).frame(width: 760, height: 510)
-    }
-    private func detailText(_ record: GitCommandRecord, full: Bool = false, snapshot: (output: String, error: String?, complete: Bool)? = nil) -> String {
-        var lines = [record.date.formatted(), record.operation, record.directory, record.command]
-        if let code = record.exitCode { lines.append(text("Exit status") + ": \(code)") }
-        let contents = snapshot ?? (full ? record.fullContents() : (output: record.output, error: record.error, complete: !record.previewTruncated))
-        if !contents.output.isEmpty { lines.append(contents.output) }
-        if let error = contents.error { lines.append(error) }
-        if full && !contents.complete { lines.append(text("Preview truncated at 32K characters. Full output cache has expired.")) }
-        if !full && record.previewTruncated { lines.append(text(record.fullOutputAvailable ? "Preview truncated at 32K characters. Full sanitized output is available." : "Preview truncated at 32K characters. Full output cache has expired.")) }
-        if record.error?.contains("32 MB display limit") == true { lines.append(text("Process output exceeded 32 MiB. Complete output was not captured.")) }
-        for command in store.commands(for: record) {
-            lines.append(detailText(command, full: full))
-        }
-        return lines.joined(separator: "\n")
+            .onDisappear { outputTask?.cancel(); outputGeneration = UUID() }
     }
 
     private func fullOutputAvailable(_ record: GitCommandRecord) -> Bool {
@@ -83,19 +65,96 @@ struct OperationLogView: View {
     private func unavailable() {
         exportError = OperationFailure.message(GitError(text("Preview truncated at 32K characters. Full output cache has expired.")), repository: store.repositoryURL)
     }
-    private func copy(_ record: GitCommandRecord) {
-        let contents = record.fullContents()
-        guard contents.complete, fullOutputAvailable(record) else { unavailable(); return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(detailText(record, full: true, snapshot: contents), forType: .string)
+    private func snapshot(_ record: GitCommandRecord) -> OperationLogSnapshot {
+        OperationLogSnapshot(records: [record] + store.commands(for: record), exitLabel: text("Exit status"), expiredMessage: text("Preview truncated at 32K characters. Full output cache has expired."), captureLimitMessage: text("Process output exceeded 32 MiB. Complete output was not captured."))
     }
+    private func perform(_ record: GitCommandRecord, destination: URL? = nil) {
+        outputTask?.cancel()
+        let generation = UUID(); outputGeneration = generation
+        let captured = snapshot(record)
+        outputTask = Task { @MainActor in
+            do {
+                let contents = try await OperationLogContentLoader.shared.load(captured)
+                try Task.checkCancellation()
+                guard generation == outputGeneration else { return }
+                guard contents.complete, fullOutputAvailable(record) else { unavailable(); return }
+                if let destination {
+                    try await Task.detached(priority: .userInitiated) {
+                        try contents.text.write(to: destination, atomically: true, encoding: .utf8)
+                    }.value
+                } else {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(contents.text, forType: .string)
+                }
+                if generation == outputGeneration { exportError = nil }
+            } catch is CancellationError { }
+            catch {
+                guard generation == outputGeneration else { return }
+                exportError = OperationFailure.message(error, repository: store.repositoryURL)
+            }
+        }
+    }
+    private func copy(_ record: GitCommandRecord) { perform(record) }
     private func export(_ record: GitCommandRecord) {
-        let contents = record.fullContents()
-        guard contents.complete, fullOutputAvailable(record) else { unavailable(); return }
         let panel = NSSavePanel(); panel.nameFieldStringValue = "AuvGit-operation.txt"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do { try detailText(record, full: true, snapshot: contents).write(to: url, atomically: true, encoding: .utf8); exportError = nil }
-        catch { exportError = OperationFailure.message(error, repository: store.repositoryURL) }
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            perform(record, destination: url)
+        }
+    }
+}
+
+private struct OperationLogPreviewView: View {
+    let snapshot: OperationLogSnapshot
+    let focused: Bool
+    let onFocus: () -> Void
+    @State private var preview: OperationLogPreview?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let preview {
+                if preview.truncated {
+                    Text(L10n.text(preview.fullOutputAvailable ? "Preview truncated at 32K characters. Full sanitized output is available." : "Preview truncated at 32K characters. Full output cache has expired.", table: "OperationLog"))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                OperationLogTextView(content: preview.text, focused: focused, onFocus: onFocus)
+                    .frame(height: min(240, max(60, CGFloat(preview.text.filter { $0 == "\n" }.count + 1) * 15 + 12)))
+            } else { ProgressView().controlSize(.small).frame(height: 60) }
+        }.task(id: snapshot.identity) {
+            let loaded = try? await OperationLogContentLoader.shared.preview(snapshot)
+            guard !Task.isCancelled else { return }
+            preview = loaded
+        }
+    }
+}
+
+private struct FullOperationLogView: View {
+    let snapshot: OperationLogSnapshot
+    let title: String
+    let closeTitle: String
+    let close: () -> Void
+    @State private var content: OperationLogContent?
+    @State private var page = 0
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack { Text(title).font(.headline); DialogButton(closeTitle, prominent: true, role: .cancel, action: close) }
+                .buttonStyle(AuvGitDialogButtonStyle()).frame(maxWidth: .infinity)
+            if let content {
+                if content.pages.count > 1 {
+                    HStack {
+                        Button { page = max(0, page - 1) } label: { Image(systemName: "chevron.left") }.disabled(page == 0)
+                        Text("\(page + 1) / \(content.pages.count)").monospacedDigit()
+                        Button { page = min(content.pages.count - 1, page + 1) } label: { Image(systemName: "chevron.right") }.disabled(page == content.pages.count - 1)
+                    }
+                }
+                OperationLogTextView(content: content.pages[min(page, content.pages.count - 1)], focused: false, onFocus: {})
+            } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
+        }.padding(20).frame(width: 900, height: 600)
+            .task(id: snapshot.identity) {
+                content = nil; page = 0
+                let loaded = try? await OperationLogContentLoader.shared.load(snapshot)
+                guard !Task.isCancelled else { return }
+                content = loaded
+            }
     }
 }
 
