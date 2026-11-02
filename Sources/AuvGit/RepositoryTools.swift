@@ -250,7 +250,7 @@ struct CreateRepositorySheet: View {
             Divider()
             HStack(spacing: 8) {
                 if creation.busy { ProgressView().controlSize(.small) }
-                KeyViewProxy(label: workflowText("Cancel"), keyEquivalent: "\u{1b}", minimumWidth: AuvGitDialogButtonStyle.minimumWidth) { dismiss() }.disabled(creation.busy)
+                DialogButton(workflowText("Cancel"), role: .cancel) { dismiss() }
                 KeyViewProxy(label: workflowText(creation.authenticationRequested || creation.sshAuthenticationRequested ? "Retry Clone" : "Create"), prominent: true, minimumWidth: AuvGitDialogButtonStyle.minimumWidth) { creation.create() }
                     .disabled(creation.busy || CloneDestination.targetURL(creation.destination) == nil || (creation.clone && creation.source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) || (creation.authenticationRequested && (creation.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || creation.password.isEmpty)))
                     .disabled(creation.sshAuthenticationRequested && (creation.privateKey == nil || creation.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))

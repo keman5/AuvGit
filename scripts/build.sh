@@ -2,6 +2,11 @@
 set -euo pipefail
 cd "${0:A:h:h}"
 if command -v go >/dev/null 2>&1; then go clean -cache; fi
+if [[ "${1:-}" == --test-dialog-dismissal ]]; then
+  # Unshown component hosts and Git fixtures only; never activate test windows.
+  swift test --build-system native --filter 'DisabledDialogButtonTests|RemoteAuthenticationLayoutTests|DialogButtonWidthTests|PullRecoveryTests|HistoryResetTests|NetworkAuthenticationPolicyTests'
+  exit
+fi
 if [[ "${1:-}" == --test-performance-round2 ]]; then
   # Background-only model fixtures and unshown component windows.
   swift test --build-system native -c release --filter "${AUVGIT_ROUND2_TEST_FILTER:-RepositoryReadCoordinatorTests|RepositoryEventScopeTests|SessionSavePerformanceTests|ComparisonRailVirtualizationTests|ComparisonActionRailTests|ComparisonOverviewTests|ComparisonChromeGeometryTests|WorkspaceTreeCacheTests|WorkspaceTreeRenderingTests|WorkspaceFilePreparationTests|OperationLogContentTests|RepositoryQuietRefreshTests|ForegroundRefreshTests|LoadingPerformanceRegressionTests|RepositorySwitchLatencyTests|WorkspaceProjectsTests|GitProcessTests|RepositoryChangeStateTests}"
@@ -86,7 +91,7 @@ INSTALL_APP=true
 case "${1:-}" in
   "") ;;
   --no-install) INSTALL_APP=false ;;
-  *) print -u2 "Usage: $0 [--no-install|--test-localizations|--test-dialog-focus|--test-dialog-audit|--test-clone-dialogs|--test-performance-review|--test-loading-performance|--test-dialog-buttons|--test-file-sorting|--test-refresh|--test-workspace-preview]"; exit 1 ;;
+  *) print -u2 "Usage: $0 [--no-install|--test-localizations|--test-dialog-dismissal|--test-dialog-focus|--test-dialog-audit|--test-clone-dialogs|--test-performance-review|--test-loading-performance|--test-dialog-buttons|--test-file-sorting|--test-refresh|--test-workspace-preview]"; exit 1 ;;
 esac
 python3 scripts/check-localizations.py
 rm -rf -- "$PWD/.artifacts"

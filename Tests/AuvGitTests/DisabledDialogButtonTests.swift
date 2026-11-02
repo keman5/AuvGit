@@ -5,6 +5,31 @@ import XCTest
 
 @MainActor
 final class DisabledDialogButtonTests: XCTestCase {
+    func testCancelRemainsClickableInsideDisabledFormsWithoutEnablingConfirm() throws {
+        _ = NSApplication.shared
+        var cancellations = 0
+        var confirmations = 0
+        let host = NSHostingView(rootView: VStack {
+            DialogButton("Cancel", role: .cancel) { cancellations += 1 }.disabled(true)
+            DialogButton("Continue", prominent: true) { confirmations += 1 }.disabled(true)
+        }.disabled(true))
+        host.frame = NSRect(x: 0, y: 0, width: 360, height: 120)
+        host.layoutSubtreeIfNeeded()
+        func buttons(in view: NSView) -> [NSButton] {
+            if let button = view as? NSButton { return [button] }
+            return view.subviews.flatMap(buttons)
+        }
+        let actions = buttons(in: host)
+        let cancel = try XCTUnwrap(actions.first { $0.title == "Cancel" })
+        let confirm = try XCTUnwrap(actions.first { $0.title == "Continue" })
+        XCTAssertTrue(cancel.isEnabled)
+        XCTAssertFalse(confirm.isEnabled)
+        cancel.performClick(nil)
+        confirm.performClick(nil)
+        XCTAssertEqual(cancellations, 1)
+        XCTAssertEqual(confirmations, 0)
+    }
+
     func testDisabledPrimaryButtonHasReadableTextInBothAppearances() throws {
         _ = NSApplication.shared
         for appearance in [NSAppearance.Name.aqua, .darkAqua] {

@@ -61,7 +61,7 @@ final class DialogOperationAuditTests: XCTestCase {
         }
     }
 
-    func testSingleAcknowledgementEscapeNeverRunsPositiveActionAndRespectsDisabledState() throws {
+    func testSingleAcknowledgementEscapeClosesEvenWhenDisabledWithoutRunningPositiveAction() throws {
         try runApp {
             for disabled in [false, true] {
                 let model = Model()
@@ -73,7 +73,7 @@ final class DialogOperationAuditTests: XCTestCase {
                 let panel = try self.panel(parent)
                 NSApp.sendEvent(try self.key(panel, "\u{1b}", 53))
                 try await self.settle()
-                XCTAssertEqual(model.presented, disabled, "Esc closes an acknowledgement unless its action is disabled")
+                XCTAssertFalse(model.presented, "Esc must close even when the affirmative action is disabled")
                 XCTAssertEqual(model.confirmations, 0, "Esc must never execute an affirmative callback")
             }
         }

@@ -369,7 +369,11 @@ struct KeyViewProxy: NSViewRepresentable {
                 DialogAppearance.configureDefaultButton(in: window)
             }
         }
-        @objc func invoke(_ sender: Any?) { activate?() }
+        @objc func invoke(_ sender: Any?) {
+            let sourceWindow = window
+            activate?()
+            if declaredKeyEquivalent == "\u{1b}" { DialogAppearance.dismissSheet(in: sourceWindow) }
+        }
         override func keyDown(with event: NSEvent) {
             if isCheckbox, event.keyCode == 49,
                event.modifierFlags.intersection([.command, .option, .control]).isEmpty {

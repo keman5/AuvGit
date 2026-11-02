@@ -31,6 +31,9 @@ final class RemoteAuthenticationLayoutTests: XCTestCase {
         XCTAssertEqual(picker.segmentDistribution, .fillEqually)
         let firstButtons = descendants(empty).compactMap { $0 as? KeyViewProxy.Button }
         let errorButtons = descendants(rejected).compactMap { $0 as? KeyViewProxy.Button }
+        let submittingButtons = descendants(submitting).compactMap { $0 as? KeyViewProxy.Button }
+        XCTAssertTrue(try XCTUnwrap(submittingButtons.first { $0.title == networkText("cancel") }).isEnabled)
+        XCTAssertFalse(try XCTUnwrap(submittingButtons.first { $0.title == networkText("retry") }).isEnabled)
         XCTAssertEqual(firstButtons.count, 2)
         for (before, after) in zip(firstButtons, errorButtons) {
             XCTAssertEqual(before.frame.height, after.frame.height, accuracy: 0.5)

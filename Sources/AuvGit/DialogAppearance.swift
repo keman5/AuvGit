@@ -19,6 +19,7 @@ struct AuvGitDialogButtonStyle: PrimitiveButtonStyle {
 
 /// Explicit dialog actions use the native button for rendering and activation.
 struct DialogButton: View {
+    @Environment(\.isEnabled) private var isEnabled
     let title: String
     var prominent = false
     var role: ButtonRole? = nil
@@ -29,6 +30,7 @@ struct DialogButton: View {
     var body: some View {
         KeyViewProxy(label: title, keyEquivalent: role == .cancel ? "\u{1b}" : "", prominent: prominent,
                      minimumWidth: AuvGitDialogButtonStyle.minimumWidth, tint: role == .destructive ? .systemRed : nil, action: action)
+            .environment(\.isEnabled, role == .cancel || isEnabled)
     }
 }
 
@@ -40,14 +42,18 @@ extension View {
     func auvGitSheet<Content: View>(isPresented: Binding<Bool>, onDismiss: (() -> Void)? = nil,
                                     @ViewBuilder content: @escaping () -> Content) -> some View {
         sheet(isPresented: isPresented, onDismiss: onDismiss) {
-            content().nativeFocusRoot().background(Color(nsColor: .windowBackgroundColor)).background(DialogFrameStyle())
+            content().nativeFocusRoot().environment(\.isEnabled, true)
+                .background(Color(nsColor: .windowBackgroundColor))
+                .background(DialogFrameStyle(forceClose: { isPresented.wrappedValue = false }))
                 .presentationCornerRadius(AuvGitStyle.windowCornerRadius)
         }
     }
     func auvGitSheet<Item: Identifiable, Content: View>(item: Binding<Item?>, onDismiss: (() -> Void)? = nil, focusesOnPresentation: Bool = false,
                                                        @ViewBuilder content: @escaping (Item) -> Content) -> some View {
         sheet(item: item, onDismiss: onDismiss) { value in
-            content(value).nativeFocusRoot(focusesOnPresentation: focusesOnPresentation).background(Color(nsColor: .windowBackgroundColor)).background(DialogFrameStyle())
+            content(value).nativeFocusRoot(focusesOnPresentation: focusesOnPresentation).environment(\.isEnabled, true)
+                .background(Color(nsColor: .windowBackgroundColor))
+                .background(DialogFrameStyle(forceClose: { item.wrappedValue = nil }))
                 .presentationCornerRadius(AuvGitStyle.windowCornerRadius)
         }
     }
@@ -117,17 +123,15 @@ private struct AuvGitAlertView<Message: View>: View {
                         prominent: index == DialogAppearance.defaultButtonIndex(buttons),
                         minimumWidth: AuvGitDialogButtonStyle.minimumWidth,
                         escapeAction: buttons.count == 1 && button.role == nil ? close : nil) { button.action(); close() }
-                        .disabled(button.isDisabled)
+                        .environment(\.isEnabled, button.role == .cancel || !button.isDisabled)
                 }
             }.frame(maxWidth: .infinity)
         }.buttonStyle(AuvGitDialogButtonStyle()).padding(24).frame(width: 360).fixedSize(horizontal: false, vertical: true)
             .onExitCommand {
                 if let cancel = buttons.first(where: { $0.role == .cancel }) {
-                    guard !cancel.isDisabled else { return }
                     cancel.action(); close()
-                } else if buttons.count == 1, let button = buttons.first, button.role == nil, !button.isDisabled {
-                    // Dismiss acknowledgement-only notices without confirming
-                    // an operation or invoking its affirmative callback.
+                } else {
+                    // Escape must never invoke an affirmative callback.
                     close()
                 }
             }
@@ -169,14 +173,21 @@ enum DialogAppearance {
             ?? buttons.firstIndex { !$0.isDisabled }
     }
 
-    static func style(_ window: NSWindow) {
+    static func dismissSheet(in window: NSWindow?) {
+        guard let window else { return }
+        sheetShells.values.first { $0.panel === window }?.forceClose?()
+    }
+
+    static func style(_ window: NSWindow, forceClose: (() -> Void)? = nil) {
         if window.sheetParent != nil, !(window is DialogPanel) {
             let key = ObjectIdentifier(window)
             if sheetShells[key] == nil {
                 sheetShells[key] = DialogSheetShell(original: window) { sheetShells.removeValue(forKey: key) }
             }
+            if let forceClose { sheetShells[key]?.forceClose = forceClose }
             return
         }
+        if let forceClose { sheetShells.values.first { $0.panel === window }?.forceClose = forceClose }
         if !(window is DialogPanel) {
             window.styleMask.insert([.titled, .fullSizeContentView])
             window.titleVisibility = .hidden
@@ -230,7 +241,20 @@ enum DialogAppearance {
 }
 
 private final class DialogPanel: NSPanel {
+    var dismissAction: (() -> Void)?
     override var canBecomeKey: Bool { true }
+    override func cancelOperation(_ sender: Any?) {
+        if let dismissAction { dismissAction() }
+        else { super.cancelOperation(sender) }
+    }
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.keyCode == 53, event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty,
+           attachedSheet == nil, let dismissAction {
+            dismissAction()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 }
 
 /// Keep SwiftUI's native sheet as the binding/dismiss anchor while presenting
@@ -241,6 +265,7 @@ private final class DialogSheetShell {
     private weak var original: NSWindow?
     private var observers: [NSObjectProtocol] = []
     private let closed: () -> Void
+    var forceClose: (() -> Void)?
 
     init(original: NSWindow, closed: @escaping () -> Void) {
         self.original = original
@@ -251,6 +276,18 @@ private final class DialogSheetShell {
         panel.isReleasedWhenClosed = false
         panel.animationBehavior = .none
         panel.hasShadow = true
+        panel.dismissAction = { [weak self] in
+            guard let self else { return }
+            // Preserve cancellation cleanup, then close even when an operation
+            // blocks SwiftUI's interactive dismissal or only cancels its task.
+            @MainActor func cancelButton(in view: NSView) -> KeyViewProxy.Button? {
+                guard !view.isHiddenOrHasHiddenAncestor else { return nil }
+                if let button = view as? KeyViewProxy.Button, button.declaredKeyEquivalent == "\u{1b}" { return button }
+                return view.subviews.lazy.compactMap(cancelButton).first
+            }
+            if let content = self.panel.contentView, let cancel = cancelButton(in: content) { cancel.invoke(nil) }
+            else { self.forceClose?() }
+        }
         let content = original.contentView
         let preserveFocus = NativeFocusAppearance.hasExplicitFocus(in: original)
         let keyboardFocus = NativeFocusAppearance.isVisible(in: original)
@@ -335,9 +372,11 @@ private final class DialogSheetShell {
 }
 
 struct DialogFrameStyle: NSViewRepresentable {
+    var forceClose: (() -> Void)? = nil
     func makeNSView(context: Context) -> FrameView { FrameView() }
-    func updateNSView(_ view: FrameView, context: Context) { view.scheduleStyle() }
+    func updateNSView(_ view: FrameView, context: Context) { view.forceClose = forceClose; view.scheduleStyle() }
     final class FrameView: NSView {
+        var forceClose: (() -> Void)?
         private var scheduled = false
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
@@ -350,7 +389,7 @@ struct DialogFrameStyle: NSViewRepresentable {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.scheduled = false
-                if let window = self.window { DialogAppearance.style(window) }
+                if let window = self.window { DialogAppearance.style(window, forceClose: self.forceClose) }
             }
         }
     }
