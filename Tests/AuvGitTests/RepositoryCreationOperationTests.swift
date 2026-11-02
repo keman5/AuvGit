@@ -80,12 +80,18 @@ final class RepositoryCreationOperationTests: XCTestCase {
         XCTAssertTrue(operation.authenticationRequested)
         XCTAssertTrue(operation.isPresented)
         XCTAssertFalse(store.isBusy)
+        operation.endPresentation() // The submitted sheet can finish disappearing after the failure.
+        XCTAssertTrue(operation.authenticationRequested)
         operation.username = "tester"; operation.password = "test-token"
         operation.create()
         XCTAssertFalse(operation.isPresented)
         try await settle(operation)
         XCTAssertTrue(operation.password.isEmpty)
         XCTAssertEqual(store.operationLog.filter { $0.command.isEmpty && $0.operation == "Clone" }.count, 2)
+        operation.isPresented = false
+        operation.endPresentation()
+        XCTAssertFalse(operation.authenticationRequested, "Cancelling the reopened form must clear authentication state")
+        XCTAssertTrue(operation.password.isEmpty)
     }
 
     func testOrdinaryFailureStaysClosedAndAppearsInMainWindow() async throws {

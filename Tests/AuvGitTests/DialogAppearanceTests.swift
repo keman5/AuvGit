@@ -647,6 +647,79 @@ final class DialogAppearanceTests: XCTestCase {
         }
     }
 
+    func testCloneAuthenticationReopensRealFormWithEditableCredentials() throws {
+        try runApplicationFixture {
+            let app = NSApplication.shared, policy = NSApplication.shared.activationPolicy()
+            app.setActivationPolicy(.regular)
+            defer { app.setActivationPolicy(policy) }
+            let defaults = UserDefaults.standard
+            let keys = [CloneDestination.parentPreference, RepositoryCreationDraft.preference]
+            let saved = keys.map { defaults.object(forKey: $0) }
+            defer { for (key, value) in zip(keys, saved) { defaults.set(value, forKey: key) } }
+            let store = RepositoryStore(persistsSession: false)
+            defer { store.closeTransientSession() }
+            var supplied: HTTPSCloneCredential?
+            var attempts = 0
+            let creation = RepositoryCreationOperation(store: store, createRepository: { _, _, _, credential, _ in
+                supplied = credential
+                attempts += 1
+                throw GitError("fatal: could not read Username for 'https://example.invalid': terminal prompts disabled")
+            })
+            store.creationOperation = creation
+            creation.prepare(initialClone: true)
+            creation.source = "https://example.invalid/team/repo.git"
+            creation.destination = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+            let projects = WorkspaceProjects(initial: store)
+            let parent = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 800),
+                styleMask: [.titled], backing: .buffered, defer: false)
+            parent.isReleasedWhenClosed = false
+            parent.contentView = NSHostingView(rootView: WorkspaceProjectsView(projects: projects, usesBorderlessToolbar: true))
+            defer { if let sheet = parent.attachedSheet { parent.endSheet(sheet) }; parent.close() }
+            try await self.activateFixture(parent)
+            creation.isPresented = true
+            try await Task.sleep(for: .milliseconds(500))
+            XCTAssertNotNil(parent.attachedSheet)
+            creation.create()
+            try await Task.sleep(for: .milliseconds(800))
+            XCTAssertTrue(creation.authenticationRequested)
+            XCTAssertTrue(creation.isPresented)
+            let sheet = DialogAppearance.visibleWindow(for: try XCTUnwrap(parent.attachedSheet))
+            @MainActor func fields(_ view: NSView) -> [NSTextField] {
+                (view as? NSTextField).map { [$0] } ?? view.subviews.flatMap(fields)
+            }
+            let inputs = fields(try XCTUnwrap(sheet.contentView)).filter { $0.isEditable && !$0.isHiddenOrHasHiddenAncestor }
+            let username = try XCTUnwrap(inputs.first { $0.accessibilityLabel() == workflowText("Username") })
+            XCTAssertNotNil(inputs.first { $0 is NSSecureTextField })
+            XCTAssertFalse(NativeFocusAppearance.isVisible(in: sheet))
+            username.stringValue = "fixture-user"
+            username.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: username))
+            creation.password = "fixture-token"
+            creation.saveCredential = false
+            try await Task.sleep(for: .milliseconds(100))
+            @MainActor func buttons(_ view: NSView) -> [NSButton] {
+                (view as? NSButton).map { [$0] } ?? view.subviews.flatMap(buttons)
+            }
+            let retry = try XCTUnwrap(buttons(try XCTUnwrap(sheet.contentView)).first { $0.title == workflowText("Retry Clone") })
+            XCTAssertTrue(retry.isEnabled)
+            retry.performClick(nil)
+            try await Task.sleep(for: .milliseconds(800))
+            XCTAssertEqual(attempts, 2)
+            XCTAssertEqual(supplied?.username, "fixture-user")
+            XCTAssertEqual(supplied?.password, "fixture-token")
+            let reopened = DialogAppearance.visibleWindow(for: try XCTUnwrap(parent.attachedSheet))
+            XCTAssertTrue(creation.authenticationRequested)
+            XCTAssertTrue(creation.password.isEmpty)
+            let escape = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: reopened.windowNumber, context: nil,
+                characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
+            app.sendEvent(escape)
+            try await Task.sleep(for: .milliseconds(500))
+            XCTAssertFalse(creation.isPresented)
+            XCTAssertFalse(creation.authenticationRequested)
+            XCTAssertNil(parent.attachedSheet)
+        }
+    }
+
     func testCloneReplacementAndRetryPresentRealAlertsAndAllowEscape() throws {
         try runApplicationFixture {
             let app = NSApplication.shared, policy = NSApplication.shared.activationPolicy()

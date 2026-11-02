@@ -74,7 +74,9 @@ final class RepositoryCreationOperation: ObservableObject {
 
     func endPresentation() {
         saveDraft()
-        guard !busy, prompt == nil else { return }
+        // A fast authentication failure can reopen the form before the old
+        // sheet finishes disappearing. That callback must not clear its input.
+        guard !isPresented, !busy, prompt == nil else { return }
         password = ""; keyPassphrase = ""
         authenticationRequested = false; sshAuthenticationRequested = false
         prepared = false
