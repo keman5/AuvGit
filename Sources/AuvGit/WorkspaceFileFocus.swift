@@ -7,6 +7,7 @@ import Combine
 final class WorkspaceFileFocus: ObservableObject {
     let objectWillChange = ObservableObjectPublisher()
     private(set) var hasFileFocus = false
+    private(set) var usesDefaultScope = false
     private var regions: [ObjectIdentifier: WeakRegion] = [:]
     private var monitor: Any?
     private struct WeakRegion { weak var view: NSView?; let toolbar: Bool }
@@ -17,24 +18,53 @@ final class WorkspaceFileFocus: ObservableObject {
     }
     deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
     func register(_ view: NSView, toolbar: Bool) { regions[ObjectIdentifier(view)] = WeakRegion(view: view, toolbar: toolbar) }
-    @MainActor @discardableResult func focus(in window: NSWindow, text: Bool = false) -> Bool {
+    /// Project activation changes command ownership without moving first responder.
+    func setDefaultScope(_ enabled: Bool) {
+        usesDefaultScope = enabled
+        updateScope(enabled)
+    }
+    /// Retained project views can share geometry. Only the surface that receives
+    /// mouse input may own keyboard commands at those coordinates.
+    @MainActor static func isExposed(_ view: NSView, in window: NSWindow) -> Bool {
+        guard view.window === window, !view.isHiddenOrHasHiddenAncestor,
+              let content = window.contentView else { return false }
+        let visible = view.visibleRect.intersection(view.bounds)
+        guard !visible.isEmpty else { return false }
+        let center = NSPoint(x: visible.midX, y: visible.midY)
+        let point = content.superview?.convert(center, from: view) ?? content.convert(center, from: view)
+        guard let hit = content.hitTest(point) else { return false }
+        return hit === view || hit.isDescendant(of: view)
+    }
+    @MainActor private func targets(in window: NSWindow, text: Bool) -> [NSView] {
         let live = regions.values.compactMap { region -> NSView? in
             guard !region.toolbar, let view = region.view, view.window === window, !view.isHiddenOrHasHiddenAncestor else { return nil }
             return view
         }
-        guard !live.isEmpty, let content = window.contentView else { return false }
+        guard !live.isEmpty, let content = window.contentView else { return [] }
         func candidates(_ view: NSView) -> [NSView] {
             guard !view.isHiddenOrHasHiddenAncestor else { return [] }
             let visible = view.visibleRect.intersection(view.bounds)
             let center = NSPoint(x: visible.midX, y: visible.midY)
             let inside = !visible.isEmpty && live.contains { $0.bounds.contains($0.convert(center, from: view)) }
             let supported = text ? view is NSTextView : view is NSTableView
-            let current: [NSView] = inside && view.acceptsFirstResponder && supported ? [view] : []
+            let current: [NSView] = inside && view.acceptsFirstResponder && supported && Self.isExposed(view, in: window) ? [view] : []
             return current + view.subviews.flatMap(candidates)
         }
-        let targets = candidates(content)
+        return candidates(content)
+    }
+    @MainActor @discardableResult func selectAll(in window: NSWindow) -> Bool {
+        guard window.attachedSheet == nil,
+              let table = targets(in: window, text: false).first as? NSTableView,
+              table.allowsMultipleSelection else { return false }
+        table.selectAll(nil)
+        updateScope(true)
+        return true
+    }
+    @MainActor @discardableResult func focus(in window: NSWindow, text: Bool = false) -> Bool {
+        let targets = targets(in: window, text: text)
         let appearance = NativeFocusAppearance.forWindow(window)
         for target in targets where window.makeFirstResponder(target) {
+            appearance.defaultFileScope?.setDefaultScope(false)
             appearance.preserveExplicitFocus()
             updateScope(true); return true
         }
@@ -46,8 +76,12 @@ final class WorkspaceFileFocus: ObservableObject {
         let live = regions.values.filter { $0.view?.window === window }
         guard !live.isEmpty else { return }
         if event.type == .keyDown {
+            // The sidebar can remain first responder after a project click.
+            // Keep the new default until the user clicks a pane or navigates with Tab.
+            if usesDefaultScope, event.keyCode != 48 { return }
+            usesDefaultScope = false
             DispatchQueue.main.async { [weak self, weak window] in
-                guard let self, let responder = window?.firstResponder as? NSView else { return }
+                guard let self, !self.usesDefaultScope, let responder = window?.firstResponder as? NSView else { return }
                 let visible = responder.visibleRect
                 let center = NSPoint(x: visible.midX, y: visible.midY)
                 let windowCenter = responder.convert(center, to: nil)
@@ -70,6 +104,7 @@ final class WorkspaceFileFocus: ObservableObject {
         }
         // The native toolbar lives outside the content layout rectangle.
         if event.locationInWindow.y >= window.contentLayoutRect.maxY || live.contains(where: { $0.toolbar && contains($0) }) { return }
+        usesDefaultScope = false
         // The command scope is immediately accurate, but do not invalidate the
         // hosting tree while NSTableView is tracking this click. Its mouseUp can
         // be consumed inside tracking, bypassing the normal local event monitor.

@@ -5,6 +5,96 @@ import Combine
 
 @MainActor
 final class WorkspaceFileFocusTests: XCTestCase {
+    private final class FileRows: NSObject, NSTableViewDataSource {
+        func numberOfRows(in tableView: NSTableView) -> Int { 3 }
+    }
+
+    func testProjectDefaultRoutesSelectAllToFilesWithoutMovingSidebarResponder() async throws {
+        let (window, list, _, _, focus) = fixture()
+        defer { window.close() }
+        let rows = FileRows()
+        let files = NSTableView(frame: list.bounds)
+        files.addTableColumn(NSTableColumn(identifier: .init("files")))
+        files.allowsMultipleSelection = true; files.dataSource = rows
+        list.addSubview(files); files.reloadData()
+        let sidebar = NSTableView(frame: NSRect(x: 300, y: 0, width: 250, height: 300))
+        sidebar.addTableColumn(NSTableColumn(identifier: .init("repositories")))
+        sidebar.allowsMultipleSelection = true; sidebar.dataSource = rows
+        window.contentView!.addSubview(sidebar); sidebar.reloadData()
+        let appearance = NativeFocusAppearance.forWindow(window)
+        XCTAssertTrue(window.makeFirstResponder(sidebar))
+        focus.setDefaultScope(true); appearance.defaultFileScope = focus
+        let key = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0,
+            windowNumber: window.windowNumber, context: nil, characters: "a", charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0))
+        focus.handle(key)
+        XCTAssertTrue(appearance.handle(key))
+        await Task.yield()
+        XCTAssertEqual(files.selectedRowIndexes, IndexSet(integersIn: 0..<3))
+        XCTAssertTrue(sidebar.selectedRowIndexes.isEmpty)
+        XCTAssertTrue(window.firstResponder === sidebar)
+        XCTAssertTrue(focus.hasFileFocus)
+        XCTAssertFalse(appearance.isVisible)
+        let oldEditor = NSTextView(frame: list.frame)
+        oldEditor.string = "inactive project draft"
+        window.contentView!.addSubview(oldEditor, positioned: .below, relativeTo: list)
+        XCTAssertTrue(window.makeFirstResponder(oldEditor))
+        oldEditor.setSelectedRange(NSRange(location: 0, length: 0))
+        files.deselectAll(nil)
+        XCTAssertTrue(appearance.handle(key))
+        XCTAssertEqual(files.selectedRowIndexes, IndexSet(integersIn: 0..<3))
+        XCTAssertEqual(oldEditor.selectedRange().length, 0, "A retained project's editor must not swallow file selection")
+        XCTAssertTrue(window.makeFirstResponder(sidebar))
+        try await click(NSPoint(x: 400, y: 100), in: window, focus: focus)
+        XCTAssertFalse(focus.hasFileFocus)
+        XCTAssertFalse(focus.usesDefaultScope)
+        focus.setDefaultScope(true)
+        XCTAssertTrue(focus.hasFileFocus, "Returning to the project restores file command ownership")
+        XCTAssertTrue(window.firstResponder === sidebar)
+        focus.setDefaultScope(false)
+        XCTAssertFalse(focus.hasFileFocus, "Inactive projects must release their command scope")
+        withExtendedLifetime(rows) {}
+    }
+
+    func testDefaultFileScopePreservesTextEditingAndReleasesOnTab() async throws {
+        let (window, _, _, _, focus) = fixture()
+        defer { window.close() }
+        let appearance = NativeFocusAppearance.forWindow(window)
+        let editor = NSTextView(frame: NSRect(x: 300, y: 0, width: 250, height: 300))
+        editor.string = "commit message"
+        window.contentView!.addSubview(editor)
+        XCTAssertTrue(window.makeFirstResponder(editor))
+        focus.setDefaultScope(true); appearance.defaultFileScope = focus
+        let selectAll = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0,
+            windowNumber: window.windowNumber, context: nil, characters: "a", charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0))
+        XCTAssertTrue(appearance.handle(selectAll))
+        XCTAssertEqual(editor.selectedRange(), NSRange(location: 0, length: editor.string.utf16.count))
+        XCTAssertTrue(window.firstResponder === editor)
+        let tab = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: window.windowNumber, context: nil, characters: "\t", charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: 48))
+        focus.handle(tab)
+        try await Task.sleep(for: .milliseconds(10))
+        XCTAssertFalse(focus.usesDefaultScope)
+        XCTAssertFalse(focus.hasFileFocus)
+    }
+
+    func testFocusIgnoresOverlappingBackgroundProjectTables() throws {
+        let (window, list, _, _, focus) = fixture()
+        defer { window.close() }
+        let background = NSTableView(frame: list.bounds)
+        background.addTableColumn(NSTableColumn(identifier: .init("background")))
+        list.addSubview(background)
+        let foreground = NSTableView(frame: list.bounds)
+        foreground.addTableColumn(NSTableColumn(identifier: .init("foreground")))
+        list.addSubview(foreground)
+        window.contentView?.layoutSubtreeIfNeeded()
+        XCTAssertTrue(focus.focus(in: window))
+        XCTAssertTrue(window.firstResponder === foreground,
+                      "A retained project's table at the same coordinates must not receive file commands")
+        foreground.isHidden = true
+        XCTAssertTrue(focus.focus(in: window))
+        XCTAssertTrue(window.firstResponder === background)
+    }
+
     func testProgrammaticFocusChoosesNativeResponderInsideMarkedPane() throws {
         let (window, list, _, _, focus) = fixture()
         defer { window.close() }
@@ -13,7 +103,7 @@ final class WorkspaceFileFocusTests: XCTestCase {
         list.addSubview(table)
         let outside = NSTextView(frame: NSRect(x: 300, y: 0, width: 250, height: 300))
         window.contentView!.addSubview(outside)
-        window.orderFront(nil)
+        window.contentView?.layoutSubtreeIfNeeded()
         let appearance = NativeFocusAppearance.forWindow(window)
         XCTAssertTrue(window.makeFirstResponder(outside))
         XCTAssertTrue(focus.focus(in: window))

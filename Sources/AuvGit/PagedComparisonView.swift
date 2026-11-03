@@ -112,7 +112,7 @@ struct PagedComparisonView: View {
                 }.frame(width: 120)
             }
             Button { showSearch.toggle() } label: { ComparisonToolbarIcon(name: "magnifyingglass") }.buttonStyle(ComparisonToolbarButtonStyle())
-                .popover(isPresented: $showSearch) {
+                .auvGitPopover(isPresented: $showSearch) {
                     VStack(alignment: .leading, spacing: 6) {
                         ComparisonSearchPopover(options: $searchOptions, replacement: $replacement, matchCount: hits.count, matchIndex: matchIndex + 1, isSearching: isSearching,
                             onNavigate: locate, error: searchError, onCancelSearch: { searchTask?.cancel(); isSearching = false }, onClose: closeSearch)

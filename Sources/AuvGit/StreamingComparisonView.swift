@@ -60,7 +60,7 @@ struct StreamingComparisonView: View {
                 Picker(label("revision"), selection: $revision) { ForEach(revisions, id: \.self) { Text(label($0.rawValue)).tag($0) } }.frame(width: 145).disabled(busy)
                 Toggle(largeText("Changes only"), isOn: $compactDisplay).toggleStyle(.checkbox)
                 Button { showSearch.toggle() } label: { ComparisonToolbarIcon(name: "magnifyingglass") }.buttonStyle(ComparisonToolbarButtonStyle())
-                    .popover(isPresented: $showSearch) {
+                    .auvGitPopover(isPresented: $showSearch) {
                         VStack(alignment: .leading, spacing: 6) {
                             ComparisonSearchPopover(options: $searchOptions, replacement: $replacement, matchCount: results.count, matchIndex: resultIndex + 1,
                                 isSearching: isSearching, onNavigate: { direction in Task { await locate(direction) } }, error: searchError,

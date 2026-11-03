@@ -14,6 +14,7 @@ struct MainWindow: View {
     var usesBorderlessToolbar = false
     var shellToolbarModel: BorderlessToolbarModel? = nil
     var retainsPanels = true
+    var isActiveProject = true
     @StateObject private var fileFocus = WorkspaceFileFocus()
     @StateObject private var historyFocus = WorkspaceFileFocus()
     @StateObject private var sidebarFocus = WorkspaceFileFocus()
@@ -117,7 +118,10 @@ struct MainWindow: View {
         .background(TerminalShortcutMonitor(isActive: store.workspaceProjects == nil || store.workspaceProjects?.active === store) {
             terminals.toggle(for: store.repositoryURL, store: store)
         }.frame(width: 0, height: 0))
-        .background(WorkspaceKeyboardRegion(action: { workspaceShortcut($0) }, onWindow: { shortcutWindow = $0 }, menuAction: { workspaceShortcut($0, fromMenu: true) }).allowsHitTesting(false).accessibilityHidden(true))
+        .background(WorkspaceKeyboardRegion(action: { workspaceShortcut($0) }, onWindow: { window in
+            shortcutWindow = window
+            if handlesStoreEvents, let window { NativeFocusAppearance.forWindow(window).defaultFileScope = fileFocus }
+        }, menuAction: { workspaceShortcut($0, fromMenu: true) }).allowsHitTesting(false).accessibilityHidden(true))
     }
     @ViewBuilder private var toolbarContent: some View {
         if usesBorderlessToolbar { installedContent }
@@ -364,6 +368,13 @@ struct MainWindow: View {
     private var toolbarCanUnstage: Bool { toolbarReady && WorkspaceFileActionTargets.hasEligibleTarget(for: .unstage, files: store.files, selection: toolbarSelection) }
     private var toolbarCanDiscard: Bool { toolbarReady && WorkspaceFileActionTargets.hasEligibleTarget(for: .discard, files: store.files, selection: toolbarSelection) }
     private var handlesStoreEvents: Bool { (usesBorderlessToolbar || !EightPointWindowShell.usesBorderlessMode) && (store.workspaceProjects == nil || store.workspaceProjects?.active === store) }
+    private func resetProjectCommandScope() {
+        fileFocus.setDefaultScope(isActiveProject && handlesStoreEvents)
+        for scope in [historyFocus, sidebarFocus, branchesFocus, changesFocus] { scope.setDefaultScope(false) }
+        if isActiveProject, handlesStoreEvents, let shortcutWindow {
+            NativeFocusAppearance.forWindow(shortcutWindow).defaultFileScope = fileFocus
+        }
+    }
     private var handlesCreationPresentation: Bool { store.workspaceProjects == nil }
 
     private var observedContent: some View {
@@ -398,6 +409,7 @@ struct MainWindow: View {
         .onChange(of: store.historyAuthor) { _, _ in guard handlesStoreEvents, !store.isRestoringViewState else { return }; store.scheduleSearch() }
         .onChange(of: store.repositoryURL) { _, directory in
             guard handlesStoreEvents else { return }
+            resetProjectCommandScope()
             authentication.cancel()
             aiCommit.cancel()
             if store.workspaceCommitRequest != nil { store.workspaceCommitRequest = nil }
@@ -421,6 +433,7 @@ struct MainWindow: View {
     }
     var body: some View {
         observedContent
+        .onChange(of: isActiveProject, initial: true) { _, _ in resetProjectCommandScope() }
         .onDisappear { confirmation?.cancelled?(); confirmation = nil; authentication.cancel() }
         .background {
         repositoryAvailabilityContent.auvGitAlert(item: $confirmation) { action in
@@ -983,9 +996,8 @@ extension MainWindow {
             let selection = store.selectedPaths
             switch command {
             case .selectAllFiles:
-                if let shortcutWindow, fileFocus.focus(in: shortcutWindow) {
-                    (shortcutWindow.firstResponder as? NSTableView)?.selectAll(nil)
-                }
+                guard let shortcutWindow else { return false }
+                return fileFocus.selectAll(in: shortcutWindow)
             case .copyFiles: fileAction(.copyFiles, selection)
             case .filterFiles, .showUnversionedFiles, .showIgnoredFiles: fileShortcutRequest = FilePaneShortcutRequest(command: command)
             case .selectCommittable: store.selectedPaths = WorkspaceFileActionTargets.paths(for: .stage, files: store.files, selection: [])

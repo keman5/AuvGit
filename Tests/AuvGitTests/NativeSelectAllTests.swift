@@ -64,6 +64,46 @@ final class NativeSelectAllTests: XCTestCase {
         func numberOfRows(in tableView: NSTableView) -> Int { 4 }
     }
 
+    func testSelectAllAfterProjectSwitchSkipsOldResponderAndPreservesFocus() throws {
+        let window = makeWindow()
+        defer { window.close() }
+        let appearance = NativeFocusAppearance.forWindow(window)
+        let rows = Rows()
+        let focus = WorkspaceFileFocus()
+        let background = WorkspacePreviewTable(frame: window.contentView!.bounds)
+        let foreground = WorkspacePreviewTable(frame: background.frame)
+        for table in [background, foreground] {
+            table.addTableColumn(NSTableColumn(identifier: .init("file")))
+            table.allowsMultipleSelection = true
+            table.dataSource = rows
+            window.contentView!.addSubview(table)
+            table.reloadData()
+            table.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
+        }
+        focus.register(foreground, toolbar: false)
+        XCTAssertTrue(window.makeFirstResponder(background))
+        let region = WorkspaceKeyboardRegion.RegionView(frame: .zero)
+        window.contentView!.addSubview(region)
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "SelectAllSwitch.\(UUID())"))
+        region.shortcuts = KeyboardShortcuts(defaults: defaults)
+        region.action = { command in
+            command == .selectAllFiles && focus.selectAll(in: window)
+        }
+        let event = try key(in: window)
+        XCTAssertFalse(appearance.handle(event), "The old project's responder must not consume Cmd+A")
+        XCTAssertNil(region.handle(event))
+        XCTAssertEqual(foreground.selectedRowIndexes, IndexSet(integersIn: 0..<4))
+        XCTAssertEqual(background.selectedRowIndexes, IndexSet(integer: 1))
+        XCTAssertTrue(window.firstResponder === background, "Selecting files must not move keyboard focus")
+        let editor = NSTextView(frame: foreground.frame)
+        editor.string = "search input"
+        window.contentView!.addSubview(editor)
+        XCTAssertTrue(window.makeFirstResponder(editor))
+        XCTAssertNotNil(region.handle(event), "Text input keeps native Cmd+A ownership")
+        XCTAssertTrue(appearance.handle(event))
+        XCTAssertEqual(editor.selectedRange().length, editor.string.utf16.count)
+    }
+
     func testSelectAllUsesFocusedTableWithoutRememberedFileScope() throws {
         let window = makeWindow()
         defer { window.close() }

@@ -4,6 +4,27 @@ import XCTest
 
 @MainActor
 final class WorkspaceKeyboardShortcutsTests: XCTestCase {
+    func testInactiveProjectEditorDoesNotBlockDefaultFileCommands() throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let content = try XCTUnwrap(window.contentView)
+        let editor = NSTextView(frame: content.bounds)
+        content.addSubview(editor)
+        let foreground = NSView(frame: content.bounds)
+        content.addSubview(foreground)
+        let region = WorkspaceKeyboardRegion.RegionView(frame: foreground.bounds)
+        foreground.addSubview(region)
+        var selected = false
+        region.action = { command in selected = command == .selectAllFiles; return selected }
+        XCTAssertTrue(window.makeFirstResponder(editor))
+        let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0,
+            windowNumber: window.windowNumber, context: nil, characters: "a", charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0))
+        XCTAssertNil(region.handle(event))
+        XCTAssertTrue(selected)
+        XCTAssertTrue(window.firstResponder === editor)
+    }
+
     func testWindowCommandsWorkOutsideHistoryAndWhileEditing() throws {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false

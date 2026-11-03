@@ -135,7 +135,7 @@ struct DiffPane: View {
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help(diffControlText("display"))
             Button { showSearch.toggle() } label: { ComparisonToolbarIcon(name: "magnifyingglass") }.buttonStyle(ComparisonToolbarButtonStyle())
                 .help(diffControlText("search")).accessibilityLabel(diffControlText("search"))
-                .popover(isPresented: $showSearch) {
+                .auvGitPopover(isPresented: $showSearch) {
                     ComparisonSearchPopover(options: $searchOptions, replacement: $replacement, matchCount: matchCount, matchIndex: matchIndex, canReplace: false,
                         onNavigate: { searchStep += $0 ? 1 : -1 }, onReplace: { _ in },
                         onOpenEditor: (isLoading ? nil : onOpenEditableComparison).map { action in { action(searchOptions, replacement); showSearch = false } }, error: searchError, onClose: { showSearch = false })

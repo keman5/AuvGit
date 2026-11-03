@@ -627,7 +627,7 @@ private struct FileCompareContent: View {
             }
             Button { showSearch.toggle() } label: { ComparisonToolbarIcon(name: "magnifyingglass") }.buttonStyle(ComparisonToolbarButtonStyle())
                 .help(comparisonSearchText("Search and replace")).accessibilityLabel(comparisonSearchText("Search and replace"))
-                .popover(isPresented: Binding(get: { showSearch && supportsNativeComparison }, set: { showSearch = $0 }), arrowEdge: .bottom) {
+                .auvGitPopover(isPresented: Binding(get: { showSearch && supportsNativeComparison }, set: { showSearch = $0 }), arrowEdge: .bottom) {
                     ComparisonSearchPopover(options: $searchOptions, replacement: $replacement, matchCount: editingCommands.searchTotal, matchIndex: editingCommands.searchCurrent,
                         canReplace: session.canEdit(session.activePaneID) && !session.isBusy && layout != "patch", onNavigate: { forward in
                             compact = false

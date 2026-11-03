@@ -19,6 +19,7 @@ final class NativeFocusAppearance: ObservableObject {
     private var restoresKeyboardFocus = false
     let contextRowFocus = NativeContextRowFocus()
     weak var navigationScope: NativeFocusCoordinator?
+    weak var defaultFileScope: WorkspaceFileFocus?
     private struct Ring {
         weak var view: NSView?
         let original: NSFocusRingType
@@ -103,11 +104,16 @@ final class NativeFocusAppearance: ObservableObject {
         // Route Select All to the actual responder before stale menu validation
         // or remembered workspace scopes can swallow the native editing action.
         if flags == .command, event.charactersIgnoringModifiers?.lowercased() == "a" {
-            if let text = window.firstResponder as? NSTextView, text.isSelectable {
+            if let text = window.firstResponder as? NSTextView, text.isSelectable,
+               defaultFileScope?.usesDefaultScope != true || WorkspaceFileFocus.isExposed(text, in: window) {
                 text.selectAll(nil)
                 return true
             }
-            if let table = window.firstResponder as? NSTableView, table.allowsMultipleSelection {
+            if let scope = defaultFileScope, scope.usesDefaultScope, scope.selectAll(in: window) {
+                return true
+            }
+            if let table = window.firstResponder as? NSTableView, table.allowsMultipleSelection,
+               WorkspaceFileFocus.isExposed(table, in: window) {
                 table.selectAll(nil)
                 return true
             }

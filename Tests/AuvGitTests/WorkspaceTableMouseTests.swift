@@ -109,7 +109,7 @@ final class WorkspaceTableMouseTests: XCTestCase {
         XCTAssertEqual(selection.paths, ["c"])
         try await click(0, flags: .shift)
         XCTAssertEqual(selection.paths, ["a", "b", "c"])
-        table.selectAll(nil)
+        XCTAssertTrue(focus.selectAll(in: window))
         try await Task.sleep(for: .milliseconds(30))
         XCTAssertEqual(selection.paths, ["a", "b", "c"])
     }

@@ -72,7 +72,7 @@ struct WorkspaceConflictPreview: View {
                 }
                 Button { showSearch.toggle() } label: { ComparisonToolbarIcon(name: "magnifyingglass") }.buttonStyle(ComparisonToolbarButtonStyle())
                     .help(comparisonSearchText("Search and replace")).accessibilityLabel(comparisonSearchText("Search and replace"))
-                    .popover(isPresented: $showSearch) {
+                    .auvGitPopover(isPresented: $showSearch) {
                         ComparisonSearchPopover(options: $searchOptions, replacement: $replacement, matchCount: navigationCommands.searchTotal, matchIndex: navigationCommands.searchCurrent,
                             onNavigate: { forward in compact = false; navigation += forward ? 1 : -1 },
                             onOpenEditor: onOpenEditorSearch.map { action in { action(searchOptions, replacement) } }, error: searchError, onClose: { showSearch = false; DispatchQueue.main.async { navigationCommands.focusEditor() } })

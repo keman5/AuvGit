@@ -143,7 +143,7 @@ private struct WorkspaceProjectHost: View, Equatable {
     }
     var body: some View {
         MainWindow(store: store, usesBorderlessToolbar: usesBorderlessToolbar,
-            shellToolbarModel: shellToolbarModel, retainsPanels: retainsPanels)
+            shellToolbarModel: shellToolbarModel, retainsPanels: retainsPanels, isActiveProject: isActive)
             .opacity(isActive ? 1 : 0).allowsHitTesting(isActive).disabled(!isActive)
             .accessibilityHidden(!isActive).zIndex(isActive ? 1 : 0)
     }

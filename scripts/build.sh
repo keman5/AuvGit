@@ -1,6 +1,9 @@
 #!/bin/zsh
 set -euo pipefail
 cd "${0:A:h:h}"
+caffeinate -di -w $$ &
+BUILD_CAFFEINATE_PID=$!
+trap 'kill "$BUILD_CAFFEINATE_PID" 2>/dev/null || true' EXIT
 if command -v go >/dev/null 2>&1; then go clean -cache; fi
 if [[ "${1:-}" == --test-dialog-dismissal ]]; then
   # Unshown component hosts and Git fixtures only; never activate test windows.
@@ -97,7 +100,7 @@ python3 scripts/check-localizations.py
 rm -rf -- "$PWD/.artifacts"
 # Compile the native icon so macOS 26+ does not wrap the legacy icns in a gray tile.
 ICON_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/auvgit-app-icon.XXXXXX")"
-trap 'rm -rf -- "$ICON_BUILD_DIR"' EXIT
+trap 'rm -rf -- "$ICON_BUILD_DIR"; kill "$BUILD_CAFFEINATE_PID" 2>/dev/null || true' EXIT
 xcrun actool Resources/AppIcon.icon \
   --compile "$ICON_BUILD_DIR" \
   --app-icon AppIcon \
@@ -152,6 +155,30 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
+python3 - "$APP/Contents/Info.plist" /Applications/AuvGit.app/Contents/Info.plist <<'PYTHON'
+import pathlib
+import plistlib
+import sys
+
+output = pathlib.Path(sys.argv[1])
+with output.open('rb') as stream:
+    info = plistlib.load(stream)
+installed = pathlib.Path(sys.argv[2])
+if installed.is_file():
+    with installed.open('rb') as stream:
+        previous = plistlib.load(stream)
+else:
+    previous = info
+version = previous['CFBundleShortVersionString'].split('.')
+if len(version) != 3 or not all(part.isdecimal() for part in version):
+    raise SystemExit('Cannot increment the installed version: expected major.minor.patch')
+version[-1] = str(int(version[-1]) + 1)
+info['CFBundleShortVersionString'] = '.'.join(version)
+info['CFBundleVersion'] = str(int(previous['CFBundleVersion']) + 1)
+with output.open('wb') as stream:
+    plistlib.dump(info, stream)
+print(f"Version {info['CFBundleShortVersionString']} ({info['CFBundleVersion']})")
+PYTHON
 codesign --force --sign - "$APP"
 # Reusing the bundle directory otherwise leaves Finder's cached icon unchanged.
 touch "$APP/Contents/Resources" "$APP/Contents" "$APP"
@@ -213,5 +240,7 @@ for artifact in try FileManager.default.contentsOfDirectory(at: artifacts, inclu
 }
 SWIFT
   print "Installed $LOCAL_APP"
+  rm -rf -- "$PWD/.artifacts"
+  print "Cleaned $PWD/.artifacts (generated app and disk image)"
   swift package clean
 fi

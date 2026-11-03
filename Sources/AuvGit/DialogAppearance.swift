@@ -38,6 +38,10 @@ extension View {
     func auvGitPopover<Content: View>(isPresented: Binding<Bool>, arrowEdge: Edge = .top,
                                       @ViewBuilder content: @escaping () -> Content) -> some View {
         popover(isPresented: isPresented, arrowEdge: arrowEdge) { content().nativeFocusRoot() }
+            .transaction(value: isPresented.wrappedValue) {
+                $0.animation = nil
+                $0.disablesAnimations = true
+            }
     }
     func auvGitSheet<Content: View>(isPresented: Binding<Bool>, onDismiss: (() -> Void)? = nil,
                                     @ViewBuilder content: @escaping () -> Content) -> some View {
@@ -47,6 +51,12 @@ extension View {
                 .background(DialogFrameStyle(forceClose: { isPresented.wrappedValue = false }))
                 .presentationCornerRadius(AuvGitStyle.windowCornerRadius)
         }
+        // animationBehavior only affects AppKit's window ordering. Disable the
+        // SwiftUI sheet transition too, before it starts the native modal sheet.
+        .transaction(value: isPresented.wrappedValue) {
+            $0.animation = nil
+            $0.disablesAnimations = true
+        }
     }
     func auvGitSheet<Item: Identifiable, Content: View>(item: Binding<Item?>, onDismiss: (() -> Void)? = nil, focusesOnPresentation: Bool = false,
                                                        @ViewBuilder content: @escaping (Item) -> Content) -> some View {
@@ -55,6 +65,10 @@ extension View {
                 .background(Color(nsColor: .windowBackgroundColor))
                 .background(DialogFrameStyle(forceClose: { item.wrappedValue = nil }))
                 .presentationCornerRadius(AuvGitStyle.windowCornerRadius)
+        }
+        .transaction(value: item.wrappedValue?.id) {
+            $0.animation = nil
+            $0.disablesAnimations = true
         }
     }
     func auvGitAlert<Message: View>(_ title: String, isPresented: Binding<Bool>,

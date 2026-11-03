@@ -38,7 +38,9 @@ struct WorkspaceKeyboardRegion: NSViewRepresentable {
         }
         func handle(_ event: NSEvent) -> NSEvent? {
             guard let window, event.window === window, window.attachedSheet == nil, !isHiddenOrHasHiddenAncestor else { return event }
-            let textEditing = window.firstResponder is NSTextView || window.firstResponder is NSTextField
+            let responder = window.firstResponder as? NSView
+            let textEditing = (responder is NSTextView || responder is NSTextField) &&
+                responder.map { WorkspaceFileFocus.isExposed($0, in: window) } == true
             for command in ShortcutCommand.allCases where (command.scopes.contains(.workspace) || command.scopes.contains(.files)) && shortcuts.binding(command).matches(event) {
                 if textEditing && !command.worksWhileEditingText { continue }
                 if command == .reset || command == .resetAdvanced {
