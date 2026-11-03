@@ -11,6 +11,7 @@ struct OperationLogView: View {
     }
     @Environment(\.dismiss) private var dismiss
     @State private var expanded = Set<UUID>()
+    @State private var rowSelection = ListSelectionState<UUID>()
     @State private var activeDetail: UUID?
     @State private var fullRecord: GitCommandRecord?
     @State private var exportError: String?
@@ -46,7 +47,7 @@ struct OperationLogView: View {
                                 Spacer()
                                 Text(String(format: "%.2fs", record.duration)).foregroundStyle(.secondary)
                             }.font(.caption)
-                        }.disclosureGroupStyle(OperationLogDisclosureStyle())
+                        }.disclosureGroupStyle(OperationLogDisclosureStyle(id: record.id, selection: $rowSelection, orderedIDs: store.operationLog.map(\.id)))
                             .accessibilityLabel(record.command.isEmpty ? record.operation : "git " + record.operation)
                         Divider()
                     }
@@ -159,15 +160,23 @@ private struct FullOperationLogView: View {
 }
 
 private struct OperationLogDisclosureStyle: DisclosureGroupStyle {
+    let id: UUID
+    @Binding var selection: ListSelectionState<UUID>
+    let orderedIDs: [UUID]
     func makeBody(configuration: Configuration) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button { configuration.isExpanded.toggle() } label: {
+            Button {
+                let flags = NSEvent.modifierFlags
+                selection.click(id, shift: flags.contains(.shift), command: flags.contains(.command), orderedIDs: orderedIDs)
+                if !flags.contains(.shift), !flags.contains(.command) { configuration.isExpanded.toggle() }
+            } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
                         .rotationEffect(.degrees(configuration.isExpanded ? 90 : 0)).frame(width: 12)
                     configuration.label
                 }.frame(maxWidth: .infinity, minHeight: 24, alignment: .leading).contentShape(Rectangle())
-            }.buttonStyle(.plain).accessibilityValue(historyRefinementText(configuration.isExpanded ? "Expanded" : "Collapsed"))
+            }.buttonStyle(.plain).background(selection.ids.contains(id) ? Color.accentColor.opacity(0.15) : .clear)
+                .accessibilityValue(historyRefinementText(configuration.isExpanded ? "Expanded" : "Collapsed"))
             if configuration.isExpanded { configuration.content.padding(.leading, 18) }
         }
     }

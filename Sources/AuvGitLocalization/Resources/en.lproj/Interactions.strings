@@ -44,3 +44,5 @@
 "File Count Summary" = "%d files";
 
 "Discard Conflict Workspace Message" = "Outside an active Git operation, conflicted files and their index entries will be restored to HEAD. Files absent from HEAD will be deleted. Other staged contents remain unchanged; ordinary unstaged changes are restored from the index. Untracked files are permanently deleted.";
+"Drop %@ Stashes…" = "Drop %@ Stashes…";
+"Drop Multiple Stashes Message" = "Permanently delete the following %@ stashes? Confirm their contents are no longer needed.\n\n%@";

@@ -751,7 +751,7 @@ struct MainWindow: View {
             store.error = OperationFailure.message(error, repository: repository.url)
         }
     }
-    var sidebar: some View { RepositorySidebar(store: store, onAction: sidebarAction, repositoryFocusRequest: repositoryFocusRequest, branchFocus: branchesFocus).background(WorkspaceFileFocusRegion(focus: sidebarFocus).allowsHitTesting(false).accessibilityHidden(true)) }
+    var sidebar: some View { RepositorySidebar(store: store, onAction: sidebarAction, onDropStashes: dropStashes, repositoryFocusRequest: repositoryFocusRequest, branchFocus: branchesFocus).background(WorkspaceFileFocusRegion(focus: sidebarFocus).allowsHitTesting(false).accessibilityHidden(true)) }
     var welcome: some View {
         VStack(spacing: 18) {
             Image(systemName: "arrow.triangle.branch").font(.system(size: 58, weight: .light)).foregroundStyle(Color.accentColor)
@@ -1182,6 +1182,17 @@ extension MainWindow {
         case .revert: confirm(interactionText("Revert Commit"), interactionText("Revert Message", commit.shortHash)) { store.operation(interactionText("Revert Commit")) { try await $0.revert(hash: commit.hash) } }
         }
     }
+    private func dropStashes(_ stashes: [GitStash]) {
+        guard !stashes.isEmpty, let repository = store.repository, !store.isBusy else { return }
+        let title = stashes.count > 1 ? interactionText("Drop %@ Stashes…", String(stashes.count)) : interactionText("Drop Stash…")
+        let message = stashes.count > 1
+            ? interactionText("Drop Multiple Stashes Message", String(stashes.count), stashes.map { "\($0.ref): \($0.subject)" }.joined(separator: "\n"))
+            : interactionText("Drop Stash Message", stashes[0].ref)
+        confirm(title, message) {
+            guard store.repository === repository else { return }
+            store.operation(title) { try await $0.dropStashes(stashes) }
+        }
+    }
     private func sidebarAction(_ action: SidebarAction, _ value: String) {
         switch action {
         case .openRepository: store.requestOpen(URL(fileURLWithPath: value))
@@ -1239,7 +1250,8 @@ extension MainWindow {
         case .stashShow: store.showStashHistory(ref: value)
         case .stashApply: confirm(mainText("applyTitle", value), mainText("applyMessage")) { store.operation("应用贮藏") { try await $0.applyStash(ref: value) } }
         case .stashApplyImmediately: store.operation("应用贮藏") { try await $0.applyStash(ref: value) }
-        case .stashDrop: confirm(interactionText("Drop Stash…"), interactionText("Drop Stash Message", value)) { store.operation(interactionText("Drop Stash…")) { try await $0.dropStash(ref: value) } }
+        case .stashDrop:
+            if let stash = store.stashes.first(where: { $0.ref == value }) { dropStashes([stash]) }
         }
     }
     private func executeRemoteBranchDeletion(_ repository: GitRepository, reference: String, credential supplied: NetworkCredential? = nil, saveCredential: Bool = false) {

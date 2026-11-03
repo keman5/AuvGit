@@ -7,6 +7,10 @@ struct TagManagementView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var tags: [ManagedTag] = []
     @State private var selection: String?
+    @State private var rangeSelection = ListSelectionState<String>()
+    private var singleSelection: String? {
+        rangeSelection.selected(primary: selection, orderedIDs: filteredTags.map(\.id)).count == 1 ? selection : nil
+    }
     @State private var name = ""
     @State private var revision = "HEAD"
     @State private var annotation = ""
@@ -67,7 +71,7 @@ struct TagManagementView: View {
                             Text(loading ? panelText("Loading tags…") : tags.isEmpty ? panelText("No local tags") : designText("No matching tags")).foregroundStyle(.secondary)
                         }.frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
-                        Table(filteredTags, selection: $selection) {
+                        Table(filteredTags, selection: ListSelectionState.binding($rangeSelection, primary: $selection, orderedIDs: filteredTags.map(\.id))) {
                             TableColumn(workflowText("Tag name")) { tag in
                                 Label(tag.name, systemImage: "tag").font(.system(size: 13, weight: .medium))
                             }.width(min: 140, ideal: 180)
@@ -99,11 +103,11 @@ struct TagManagementView: View {
                             Picker(workflowText("Remote name"), selection: $remote) { ForEach(remotes, id: \.self) { Text($0).tag($0) } }.frame(width: 200)
                         }
                         Spacer()
-                        Button { preview(delete: false) } label: { Label(workflowText("Preview tag push"), systemImage: "square.and.arrow.up") }.disabled(selection == nil || remotes.isEmpty)
+                        Button { preview(delete: false) } label: { Label(workflowText("Preview tag push"), systemImage: "square.and.arrow.up") }.disabled(singleSelection == nil || remotes.isEmpty)
                         Button(workflowText("Delete local tag"), role: .destructive) {
-                            if let repo = store.repository, let selected = selection { pending = TagRequest(repo: repo, name: selected, remote: "", delete: true, local: true) }
-                        }.disabled(selection == nil)
-                        Button(workflowText("Preview remote deletion"), role: .destructive) { preview(delete: true) }.disabled(selection == nil || remotes.isEmpty)
+                            if let repo = store.repository, let selected = singleSelection { pending = TagRequest(repo: repo, name: selected, remote: "", delete: true, local: true) }
+                        }.disabled(singleSelection == nil)
+                        Button(workflowText("Preview remote deletion"), role: .destructive) { preview(delete: true) }.disabled(singleSelection == nil || remotes.isEmpty)
                     }
                     Text(selection ?? panelText("Select a tag to synchronize or delete.")).font(.caption).foregroundStyle(.secondary).padding(.top, 6)
                 }
@@ -186,7 +190,7 @@ struct TagManagementView: View {
         dismiss()
     }
     private func preview(delete: Bool) {
-        guard let repo = store.repository, let selected = selection, !store.isBusy else { return }
+        guard let repo = store.repository, let selected = singleSelection, !store.isBusy else { return }
         let request = TagRequest(repo: repo, name: selected, remote: remote, delete: delete, local: false)
         store.isBusy = true
         Task {

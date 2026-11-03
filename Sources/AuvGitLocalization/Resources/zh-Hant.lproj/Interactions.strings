@@ -44,3 +44,5 @@
 "File Count Summary" = "%d 個檔案";
 
 "Discard Conflict Workspace Message" = "非合併等操作狀態下，衝突檔案及其索引將恢復為 HEAD 版本；HEAD 中不存在的檔案會被刪除。其他未暫存修改恢復為索引版本，保留其已暫存內容。未追蹤檔案將被永久刪除。";
+"Drop %@ Stashes…" = "捨棄 %@ 筆儲藏…";
+"Drop Multiple Stashes Message" = "將永久刪除以下 %@ 筆儲藏記錄，請確認其中內容已不再需要。\n\n%@";

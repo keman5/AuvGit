@@ -7,6 +7,7 @@ struct ReferenceChangesView: View {
     let right: String
     @State private var files: [GitCommitFile] = []
     @State private var selection: String?
+    @State private var rangeSelection = ListSelectionState<String>()
     @State private var diff = ""
     @State private var loading = false
     @State private var error = ""
@@ -28,7 +29,7 @@ struct ReferenceChangesView: View {
                         if loading { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
                         else { Text(historyActionText("noFiles")).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity).padding(12) }
                     } else {
-                        List(selection: $selection) {
+                        List(selection: ListSelectionState.binding($rangeSelection, primary: $selection, orderedIDs: files.map(\.path))) {
                             ForEach(files) { file in
                                 HStack(spacing: 8) {
                                     Text(file.status).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)

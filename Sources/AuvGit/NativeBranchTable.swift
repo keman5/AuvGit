@@ -15,6 +15,7 @@ struct NativeBranchTable: NSViewRepresentable {
     let onAction: (SidebarAction, String) -> Void
     let onRenameStash: (String) -> Void
     let onShortcut: (NSEvent) -> Bool
+    var onDropStashes: (([GitStash]) -> Void)? = nil
 
     struct Row: Equatable {
         let id: String
@@ -79,7 +80,7 @@ struct NativeBranchTable: NSViewRepresentable {
         table.coordinator = context.coordinator
         table.headerView = nil; table.backgroundColor = .clear
         table.rowHeight = 24; table.usesAutomaticRowHeights = false; table.intercellSpacing = .zero
-        table.allowsEmptySelection = true; table.allowsMultipleSelection = false
+        table.allowsEmptySelection = true; table.allowsMultipleSelection = true
         table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle; table.autoresizingMask = [.width]
         let column = NSTableColumn(identifier: .init("branch")); column.width = 250; table.addTableColumn(column)
         table.delegate = context.coordinator; table.dataSource = context.coordinator
@@ -105,16 +106,20 @@ struct NativeBranchTable: NSViewRepresentable {
         override func menu(for event: NSEvent) -> NSMenu? { coordinator?.menu(row: row(at: convert(event.locationInWindow, from: nil))) }
         override func keyDown(with event: NSEvent) {
             guard window?.attachedSheet == nil else { super.keyDown(with: event); return }
-            if coordinator?.parent.onShortcut(event) == true { return }
+            if selectedRowIndexes.count > 1, event.modifierFlags.intersection([.command, .option, .control, .shift]) == .command,
+               event.charactersIgnoringModifiers?.lowercased() == "c" {
+                coordinator?.copySelectedNames(); return
+            }
+            if selectedRowIndexes.count == 1, coordinator?.parent.onShortcut(event) == true { return }
             if [123, 124].contains(event.keyCode), event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty,
                coordinator?.setExpanded(row: selectedRow, expanded: event.keyCode == 124) == true { return }
             if [36, 76].contains(event.keyCode), event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty {
-                coordinator?.activate(row: selectedRow); return
+                if selectedRowIndexes.count == 1 { coordinator?.activate(row: selectedRow) }; return
             }
             super.keyDown(with: event)
         }
     }
-    final class Cell: NSTableCellView {
+    final class Cell: NSTableCellView, NativeSelectionCellStyling {
         let disclosure = NSButton()
         let icon = NSImageView()
         let label = NSTextField(labelWithString: "")
@@ -123,6 +128,7 @@ struct NativeBranchTable: NSViewRepresentable {
         var group = false
         var compactIcon = false
         var depth = 0
+        var nativeSelection: Bool? { didSet { applyForeground() } }
         override init(frame: NSRect) {
             super.init(frame: frame)
             disclosure.isBordered = false; disclosure.bezelStyle = .inline
@@ -193,8 +199,8 @@ struct NativeBranchTable: NSViewRepresentable {
             didSet { applyForeground() }
         }
         private func applyForeground() {
-            let selected = backgroundStyle == .emphasized
-            label.textColor = selected ? .alternateSelectedControlTextColor : group ? .secondaryLabelColor : .labelColor
+            let selected = nativeSelection ?? (backgroundStyle == .emphasized)
+            label.textColor = selected ? .white : group ? .secondaryLabelColor : .labelColor
             icon.contentTintColor = label.textColor
             tracking.contentTintColor = selected ? label.textColor : .secondaryLabelColor
             check.contentTintColor = selected ? label.textColor : .controlAccentColor
@@ -216,29 +222,35 @@ struct NativeBranchTable: NSViewRepresentable {
         private var displayedCollapsedFolders: Set<String> = []
         weak var table: NSTableView?
         var updating = false
+        var rangeSelection = ListSelectionState<String>()
         init(_ parent: NativeBranchTable) { self.parent = parent }
         func update(_ value: NativeBranchTable) {
-            let repositoryChanged = parent.repositoryPath != value.repositoryPath
+            let repositoryChanged = parent.repositoryPath != value.repositoryPath || parent.repositoryIdentity != value.repositoryIdentity
             let rebuild = treeRows.isEmpty || repositoryChanged || parent.branches != value.branches || parent.stashes != value.stashes
                 || treeRows.first(where: { $0.id == "group:local" })?.expanded != value.localExpanded
                 || (!value.stashes.isEmpty && treeRows.first(where: { $0.id == "group:stash" })?.expanded != value.stashesExpanded)
             let currentChanged = repositoryChanged || parent.currentBranch != value.currentBranch
             parent = value
-            if repositoryChanged { collapsedFolders = [] }
+            if repositoryChanged {
+                collapsedFolders = []; rangeSelection = .init()
+                rangeSelection.synchronizePrimaryForDetails(parent.selection)
+            }
             if rebuild { treeRows = value.treeRows() }
             if currentChanged, let current = treeRows.first(where: { $0.current }) { collapsedFolders.subtract(current.parentFolders) }
             let newRows = rebuild || displayedCollapsedFolders != collapsedFolders ? value.visibleRows(treeRows, collapsed: collapsedFolders) : rows
             displayedCollapsedFolders = collapsedFolders
             guard let table else { rows = newRows; return }
             updating = true; defer { updating = false }
-            let directoryID = table.selectedRow >= 0 && rows.indices.contains(table.selectedRow) && rows[table.selectedRow].id.hasPrefix("folder:") ? rows[table.selectedRow].id : nil
+            rangeSelection.synchronize(primary: parent.selection, orderedIDs: newRows.map(\.id))
             if rows != newRows { rows = newRows; table.reloadData() }
-            let index = rows.firstIndex { !$0.isGroup && $0.id == parent.selection || parent.selection == nil && $0.id == directoryID }
-            let selected = index.map { IndexSet(integer: $0) } ?? []
+            let selected = IndexSet(rows.indices.filter { rangeSelection.ids.contains(rows[$0].id) })
             if table.selectedRowIndexes != selected { table.selectRowIndexes(selected, byExtendingSelection: false) }
         }
         func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
         func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { rows.indices.contains(row) && !rows[row].id.hasPrefix("group:") }
+        func tableView(_ tableView: NSTableView, selectionIndexesForProposedSelection proposedSelectionIndexes: IndexSet) -> IndexSet {
+            IndexSet(proposedSelectionIndexes.filter { rows.indices.contains($0) && !rows[$0].id.hasPrefix("group:") })
+        }
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
             guard rows.indices.contains(row) else { return nil }
             let id = NSUserInterfaceItemIdentifier("branchCell")
@@ -250,7 +262,11 @@ struct NativeBranchTable: NSViewRepresentable {
         }
         func tableViewSelectionDidChange(_ notification: Notification) {
             guard !updating, let table else { return }
-            parent.selection = rows.indices.contains(table.selectedRow) && !rows[table.selectedRow].isGroup ? rows[table.selectedRow].id : nil
+            let ids = Set(table.selectedRowIndexes.compactMap { rows.indices.contains($0) ? rows[$0].id : nil })
+            let clicked = rows.indices.contains(table.clickedRow) ? rows[table.clickedRow].id : nil
+            let primary = rangeSelection.select(ids, orderedIDs: rows.map(\.id), preferred: clicked)
+            parent.selection = ids.count == 1 && rows.first(where: { $0.id == primary })?.isGroup == false ? primary : nil
+            rangeSelection.synchronizePrimaryForDetails(parent.selection)
         }
         @objc func toggle(_ button: NSButton) {
             switch button.identifier?.rawValue {
@@ -286,6 +302,7 @@ struct NativeBranchTable: NSViewRepresentable {
             let row: Row
             let action: SidebarAction?
             let renameStash: Bool
+            var stashes: [GitStash] = []
         }
         func permits(_ action: SidebarAction, row: Row) -> Bool {
             if action == .copy || action == .stashShow || action == .history { return true }
@@ -308,17 +325,29 @@ struct NativeBranchTable: NSViewRepresentable {
             guard rows.indices.contains(row), !rows[row].isGroup else { return nil }
             let value = rows[row]; let target = value.target
             let menu = NSMenu(); menu.autoenablesItems = false
+            let selectedRows = table.map { table in
+                table.selectedRowIndexes.contains(row) ? table.selectedRowIndexes.compactMap { rows.indices.contains($0) ? rows[$0] : nil } : [value]
+            } ?? [value]
+            let selectedStashes = selectedRows.filter { $0.id.hasPrefix("stash:") }.compactMap { row in
+                parent.stashes.first { $0.ref == row.target }
+            }
+            if let table, table.selectedRowIndexes.contains(row), table.selectedRowIndexes.count > 1 {
+                let item = NSMenuItem(title: interactionText("Copy Name"), action: #selector(copySelectedNames), keyEquivalent: "")
+                item.target = self; menu.addItem(item)
+                guard value.id.hasPrefix("stash:") else { return menu }
+                menu.addItem(.separator())
+            }
             func add(_ title: String, _ action: SidebarAction?, enabled: Bool = true, rename: Bool = false) {
                 let item = NSMenuItem(title: title, action: #selector(performMenuAction(_:)), keyEquivalent: "")
                 item.target = self; item.isEnabled = enabled && (action.map { permits($0, row: value) } ?? !parent.isBusy)
-                item.representedObject = MenuAction(repositoryPath: parent.repositoryPath, repositoryIdentity: parent.repositoryIdentity, row: value, action: action, renameStash: rename)
+                item.representedObject = MenuAction(repositoryPath: parent.repositoryPath, repositoryIdentity: parent.repositoryIdentity, row: value, action: action, renameStash: rename, stashes: action == .stashDrop ? selectedStashes : [])
                 menu.addItem(item)
             }
             if value.id.hasPrefix("stash:") {
                 add(interactionText("Show Changes"), .stashShow)
                 add(interactionText("Apply Stash…"), .stashApply, enabled: !parent.isBusy)
                 add(shortcutText("Rename Stash"), nil, enabled: !parent.isBusy, rename: true)
-                add(interactionText("Drop Stash…"), .stashDrop, enabled: !parent.isBusy)
+                add(selectedStashes.count > 1 ? interactionText("Drop %@ Stashes…", String(selectedStashes.count)) : interactionText("Drop Stash…"), .stashDrop, enabled: !parent.isBusy)
             } else {
                 let remote = value.id.hasPrefix("remote:")
                 if !remote { add(interactionText("Check Out…"), .checkout, enabled: !parent.isBusy) }
@@ -340,6 +369,16 @@ struct NativeBranchTable: NSViewRepresentable {
             }
             return menu
         }
+        @objc func copySelectedNames() {
+            guard let table else { return }
+            let names = table.selectedRowIndexes.compactMap { index -> String? in
+                guard rows.indices.contains(index), !rows[index].isGroup else { return nil }
+                let row = rows[index]
+                return row.id.hasPrefix("stash:") ? row.title : row.target
+            }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(names.joined(separator: "\n"), forType: .string)
+        }
         @objc func performMenuAction(_ item: NSMenuItem) {
             guard item.isEnabled, let payload = item.representedObject as? MenuAction,
                   payload.repositoryPath == parent.repositoryPath, payload.repositoryIdentity == parent.repositoryIdentity,
@@ -347,6 +386,13 @@ struct NativeBranchTable: NSViewRepresentable {
             if payload.renameStash { guard !parent.isBusy else { return }; parent.onRenameStash(payload.row.target); return }
             guard let action = payload.action else { return }
             guard permits(action, row: value) else { return }
+            if action == .stashDrop, let onDropStashes = parent.onDropStashes {
+                guard !payload.stashes.isEmpty, payload.stashes.allSatisfy({ selected in
+                    parent.stashes.contains { $0.ref == selected.ref && $0.hash == selected.hash }
+                }) else { return }
+                onDropStashes(payload.stashes)
+                return
+            }
             let remote = value.id.hasPrefix("remote:")
             let target = action == .history || action == .merge ? (remote ? "refs/remotes/" : "refs/heads/") + value.target
                 : (action == .stopTracking || action == .deleteRemote) && remote ? "refs/remotes/" + value.target : value.target

@@ -54,10 +54,13 @@ struct RepositorySidebar: View {
     @State private var originalStashName = ""
     @State private var rebaseReference: String?
     let onAction: (SidebarAction, String) -> Void
+    var onDropStashes: (([GitStash]) -> Void)? = nil
     var repositoryFocusRequest: UUID? = nil
     var branchFocus: WorkspaceFileFocus? = nil
     @FocusState private var focusedRepository: String?
     @State private var branchSelection: String?
+    @State private var repositoryRange = ListSelectionState<String>()
+    @State private var repositorySelectionInitialized = false
     @State private var contextTarget: RepositoryContextTarget?
     @AppStorage("sidebar.localBranchesExpanded") private var localBranchesExpanded = true
     @AppStorage("sidebar.stashesExpanded") private var stashesExpanded = true
@@ -107,6 +110,12 @@ struct RepositorySidebar: View {
                     }
                 }
             }.frame(minHeight: 130, idealHeight: 300)
+            .onChange(of: store.highlightedRepositoryPath) { _, path in
+                if repositoryRange.primary != path {
+                    repositoryRange = .init()
+                    repositoryRange.synchronize(primary: path, orderedIDs: store.recentPaths)
+                }
+            }
     }
     private var branchPane: some View {
         VStack(spacing: 0) {
@@ -114,7 +123,7 @@ struct RepositorySidebar: View {
                 NativeBranchTable(branches: store.branches, stashes: store.stashes,
                     repositoryPath: store.repositoryURL?.path, repositoryIdentity: store.repository.map { ObjectIdentifier($0) }, currentBranch: store.branch, isBusy: store.isBusy,
                     localExpanded: $localBranchesExpanded, stashesExpanded: $stashesExpanded, selection: $branchSelection,
-                    onAction: onAction, onRenameStash: prepareStashRename, onShortcut: handleShortcut)
+                    onAction: onAction, onRenameStash: prepareStashRename, onShortcut: handleShortcut, onDropStashes: onDropStashes)
                     .background { if let branchFocus { WorkspaceFileFocusRegion(focus: branchFocus).allowsHitTesting(false).accessibilityHidden(true) } }
             }.frame(minHeight: 170)
     }
@@ -154,13 +163,21 @@ struct RepositorySidebar: View {
             .fixedSize().help(help).accessibilityLabel(help)
     }
     private func repositoryRow(_ path: String) -> some View {
-        let active = path == store.highlightedRepositoryPath
+        let active = repositorySelectionInitialized ? repositoryRange.ids.contains(path) : path == store.highlightedRepositoryPath
         let sync = store.repositorySyncStates[path]
         let ahead = sync?.ahead ?? 0, behind = sync?.behind ?? 0, conflicts = sync?.conflicts ?? 0
         let hasPush = ahead > 0, hasPull = behind > 0, hasConflict = conflicts > 0
         let symbol = hasConflict ? "exclamationmark.triangle.fill" : hasPush && hasPull ? "arrow.up.arrow.down.circle" : hasPull ? "arrow.down.circle" : hasPush ? "arrow.up.circle" : "folder"
         let status = hasConflict ? sidebarRefinementText("conflicts", conflicts) : hasPush && hasPull ? sidebarRefinementText("pushPull", ahead, behind) : hasPull ? sidebarRefinementText("pull", behind) : hasPush ? sidebarRefinementText("push", ahead) : path
-        return Button { focusedRepository = path; if store.canOpenRepository { onAction(.openRepository, path) } } label: {
+        return Button {
+            let flags = NSEvent.modifierFlags
+            if !repositorySelectionInitialized, let current = store.highlightedRepositoryPath {
+                repositoryRange.click(current, shift: false, command: false, orderedIDs: store.recentPaths)
+            }
+            repositorySelectionInitialized = true
+            repositoryRange.click(path, shift: flags.contains(.shift), command: flags.contains(.command), orderedIDs: store.recentPaths)
+            if !flags.contains(.shift), !flags.contains(.command), store.canOpenRepository { onAction(.openRepository, path) }
+        } label: {
             HStack(spacing: 6) {
                 RepositoryRowIcon(symbol: symbol, hasConflict: hasConflict, hasSync: hasPush || hasPull)
                     .help(status).accessibilityLabel(status)
@@ -188,7 +205,8 @@ struct RepositorySidebar: View {
             .focusable().focused($focusedRepository, equals: path).id(path)
             .onKeyPress("c", phases: .down) { press in
                 guard press.modifiers == .command else { return .ignored }
-                onAction(.copy, URL(fileURLWithPath: path).lastPathComponent)
+                let paths = repositorySelectionInitialized ? store.recentPaths.filter { repositoryRange.ids.contains($0) } : [path]
+                onAction(.copy, paths.map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: "\n"))
                 return .handled
             }
             .onKeyPress(.return) { guard store.canOpenRepository else { return .handled }; onAction(.openRepository, path); return .handled }

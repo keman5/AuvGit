@@ -11,6 +11,7 @@ struct RebaseWorkflowView: View {
     @State private var captured: RebasePlan?
     @State private var todo = ""
     @State private var messageSelection: String?
+    @State private var planSelection = ListSelectionState<Int>()
     @State private var messages: [String: String] = [:]
     @State private var originalMessages: [String: String] = [:]
     @State private var output = ""
@@ -116,8 +117,12 @@ struct RebaseWorkflowView: View {
                                                 Text(rowMetadata(row)?.author ?? "").font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).frame(width: 110, alignment: .leading)
                                                 Text(rowMetadata(row).map { preferencesDate($0.date, style: "relative") } ?? "").font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 125, alignment: .leading)
                                             }.padding(.horizontal, 8).padding(.vertical, 9)
-                                                .background(row.hash != nil && messageSelection == row.hash ? Color.blue.opacity(0.13) : Color.clear)
-                                                .contentShape(Rectangle()).onTapGesture { if let hash = row.hash { messageSelection = hash } }
+                                                .background(planSelection.ids.contains(row.id) ? Color.blue.opacity(0.13) : Color.clear)
+                                                .contentShape(Rectangle()).onTapGesture {
+                                                    let flags = NSEvent.modifierFlags
+                                                    planSelection.click(row.id, shift: flags.contains(.shift), command: flags.contains(.command), orderedIDs: planRows.map(\.id))
+                                                    if let hash = row.hash { messageSelection = hash }
+                                                }
                                             Divider()
                                         }
                                     }

@@ -43,6 +43,7 @@ private struct CommitDetailView: View {
     @AppStorage(L10n.preferenceKey) private var language = AppLanguage.system.rawValue
     @State private var files: [GitCommitFile] = []
     @State private var selection: String?
+    @State private var rangeSelection = ListSelectionState<String>()
     @State private var diff = ""
     @State private var loadingFiles = true
     @State private var loadingDiff = false
@@ -74,7 +75,7 @@ private struct CommitDetailView: View {
                     else if let filesError { Text(filesError).foregroundStyle(.red).textSelection(.enabled).padding() }
                     else if files.isEmpty { AuvGitEmptyState(title: historyActionText("noFiles"), systemImage: "doc.on.doc") }
                     else {
-                        List(files, selection: $selection) { file in
+                        List(files, selection: ListSelectionState.binding($rangeSelection, primary: $selection, orderedIDs: files.map(\.path))) { file in
                             HStack(spacing: 8) {
                                 Text(file.status).font(.system(.caption, design: .monospaced))
                                 Text(file.logFileName).font(.system(size: 12)).lineLimit(2).truncationMode(.middle)

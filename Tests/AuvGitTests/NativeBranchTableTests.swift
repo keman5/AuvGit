@@ -6,6 +6,92 @@ import GitCore
 
 @MainActor
 final class NativeBranchTableTests: XCTestCase {
+    func testDropCapturesAllSelectedStashesAndRejectsRetargetedMenus() throws {
+        let stashes = (0..<3).map { GitStash(ref: "stash@{\($0)}", subject: "Saved \($0)", hash: "hash\($0)") }
+        var received: [[GitStash]] = []
+        let base = pane()
+        let view = NativeBranchTable(branches: base.branches, stashes: stashes, repositoryPath: base.repositoryPath,
+            currentBranch: base.currentBranch, isBusy: false, localExpanded: .constant(true),
+            stashesExpanded: .constant(true), selection: .constant(nil), onAction: { _, _ in XCTFail("Drop must use the captured selection") },
+            onRenameStash: { _ in }, onShortcut: { _ in false }, onDropStashes: { received.append($0) })
+        let coordinator = view.makeCoordinator()
+        let table = NSTableView()
+        table.allowsMultipleSelection = true
+        table.addTableColumn(NSTableColumn(identifier: .init("branch")))
+        table.dataSource = coordinator; coordinator.table = table; coordinator.update(view)
+        let indices = coordinator.rows.indices.filter { coordinator.rows[$0].id.hasPrefix("stash:") }
+        table.selectRowIndexes(IndexSet([indices[0], indices[2]]), byExtendingSelection: false)
+        func drop(_ row: Int) throws -> NSMenuItem {
+            try XCTUnwrap(coordinator.menu(row: row)?.items.first {
+                ($0.representedObject as? NativeBranchTable.Coordinator.MenuAction)?.action == .stashDrop
+            })
+        }
+        let batch = try drop(indices[0])
+        XCTAssertTrue(batch.title.contains("2"))
+        table.selectRowIndexes(IndexSet(integer: indices[1]), byExtendingSelection: false)
+        coordinator.performMenuAction(batch)
+        XCTAssertEqual(received, [[stashes[0], stashes[2]]], "Menu captures the confirmed targets, not a later selection")
+        let single = try drop(indices[0])
+        coordinator.performMenuAction(single)
+        XCTAssertEqual(received.last, [stashes[0]], "Right-click outside selection targets only the clicked stash")
+        coordinator.parent = NativeBranchTable(branches: base.branches,
+            stashes: [GitStash(ref: stashes[0].ref, subject: "Replacement", hash: "new")], repositoryPath: base.repositoryPath,
+            currentBranch: base.currentBranch, isBusy: false, localExpanded: .constant(true), stashesExpanded: .constant(true),
+            selection: .constant(nil), onAction: { _, _ in }, onRenameStash: { _ in }, onShortcut: { _ in false },
+            onDropStashes: { received.append($0) })
+        coordinator.performMenuAction(batch)
+        XCTAssertEqual(received.count, 2)
+    }
+    func testSelectedStashKeepsWhiteTextWhenAppKitRemovesEmphasis() throws {
+        let parent = pane()
+        let coordinator = parent.makeCoordinator()
+        let stash = try XCTUnwrap(parent.rows.first { $0.id.hasPrefix("stash:") })
+        let cell = NativeBranchTable.Cell(frame: .zero)
+        cell.configure(stash, coordinator: coordinator)
+        let row = NativeBranchTable.RowView()
+        row.addSubview(cell)
+        row.isSelected = true
+        row.isEmphasized = false
+        cell.backgroundStyle = .normal
+        XCTAssertEqual(cell.label.textColor, .white)
+        XCTAssertEqual(cell.icon.contentTintColor, .white)
+        cell.configure(stash, coordinator: coordinator)
+        XCTAssertEqual(cell.label.textColor, .white, "Refreshing an inactive selected stash must keep its contrast")
+        row.isSelected = false
+        XCTAssertEqual(cell.label.textColor, .labelColor)
+    }
+
+    func testRightClickedStashRetainsDropInMultipleSelection() throws {
+        var received: [(SidebarAction, String)] = []
+        let value = pane(action: { received.append(($0, $1)) })
+        let coordinator = value.makeCoordinator()
+        let table = NSTableView()
+        table.allowsMultipleSelection = true
+        table.addTableColumn(NSTableColumn(identifier: .init("branch")))
+        table.dataSource = coordinator; coordinator.table = table
+        coordinator.update(value)
+        let stashIndex = try XCTUnwrap(coordinator.rows.firstIndex { $0.id.hasPrefix("stash:") })
+        let branchIndex = try XCTUnwrap(coordinator.rows.firstIndex { $0.id.hasPrefix("branch:") })
+        let selection = IndexSet([branchIndex, stashIndex])
+        table.selectRowIndexes(selection, byExtendingSelection: false)
+        let menu = try XCTUnwrap(coordinator.menu(row: stashIndex))
+        let drop = try XCTUnwrap(menu.items.first {
+            ($0.representedObject as? NativeBranchTable.Coordinator.MenuAction)?.action == .stashDrop
+        })
+        XCTAssertTrue(drop.isEnabled)
+        coordinator.performMenuAction(drop)
+        XCTAssertEqual(received.first?.0, .stashDrop)
+        XCTAssertEqual(received.first?.1, "stash@{0}", "Only the right-clicked stash enters confirmation")
+        XCTAssertEqual(table.selectedRowIndexes, selection)
+        coordinator.update(pane(busy: true))
+        let busyDrop = try XCTUnwrap(coordinator.menu(row: stashIndex)?.items.first {
+            ($0.representedObject as? NativeBranchTable.Coordinator.MenuAction)?.action == .stashDrop
+        })
+        XCTAssertFalse(busyDrop.isEnabled)
+        coordinator.performMenuAction(drop)
+        XCTAssertEqual(received.count, 1, "A stale menu cannot drop a stash while another operation runs")
+    }
+
     func testSelectionImmediatelyTintsAllBranchIconsAndSurvivesReuse() throws {
         let parent = pane()
         let coordinator = parent.makeCoordinator()
@@ -16,10 +102,10 @@ final class NativeBranchTableTests: XCTestCase {
         row.addSubview(cell)
         row.isSelected = true
         for icon in [cell.icon, cell.tracking, cell.check] {
-            XCTAssertEqual(icon.contentTintColor, .alternateSelectedControlTextColor)
+            XCTAssertEqual(icon.contentTintColor, .white)
         }
         cell.configure(value, coordinator: coordinator)
-        XCTAssertEqual(cell.check.contentTintColor, .alternateSelectedControlTextColor)
+        XCTAssertEqual(cell.check.contentTintColor, .white)
         row.isSelected = false
         XCTAssertEqual(cell.label.textColor, .labelColor)
         XCTAssertEqual(cell.check.contentTintColor, .controlAccentColor)

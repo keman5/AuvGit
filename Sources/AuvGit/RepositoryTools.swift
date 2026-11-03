@@ -295,17 +295,23 @@ struct RepositoryCreationAlerts: View {
 struct HistoricalRecordsView: View {
     let text: String
     let repository: GitRepository?
-    @State private var selected: String?
+    @State private var selected: Set<Int> = []
     @State private var error = ""
     var body: some View {
         VStack {
             List(selection: $selected) {
                 ForEach(Array(text.split(separator: "\n").enumerated()), id: \.offset) { index, line in
-                    Text(String(line)).font(.system(size: 12, design: .monospaced)).textSelection(.enabled).tag(String(line))
+                    Text(String(line)).font(.system(size: 12, design: .monospaced)).tag(index)
                 }
-            }.contextMenu(forSelectionType: String.self) { rows in
-                if let line = rows.first { Button(workflowText("Open commit")) { open(line) }; Button(workflowText("Copy record")) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(line, forType: .string) } }
-            } primaryAction: { rows in if let line = rows.first { open(line) } }
+            }.contextMenu(forSelectionType: Int.self) { rows in
+                let lines = text.split(separator: "\n").map(String.init)
+                let chosen = rows.sorted().compactMap { lines.indices.contains($0) ? lines[$0] : nil }
+                if chosen.count == 1, let line = chosen.first { Button(workflowText("Open commit")) { open(line) } }
+                if !chosen.isEmpty { Button(workflowText("Copy record")) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(chosen.joined(separator: "\n"), forType: .string) } }
+            } primaryAction: { rows in
+                let lines = text.split(separator: "\n").map(String.init)
+                if let row = rows.sorted().first, lines.indices.contains(row) { open(lines[row]) }
+            }
             if !error.isEmpty { Text(error).foregroundStyle(.orange) }
         }
     }

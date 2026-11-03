@@ -36,6 +36,7 @@ struct WorkspaceTree: View {
     @State private var stateRepositoryPath: String?
     @State private var trashed: [TrashedRepositoryFile] = []
     @State private var ignored: [String] = []
+    @State private var selectedIgnored: Set<String> = []
     @State private var showIgnored = false
     @State private var showIgnoreEditor = false
     @State private var ignoreDraft = ""
@@ -95,7 +96,7 @@ struct WorkspaceTree: View {
             .auvGitSheet(isPresented: $showIgnored) {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(compareText("Ignored Files")).font(.headline)
-                    List(ignored, id: \.self) { Text($0).font(.system(size: 12)).textSelection(.enabled) }
+                    List(ignored, id: \.self, selection: $selectedIgnored) { Text($0).font(.system(size: 12)).tag($0) }
                     HStack { DialogButton(compareText("Close"), prominent: true, role: .cancel) { showIgnored = false } }.buttonStyle(AuvGitDialogButtonStyle()).frame(maxWidth: .infinity)
                 }.controlSize(.small).padding(20).frame(width: 600, height: 450)
             }

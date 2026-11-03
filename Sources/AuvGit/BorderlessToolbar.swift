@@ -67,6 +67,7 @@ struct BorderlessToolbarView<CommandContent: View>: View {
     let commands: [ShellToolbarCommand]
     @ViewBuilder let commandContent: (ShellToolbarCommand, Bool) -> CommandContent
     @State private var customizing = false
+    @State private var selectedPaletteRows: Set<Int> = []
     var body: some View {
         HStack(spacing: 5) {
             GeometryReader { geometry in
@@ -93,7 +94,7 @@ struct BorderlessToolbarView<CommandContent: View>: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(shellToolbarText("customize")).font(.headline)
             Toggle(shellToolbarText("iconAndText"), isOn: $model.showsText)
-            List {
+            List(selection: $selectedPaletteRows) {
                 ForEach(Array(model.identifiers.enumerated()), id: \.offset) { index, id in
                     HStack {
                         Text(commands.first(where: { $0.id == id })?.title ?? shellToolbarText(id))
@@ -102,9 +103,10 @@ struct BorderlessToolbarView<CommandContent: View>: View {
                         Button { model.move(index, by: 1) } label: { Image(systemName: "arrow.down") }.disabled(index == model.identifiers.count - 1)
                         Button { model.remove(at: index) } label: { Image(systemName: "minus.circle") }
                     }
+                    .tag(index)
                     .buttonStyle(ToolbarRowButtonStyle())
                 }
-            }.frame(height: 280)
+            }.frame(height: 280).onChange(of: model.identifiers) { _, _ in selectedPaletteRows = [] }
             Menu(shellToolbarText("addItem")) {
                 ForEach(commands) { command in Button(command.title) { model.insert(command.id) }.disabled(model.identifiers.contains(command.id)) }
                 Divider()

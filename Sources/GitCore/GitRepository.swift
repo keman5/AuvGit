@@ -368,6 +368,21 @@ public actor GitRepository {
         try await validateStash(ref)
         _ = try await run(["stash", "drop", ref])
     }
+    public func dropStashes(_ selected: [GitStash]) async throws {
+        let current = try await stashes()
+        let references = Set(selected.map(\.ref))
+        guard !selected.isEmpty, references.count == selected.count,
+              selected.allSatisfy({ target in current.contains { $0.ref == target.ref && $0.hash == target.hash } }) else {
+            throw GitError("Stash selection changed. Refresh and select the stashes again.")
+        }
+        // Delete oldest selected entries first so lower stash indices stay stable.
+        for target in current.reversed() where references.contains(target.ref) {
+            guard try await stashes().contains(where: { $0.ref == target.ref && $0.hash == target.hash }) else {
+                throw GitError("Stash selection changed. Refresh and select the stashes again.")
+            }
+            _ = try await run(["stash", "drop", target.ref])
+        }
+    }
     public func stashDiff(ref: String) async throws -> String {
         try await validateStash(ref)
         return try await run(["stash", "show", "--patch", "--include-untracked", "--no-ext-diff", "--no-textconv", "--no-color", ref]).text

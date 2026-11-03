@@ -34,6 +34,8 @@ struct NativeCompactHistoryTable: NSViewRepresentable {
         table.rowHeight = HistoryColumnLayout.rowHeight(compact: true)
         table.intercellSpacing = .zero
         table.selectionHighlightStyle = .regular
+        table.allowsMultipleSelection = true
+        table.allowsEmptySelection = true
         let column = NSTableColumn(identifier: .init("history"))
         table.addTableColumn(column)
         table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
@@ -57,6 +59,10 @@ struct NativeCompactHistoryTable: NSViewRepresentable {
         coordinator.parent = self
         guard let table = coordinator.table else { return }
         coordinator.updatingSelection = true
+        if previous.navigationGeneration != navigationGeneration {
+            coordinator.rangeSelection = .init()
+        }
+        coordinator.rangeSelection.synchronize(primary: selection, orderedIDs: commits.map(\.hash))
         let changed = previous.commits != commits
         if changed {
             if previous.commits.first?.hash != commits.first?.hash { coordinator.gate.reset() }
@@ -71,7 +77,7 @@ struct NativeCompactHistoryTable: NSViewRepresentable {
             }
         }
         let row = commits.firstIndex { $0.hash == selection }
-        table.selectRowIndexes(row.map { IndexSet(integer: $0) } ?? [], byExtendingSelection: false)
+        table.selectRowIndexes(IndexSet(commits.indices.filter { coordinator.rangeSelection.ids.contains(commits[$0].hash) }), byExtendingSelection: false)
         coordinator.updatingSelection = false
         if previous.navigationGeneration != navigationGeneration { coordinator.pendingScroll = true }
         if coordinator.pendingScroll || coordinator.appliedSelection != selection, let row {
@@ -93,6 +99,7 @@ struct NativeCompactHistoryTable: NSViewRepresentable {
         var updatingSelection = false
         var pendingScroll = true
         var appliedSelection: String?
+        var rangeSelection = ListSelectionState<String>()
         var gate = HistoryPaginationGate(prefetchDistance: 10)
         init(_ parent: NativeCompactHistoryTable) { self.parent = parent }
         func numberOfRows(in tableView: NSTableView) -> Int { parent.commits.count }
@@ -106,8 +113,9 @@ struct NativeCompactHistoryTable: NSViewRepresentable {
         func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { CompactHistoryRowView() }
         func tableViewSelectionDidChange(_ notification: Notification) {
             guard !updatingSelection, let table else { return }
-            let row = table.selectedRow
-            parent.selection = parent.commits.indices.contains(row) ? parent.commits[row].hash : nil
+            let ids = Set(table.selectedRowIndexes.compactMap { parent.commits.indices.contains($0) ? parent.commits[$0].hash : nil })
+            let clicked = parent.commits.indices.contains(table.clickedRow) ? parent.commits[table.clickedRow].hash : nil
+            parent.selection = rangeSelection.select(ids, orderedIDs: parent.commits.map(\.hash), preferred: clicked)
         }
         @objc func showCommit() {
             guard let table, parent.commits.indices.contains(table.clickedRow) else { return }
@@ -146,7 +154,8 @@ struct NativeCompactHistoryTable: NSViewRepresentable {
                     }
                 }
                 item.representedObject = (action, commit, parent.navigationGeneration)
-                item.isEnabled = !action.isMutation || !parent.isBusy
+                item.isEnabled = (!action.isMutation || !parent.isBusy)
+                    && (table.selectedRowIndexes.count <= 1 || [.copyHash, .copyMessage].contains(action))
                 menu.addItem(item)
             }
             menu.autoenablesItems = false
@@ -157,6 +166,13 @@ struct NativeCompactHistoryTable: NSViewRepresentable {
                   generation == parent.navigationGeneration,
                   parent.commits.contains(where: { $0.hash == commit.hash }),
                   !action.isMutation || !parent.isBusy else { return }
+            if let table, table.selectedRowIndexes.count > 1 {
+                guard [.copyHash, .copyMessage].contains(action) else { return }
+                let selected = table.selectedRowIndexes.compactMap { parent.commits.indices.contains($0) ? parent.commits[$0] : nil }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(selected.map { action == .copyHash ? $0.hash : $0.subject }.joined(separator: "\n"), forType: .string)
+                return
+            }
             parent.onAction(action, commit)
         }
     }
@@ -165,7 +181,7 @@ struct NativeCompactHistoryTable: NSViewRepresentable {
 private final class CompactHistoryTableView: NSTableView {
     override func menu(for event: NSEvent) -> NSMenu? {
         let row = self.row(at: convert(event.locationInWindow, from: nil))
-        if row >= 0 { selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) }
+        if row >= 0, !selectedRowIndexes.contains(row) { selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) }
         return super.menu(for: event)
     }
 }

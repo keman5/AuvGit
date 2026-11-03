@@ -44,3 +44,5 @@
 "File Count Summary" = "%d ファイル";
 
 "Discard Conflict Workspace Message" = "Git 操作の進行中でない場合、競合ファイルとインデックスを HEAD に戻します。HEAD に存在しないファイルは削除します。他の未ステージ変更はインデックスに戻し、ステージ済み内容を保持します。未追跡ファイルは完全に削除します。";
+"Drop %@ Stashes…" = "%@ 件のスタッシュを削除…";
+"Drop Multiple Stashes Message" = "次の %@ 件のスタッシュを完全に削除します。内容が不要であることを確認してください。\n\n%@";

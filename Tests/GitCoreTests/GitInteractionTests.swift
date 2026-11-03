@@ -86,6 +86,26 @@ final class GitInteractionTests: XCTestCase {
         try await repo.dropStash(ref: ref)
         let stashes = try await repo.stashes(); XCTAssertTrue(stashes.isEmpty)
     }
+    func testBatchStashDropKeepsUnselectedEntriesAndRejectsRenumberedTargets() async throws {
+        let (url, repo) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try write("base", "file", at: url); try await repo.stage(paths: ["file"]); try await repo.commit(message: "base")
+        for index in 0..<4 {
+            try write("change \(index)", "file", at: url)
+            try await repo.stash(message: "stash \(index)")
+        }
+        let original = try await repo.stashes()
+        try await repo.dropStashes([original[0], original[2]])
+        let remaining = try await repo.stashes()
+        XCTAssertEqual(remaining.map(\.hash), [original[1].hash, original[3].hash])
+        await rejected { try await repo.dropStashes([remaining[0], original[2]]) }
+        let unchanged = try await repo.stashes()
+        XCTAssertEqual(unchanged.map(\.hash), remaining.map(\.hash), "Validate the whole batch before dropping any stash")
+        try write("new change", "file", at: url); try await repo.stash(message: "new stash")
+        await rejected { try await repo.dropStashes(remaining) }
+        let after = try await repo.stashes()
+        XCTAssertEqual(after.count, 3)
+    }
     func testForceDeleteRequiresFreshBranchTipAndRejectsCurrentBranch() async throws {
         let (url, repo) = try await fixture()
         defer { try? FileManager.default.removeItem(at: url) }

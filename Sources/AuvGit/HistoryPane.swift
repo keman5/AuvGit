@@ -36,6 +36,7 @@ struct HistoryPaginationGate {
 struct HistoryPane: View {
     let commits: [GitCommit]
     @Binding var selection: String?
+    @State private var rangeSelection = ListSelectionState<String>()
     @Binding var search: String
     let isLoading: Bool
     let hasMore: Bool
@@ -76,6 +77,7 @@ struct HistoryPane: View {
     var body: some View {
         GeometryReader { geometry in
         let visible = commits
+        let selectedHashes = rangeSelection.selected(primary: selection, orderedIDs: visible.map(\.hash))
         let graph = graphCache.graph(commits: visible, firstParent: firstParentGraph)
         let graphStyles = graphCache.styles(commits: visible, remoteBranchNames: remoteBranchNames, localUnpushedHashes: localUnpushedCommitHashes, currentBranch: currentBranch, visibleRemoteBranchNames: visibleRemoteBranchNames)
         let showColumns = !compact && (showAvatars || showNames)
@@ -130,7 +132,7 @@ struct HistoryPane: View {
                 emptyHistory
             } else {
                 ScrollViewReader { proxy in
-                List(selection: $selection) {
+                List(selection: ListSelectionState.binding($rangeSelection, primary: $selection, orderedIDs: visible.map(\.hash))) {
                     ForEach(Array(visible.enumerated()), id: \.element.hash) { index, commit in
                         let row = graph.rows[index]
                         let rowWidths = HistoryColumnLayout.graphMessageWidths(
@@ -140,12 +142,12 @@ struct HistoryPane: View {
                             baseMessageWidth: compact ? 220 : messageWidth
                         )
                         HStack(spacing: compact ? 4 : 8) {
-                            CommitGraphCell(row: row, rowIndex: index, styles: graphStyles, selected: selection == commit.hash)
+                            CommitGraphCell(row: row, rowIndex: index, styles: graphStyles, selected: selectedHashes.contains(commit.hash))
                                 .frame(width: rowWidths.graph, height: HistoryColumnLayout.rowHeight(compact: compact)).clipped()
                             HStack(spacing: 4) {
                                 ForEach(visibleRefs(commit, compact: compact, styles: graphStyles), id: \.self) { ref in
                                     let tint = graphStyles.referenceStyle(for: ref, commitHash: commit.hash).color.color
-                                    HistoryReferenceBadge(label: graphStyles.referenceLabel(ref), tint: NSColor(tint), selected: selection == commit.hash)
+                                    HistoryReferenceBadge(label: graphStyles.referenceLabel(ref), tint: NSColor(tint), selected: selectedHashes.contains(commit.hash))
                                         .frame(width: min(120, (graphStyles.referenceLabel(ref) as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 10, weight: .medium)]).width + 8), height: 16)
                                         .help(ref)
                                 }
@@ -188,7 +190,7 @@ struct HistoryPane: View {
                     }
                 }.listStyle(.plain).contentMargins(.horizontal, 0).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, HistoryColumnLayout.rowHeight(compact: compact))
                     .contextMenu(forSelectionType: String.self) { hashes in
-                        if let hash = hashes.first, let commit = commits.first(where: { $0.hash == hash }) {
+                        if hashes.count == 1, let hash = hashes.first, let commit = commits.first(where: { $0.hash == hash }) {
                             Button(sidebarRefinementText("viewLog")) { onAction(.viewLog, commit) }.configuredShortcut(.viewLog, using: shortcuts)
                             Button(sidebarRefinementText("commitDetails")) { onAction(.show, commit) }.configuredShortcut(.show, using: shortcuts)
                             Divider()
@@ -205,11 +207,14 @@ struct HistoryPane: View {
                             Button(historyActionText("copyHash")) { onAction(.copyHash, commit) }.configuredShortcut(.copyHash, using: shortcuts)
                             Button(historyActionText("copyMessage")) { onAction(.copyMessage, commit) }.configuredShortcut(.copyMessage, using: shortcuts)
                             Button(shortcutText("Use Message for Commit")) { onAction(.useCommitMessage, commit) }.configuredShortcut(.useCommitMessage, using: shortcuts)
+                        } else if !hashes.isEmpty {
+                            Button(historyActionText("copyHash")) { copyCommits(hashes, messages: false) }
+                            Button(historyActionText("copyMessage")) { copyCommits(hashes, messages: true) }
                         }
                     } primaryAction: { hashes in
                         if let hash = hashes.first, let commit = commits.first(where: { $0.hash == hash }) { onAction(.show, commit) }
                     }
-                    .onChange(of: navigationGeneration) { _, _ in pendingNavigationScroll = true; scrollAfterNavigation(proxy) }
+                    .onChange(of: navigationGeneration) { _, _ in rangeSelection = .init(); pendingNavigationScroll = true; scrollAfterNavigation(proxy) }
                     .onChange(of: visible.first?.hash) { _, _ in paginationGate.reset() }
                     .onChange(of: selection) { _, _ in scrollAfterNavigation(proxy) }
                     .onChange(of: commits) { _, _ in scrollAfterNavigation(proxy) }
@@ -257,6 +262,10 @@ struct HistoryPane: View {
         guard pendingNavigationScroll, let selection, commits.contains(where: { $0.hash == selection }) else { return }
         pendingNavigationScroll = false
         DispatchQueue.main.async { proxy.scrollTo(selection, anchor: .top) }
+    }
+    private func copyCommits(_ hashes: Set<String>, messages: Bool) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(commits.filter { hashes.contains($0.hash) }.map { messages ? $0.subject : $0.hash }.joined(separator: "\n"), forType: .string)
     }
     private func visibleRefs(_ commit: GitCommit, compact: Bool, styles: HistoryGraphStylePlan) -> [String] {
         let values = commit.refs.filter { styles.isVisibleReference($0) && (showRemoteLabels || !styles.isRemoteReference($0)) && (showTagLabels || !styles.isTagReference($0)) }

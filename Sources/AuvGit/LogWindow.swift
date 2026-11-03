@@ -150,6 +150,8 @@ private struct LogWindowContent: View {
     @AppStorage(L10n.preferenceKey) private var language = "system"
     @State private var refSearch = ""
     @State private var highlightedReference: String?
+    @State private var referenceRange = ListSelectionState<String>()
+    @State private var fileRange = ListSelectionState<String>()
     @State private var tags: [ManagedTag] = []
     @State private var showOperationLog = false
     @State private var mutation: Mutation?
@@ -230,7 +232,7 @@ private struct LogWindowContent: View {
             HStack { Image(systemName: "magnifyingglass").foregroundStyle(.secondary); StableTextField(logText("Filter references"), text: $refSearch, rounded: false) }
                 .font(.system(size: 12)).padding(8).auvGitInputSurface().padding(10)
             ScrollViewReader { proxy in
-            List(selection: $highlightedReference) {
+            List(selection: ListSelectionState.binding($referenceRange, primary: $highlightedReference, orderedIDs: visibleReferenceIDs)) {
                 scopeRow("HEAD", title: "HEAD", symbol: "arrow.triangle.branch")
                 scopeRow(HistoryBranchScope.recyclable, title: logText("Recyclable commits"), symbol: "arrow.uturn.backward")
                 Section(logText("Local branches")) { referenceRows(remote: false) }
@@ -255,7 +257,7 @@ private struct LogWindowContent: View {
                 }
             }.listStyle(.sidebar).scrollContentBackground(.hidden).font(.system(size: 12))
                 .onCopyCommand(perform: copyReference)
-                .onChange(of: store.historyNavigationGeneration) { _, _ in refSearch = ""; highlightedReference = referenceSelection; proxy.scrollTo(referenceSelection, anchor: .center) }
+                .onChange(of: store.historyNavigationGeneration) { _, _ in referenceRange = .init(); fileRange = .init(); refSearch = ""; highlightedReference = referenceSelection; proxy.scrollTo(referenceSelection, anchor: .center) }
                 .onChange(of: store.branches) { _, _ in proxy.scrollTo(referenceSelection, anchor: .center) }
                 .onChange(of: tags.map(\.name)) { _, _ in proxy.scrollTo(referenceSelection, anchor: .center) }
                 .onAppear { highlightedReference = referenceSelection; proxy.scrollTo(referenceSelection, anchor: .center) }
@@ -264,12 +266,22 @@ private struct LogWindowContent: View {
         }.background(AuvGitStyle.sidebar)
     }
     private var referenceSelection: String { store.historyStashRef ?? HistoryReference.canonical(store.historyRef, branches: store.branches) ?? "" }
+    private var visibleReferenceIDs: [String] {
+        ["HEAD", HistoryBranchScope.recyclable]
+        + [false, true].flatMap { remote in
+            store.branches.filter { $0.isRemote == remote && (refSearch.isEmpty || $0.name.localizedCaseInsensitiveContains(refSearch)) }.map(HistoryBranchScope.branchRef)
+        }
+        + tags.filter { refSearch.isEmpty || $0.name.localizedCaseInsensitiveContains(refSearch) }.map { "refs/tags/" + $0.name }
+        + store.stashes.map(HistoryBranchScope.stashRef)
+    }
     private func copyReference() -> [NSItemProvider] {
-        guard let reference = highlightedReference else { return [] }
-        let branch = store.branches.first { HistoryBranchScope.branchRef($0) == reference }?.name
-        let tag = tags.first { "refs/tags/" + $0.name == reference }?.name
-        let stash = store.stashes.first { HistoryBranchScope.stashRef($0) == reference }?.subject
-        return [NSItemProvider(object: (branch ?? tag ?? stash ?? reference) as NSString)]
+        let selected = referenceRange.selected(primary: highlightedReference, orderedIDs: visibleReferenceIDs)
+        let names = visibleReferenceIDs.filter(selected.contains).map { reference in
+            store.branches.first { HistoryBranchScope.branchRef($0) == reference }?.name
+                ?? tags.first { "refs/tags/" + $0.name == reference }?.name
+                ?? store.stashes.first { HistoryBranchScope.stashRef($0) == reference }?.subject ?? reference
+        }
+        return names.isEmpty ? [] : [NSItemProvider(object: names.joined(separator: "\n") as NSString)]
     }
     private func referenceRows(remote: Bool) -> some View {
         ForEach(store.branches.filter { $0.isRemote == remote && (refSearch.isEmpty || $0.name.localizedCaseInsensitiveContains(refSearch)) }) { branch in
@@ -307,7 +319,7 @@ private struct LogWindowContent: View {
             if store.selectedCommit == nil { AuvGitEmptyState(title: logText("Select a commit"), systemImage: "doc.on.doc") }
             else if store.commitFiles.isEmpty { AuvGitEmptyState(title: historyActionText("noFiles"), systemImage: "doc.on.doc") }
             else {
-                Table(LogFileSorting.sorted(store.commitFiles, by: fileSortOrder), selection: $store.selectedCommitPath,
+                Table(LogFileSorting.sorted(store.commitFiles, by: fileSortOrder), selection: ListSelectionState.binding($fileRange, primary: $store.selectedCommitPath, orderedIDs: LogFileSorting.sorted(store.commitFiles, by: fileSortOrder).map(\.path)),
                       sortOrder: Binding(get: { fileSortOrder }, set: { fileSortOrder = LogFileSorting.cycle($0, after: fileSortOrder) })) {
                     TableColumn(L10n.text("name", table: "Files"), value: \.logFileName) { file in
                         Label(file.logFileName, systemImage: "doc")
