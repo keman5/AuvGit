@@ -751,7 +751,7 @@ struct MainWindow: View {
             store.error = OperationFailure.message(error, repository: repository.url)
         }
     }
-    var sidebar: some View { RepositorySidebar(store: store, onAction: sidebarAction, onDropStashes: dropStashes, repositoryFocusRequest: repositoryFocusRequest, branchFocus: branchesFocus).background(WorkspaceFileFocusRegion(focus: sidebarFocus).allowsHitTesting(false).accessibilityHidden(true)) }
+    var sidebar: some View { RepositorySidebar(store: store, onAction: sidebarAction, onDropStashes: dropStashes, repositoryFocusRequest: repositoryFocusRequest, branchFocus: branchesFocus, isActiveProject: isActiveProject).background(WorkspaceFileFocusRegion(focus: sidebarFocus).allowsHitTesting(false).accessibilityHidden(true)) }
     var welcome: some View {
         VStack(spacing: 18) {
             Image(systemName: "arrow.triangle.branch").font(.system(size: 58, weight: .light)).foregroundStyle(Color.accentColor)

@@ -5,6 +5,7 @@ import GitCore
 /// Each project keeps its operation owner when another project becomes visible.
 @MainActor
 final class WorkspaceProjects: ObservableObject {
+    let repositoryListViewport = RepositoryListViewport()
     @Published private(set) var active: RepositoryStore
     @Published private(set) var sessions: [RepositoryStore]
     @Published private(set) var residentSessionIDs: Set<UUID> = []

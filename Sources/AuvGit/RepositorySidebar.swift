@@ -8,6 +8,34 @@ func sidebarRefinementText(_ key: String, _ arguments: CVarArg...) -> String {
 
 enum SidebarAction { case openRepository, revealRepository, removeRecent, checkout, createLocalBranch, createBranchFromLocal, history, rename, delete, deleteRemote, copy, stashShow, stashApply, stashApplyImmediately, stashDrop, merge, stopTracking, setTracking }
 
+/// A retained project's outgoing row selection must not survive reactivation.
+/// Ordinary refreshes keep modifier selections and their range anchor intact.
+struct RepositorySidebarSelection {
+    private var range = ListSelectionState<String>()
+    private var initialized = false
+    private var navigationPath: String?
+
+    func selected(primary: String?, orderedIDs: [String]) -> Set<String> {
+        let selection = initialized ? range.ids : Set(primary.map { [$0] } ?? [])
+        return selection.intersection(orderedIDs)
+    }
+
+    mutating func click(_ path: String, current: String?, shift: Bool, command: Bool, orderedIDs: [String]) {
+        if !initialized { range.synchronize(primary: current, orderedIDs: orderedIDs) }
+        initialized = true
+        navigationPath = current
+        range.click(path, shift: shift, command: command, orderedIDs: orderedIDs)
+    }
+
+    mutating func synchronize(primary: String?, orderedIDs: [String], reactivating: Bool) {
+        guard reactivating || primary != navigationPath else { return }
+        range = .init()
+        range.synchronize(primary: primary, orderedIDs: orderedIDs)
+        navigationPath = primary
+        initialized = true
+    }
+}
+
 private struct RepositoryRowSelectionKey: EnvironmentKey {
     static let defaultValue = false
 }
@@ -57,15 +85,17 @@ struct RepositorySidebar: View {
     var onDropStashes: (([GitStash]) -> Void)? = nil
     var repositoryFocusRequest: UUID? = nil
     var branchFocus: WorkspaceFileFocus? = nil
+    var isActiveProject = true
     @FocusState private var focusedRepository: String?
     @State private var branchSelection: String?
-    @State private var repositoryRange = ListSelectionState<String>()
-    @State private var repositorySelectionInitialized = false
+    @State private var repositorySelection = RepositorySidebarSelection()
     @State private var contextTarget: RepositoryContextTarget?
     @AppStorage("sidebar.localBranchesExpanded") private var localBranchesExpanded = true
     @AppStorage("sidebar.stashesExpanded") private var stashesExpanded = true
     var body: some View {
-        RepositorySidebarSplit(repositories: repositoryPane, branches: branchPane)
+        RepositorySidebarSplit(repositories: repositoryPane, branches: branchPane,
+                               repositoryViewport: store.workspaceProjects?.repositoryListViewport,
+                               isActiveProject: isActiveProject)
         .controlSize(.small)
         .background(AuvGitStyle.sidebar)
         .auvGitSheet(item: $contextTarget) { target in RepositoryContextEditor(store: store, target: target) }
@@ -111,10 +141,12 @@ struct RepositorySidebar: View {
                 }
             }.frame(minHeight: 130, idealHeight: 300)
             .onChange(of: store.highlightedRepositoryPath) { _, path in
-                if repositoryRange.primary != path {
-                    repositoryRange = .init()
-                    repositoryRange.synchronize(primary: path, orderedIDs: store.recentPaths)
-                }
+                repositorySelection.synchronize(primary: path, orderedIDs: store.recentPaths, reactivating: false)
+            }
+            .onChange(of: isActiveProject, initial: true) { _, active in
+                guard active else { return }
+                repositorySelection.synchronize(primary: store.highlightedRepositoryPath,
+                                                orderedIDs: store.recentPaths, reactivating: true)
             }
     }
     private var branchPane: some View {
@@ -163,7 +195,7 @@ struct RepositorySidebar: View {
             .fixedSize().help(help).accessibilityLabel(help)
     }
     private func repositoryRow(_ path: String) -> some View {
-        let active = repositorySelectionInitialized ? repositoryRange.ids.contains(path) : path == store.highlightedRepositoryPath
+        let active = repositorySelection.selected(primary: store.highlightedRepositoryPath, orderedIDs: store.recentPaths).contains(path)
         let sync = store.repositorySyncStates[path]
         let ahead = sync?.ahead ?? 0, behind = sync?.behind ?? 0, conflicts = sync?.conflicts ?? 0
         let hasPush = ahead > 0, hasPull = behind > 0, hasConflict = conflicts > 0
@@ -171,11 +203,8 @@ struct RepositorySidebar: View {
         let status = hasConflict ? sidebarRefinementText("conflicts", conflicts) : hasPush && hasPull ? sidebarRefinementText("pushPull", ahead, behind) : hasPull ? sidebarRefinementText("pull", behind) : hasPush ? sidebarRefinementText("push", ahead) : path
         return Button {
             let flags = NSEvent.modifierFlags
-            if !repositorySelectionInitialized, let current = store.highlightedRepositoryPath {
-                repositoryRange.click(current, shift: false, command: false, orderedIDs: store.recentPaths)
-            }
-            repositorySelectionInitialized = true
-            repositoryRange.click(path, shift: flags.contains(.shift), command: flags.contains(.command), orderedIDs: store.recentPaths)
+            repositorySelection.click(path, current: store.highlightedRepositoryPath,
+                                      shift: flags.contains(.shift), command: flags.contains(.command), orderedIDs: store.recentPaths)
             if !flags.contains(.shift), !flags.contains(.command), store.canOpenRepository { onAction(.openRepository, path) }
         } label: {
             HStack(spacing: 6) {
@@ -205,7 +234,8 @@ struct RepositorySidebar: View {
             .focusable().focused($focusedRepository, equals: path).id(path)
             .onKeyPress("c", phases: .down) { press in
                 guard press.modifiers == .command else { return .ignored }
-                let paths = repositorySelectionInitialized ? store.recentPaths.filter { repositoryRange.ids.contains($0) } : [path]
+                let selected = repositorySelection.selected(primary: store.highlightedRepositoryPath, orderedIDs: store.recentPaths)
+                let paths = store.recentPaths.filter { selected.contains($0) }
                 onAction(.copy, paths.map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: "\n"))
                 return .handled
             }

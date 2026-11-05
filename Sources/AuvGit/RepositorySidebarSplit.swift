@@ -4,6 +4,8 @@ import SwiftUI
 struct RepositorySidebarSplit<Repositories: View, Branches: View>: NSViewRepresentable {
     let repositories: Repositories
     let branches: Branches
+    var repositoryViewport: RepositoryListViewport? = nil
+    var isActiveProject = true
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> RepositorySidebarSplitView {
         let split = RepositorySidebarSplitView()
@@ -12,17 +14,92 @@ struct RepositorySidebarSplit<Repositories: View, Branches: View>: NSViewReprese
         return split
     }
     func updateNSView(_ split: RepositorySidebarSplitView, context: Context) {
+        context.coordinator.repositories.setActive(isActiveProject)
         context.coordinator.repositories.rootView = AnyView(repositories.controlSize(.small).nativeFocusRoot())
         context.coordinator.branches.rootView = AnyView(branches.controlSize(.small).nativeFocusRoot())
     }
     final class Coordinator {
-        let repositories: NSHostingView<AnyView>
+        let repositories: RepositoryListHostingView
         let branches: NSHostingView<AnyView>
         init(_ model: RepositorySidebarSplit) {
-            repositories = NSHostingView(rootView: AnyView(model.repositories.controlSize(.small).nativeFocusRoot()))
+            repositories = RepositoryListHostingView(rootView: AnyView(model.repositories.controlSize(.small).nativeFocusRoot()),
+                                                     viewport: model.repositoryViewport ?? RepositoryListViewport())
+            repositories.setActive(model.isActiveProject)
             branches = NSHostingView(rootView: AnyView(model.branches.controlSize(.small).nativeFocusRoot()))
             repositories.sizingOptions = []; branches.sizingOptions = []
         }
+    }
+}
+
+/// The project list is one navigation surface, even though project panels have
+/// separate hosting views. Only its visible host may publish the scroll offset.
+final class RepositoryListViewport {
+    var origin = NSPoint.zero
+    weak var owner: RepositoryListHostingView?
+}
+
+final class RepositoryListHostingView: NSHostingView<AnyView> {
+    private let viewport: RepositoryListViewport
+    private var isActive = false
+    private var pendingRestore = false
+    private weak var scrollView: NSScrollView?
+    private var boundsObservation: NSObjectProtocol?
+
+    init(rootView: AnyView, viewport: RepositoryListViewport) {
+        self.viewport = viewport
+        super.init(rootView: rootView)
+    }
+
+    @MainActor required init(rootView: AnyView) { fatalError("init(rootView:) has not been implemented") }
+    @MainActor required dynamic init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func setActive(_ active: Bool) {
+        guard active != isActive else { return }
+        if active {
+            viewport.owner?.recordPosition()
+            pendingRestore = true
+            viewport.owner = self
+        } else if viewport.owner === self {
+            recordPosition()
+            viewport.owner = nil
+        }
+        isActive = active
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        if scrollView == nil, let scroll = findScrollView(in: self) {
+            scrollView = scroll
+            scroll.contentView.postsBoundsChangedNotifications = true
+            boundsObservation = NotificationCenter.default.addObserver(
+                forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: nil
+            ) { [weak self] _ in self?.recordPosition() }
+        }
+        guard isActive, viewport.owner === self, pendingRestore,
+              let scrollView, let document = scrollView.documentView,
+              scrollView.contentView.bounds.height > 0,
+              document.bounds.height >= scrollView.contentView.bounds.height else { return }
+        let clip = scrollView.contentView
+        var bounds = clip.bounds
+        bounds.origin = viewport.origin
+        clip.scroll(to: clip.constrainBoundsRect(bounds).origin)
+        scrollView.reflectScrolledClipView(clip)
+        pendingRestore = false
+    }
+
+    private func recordPosition() {
+        guard isActive, viewport.owner === self, !pendingRestore, let scrollView else { return }
+        viewport.origin = scrollView.contentView.bounds.origin
+    }
+
+    private func findScrollView(in view: NSView) -> NSScrollView? {
+        if let scroll = view as? NSScrollView { return scroll }
+        return view.subviews.lazy.compactMap { self.findScrollView(in: $0) }.first
+    }
+
+    deinit {
+        if let boundsObservation { NotificationCenter.default.removeObserver(boundsObservation) }
     }
 }
 

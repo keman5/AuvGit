@@ -5,6 +5,11 @@ caffeinate -di -w $$ &
 BUILD_CAFFEINATE_PID=$!
 trap 'kill "$BUILD_CAFFEINATE_PID" 2>/dev/null || true' EXIT
 if command -v go >/dev/null 2>&1; then go clean -cache; fi
+if [[ "${1:-}" == --test-project-selection ]]; then
+  # Selection models, unshown list hosts and disposable repositories only.
+  swift test --build-system native --filter 'RepositorySidebarScrollTests|RepositorySidebarSelectionTests|WorkspaceProjectsTests|ListRangeSelectionTests|WorktreeRepositoryStoreTests|RepositorySwitchLatencyTests.testLatestRepositoryClickWinsWhilePreviousOpenIsWaiting'
+  exit
+fi
 if [[ "${1:-}" == --test-batch-stash-drop ]]; then
   # Only disposable Git fixtures and unshown AppKit tables; no foreground windows.
   swift test --build-system native --filter 'NativeBranchTableTests|GitInteractionTests.testBatchStashDrop|StashPresentationTests|ListRangeSelectionTests'
