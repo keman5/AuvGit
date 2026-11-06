@@ -6,6 +6,66 @@ import GitCore
 
 @MainActor
 final class NativeBranchTableTests: XCTestCase {
+    func testRemoteRootHasFetchMoreMenuAndRejectsBusyOrRetargetedActions() throws {
+        var actions: [String] = []
+        let view = pane(action: { _, target in actions.append(target) })
+        let coordinator = view.makeCoordinator(); coordinator.update(view)
+        let index = try XCTUnwrap(coordinator.rows.firstIndex { $0.id == "folder:remote:origin" })
+        let menu = try XCTUnwrap(coordinator.menu(row: index))
+        let item = try XCTUnwrap(menu.items.first { $0.title == sidebarRefinementText("Fetch…") })
+        XCTAssertTrue(item.isEnabled)
+        coordinator.performMenuAction(item)
+        XCTAssertEqual(actions, ["origin"])
+        coordinator.parent = pane(busy: true, action: view.onAction)
+        coordinator.performMenuAction(item)
+        XCTAssertEqual(actions.count, 1)
+        XCTAssertFalse(try XCTUnwrap(coordinator.menu(row: index)?.items.first).isEnabled)
+        coordinator.parent = pane(path: "/other", action: view.onAction)
+        coordinator.performMenuAction(item)
+        XCTAssertEqual(actions.count, 1)
+    }
+    func testRemoteRootPullUsesSelectedRemoteAndRevalidatesTracking() throws {
+        var actions: [String] = []
+        let base = pane()
+        func view(upstream: String?, busy: Bool = false) -> NativeBranchTable {
+            NativeBranchTable(branches: [
+                GitBranch(name: "main", isCurrent: true, isRemote: false, upstream: upstream),
+                GitBranch(name: "origin/main", isCurrent: false, isRemote: true),
+                GitBranch(name: "upstream/main", isCurrent: false, isRemote: true)
+            ], stashes: [], repositoryPath: base.repositoryPath, currentBranch: "main", isBusy: busy,
+                localExpanded: .constant(true), stashesExpanded: .constant(true), selection: .constant(nil),
+                onAction: { action, remote in actions.append("\(action):\(remote)") }, onRenameStash: { _ in }, onShortcut: { _ in false })
+        }
+        let coordinator = view(upstream: "origin/main").makeCoordinator()
+        coordinator.update(view(upstream: "origin/main"))
+        func item(_ action: SidebarAction, remote: String) throws -> NSMenuItem {
+            let row = try XCTUnwrap(coordinator.rows.firstIndex { $0.remoteRoot == remote })
+            return try XCTUnwrap(coordinator.menu(row: row)?.items.first {
+                ($0.representedObject as? NativeBranchTable.Coordinator.MenuAction)?.action == action
+            })
+        }
+        let pull = try item(.pullRemote, remote: "origin")
+        XCTAssertTrue(pull.isEnabled)
+        XCTAssertFalse(try item(.pullRemote, remote: "upstream").isEnabled)
+        coordinator.performMenuAction(pull)
+        XCTAssertEqual(actions, ["pullRemote:origin"])
+        coordinator.update(view(upstream: "refs/remotes/origin/main"))
+        XCTAssertTrue(try item(.pullRemote, remote: "origin").isEnabled)
+        coordinator.update(view(upstream: "origin-other/main"))
+        XCTAssertFalse(try item(.pullRemote, remote: "origin").isEnabled)
+        coordinator.update(view(upstream: "upstream/main"))
+        coordinator.performMenuAction(pull)
+        XCTAssertEqual(actions.count, 1, "A menu cannot pull after tracking changes")
+        XCTAssertTrue(try item(.pullRemote, remote: "upstream").isEnabled)
+        coordinator.update(view(upstream: nil))
+        XCTAssertFalse(try item(.pullRemote, remote: "origin").isEnabled)
+        coordinator.update(view(upstream: "origin/main", busy: true))
+        XCTAssertFalse(try item(.pullRemote, remote: "origin").isEnabled)
+        let copy = try item(.copy, remote: "origin")
+        XCTAssertTrue(copy.isEnabled)
+        coordinator.performMenuAction(copy)
+        XCTAssertEqual(actions.last, "copy:origin")
+    }
     func testDropCapturesAllSelectedStashesAndRejectsRetargetedMenus() throws {
         let stashes = (0..<3).map { GitStash(ref: "stash@{\($0)}", subject: "Saved \($0)", hash: "hash\($0)") }
         var received: [[GitStash]] = []

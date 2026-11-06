@@ -51,6 +51,7 @@ struct MainWindow: View {
     @State private var pullPrompt: PullOperationPrompt?
     @State private var forcePushPrompt: ForcePushPrompt?
     @State private var firstPushPrompt: FirstBranchPushPrompt?
+    @State private var fetchBranchesPrompt: FetchRemoteBranchesPrompt?
     @State private var mergeAction: MergeActionPrompt?
     @State private var mainlineParent = 1
     private struct MergeActionPrompt: Identifiable {
@@ -454,10 +455,10 @@ struct MainWindow: View {
             }, cancel: { authentication.cancel() })
         }
         .auvGitSheet(item: $pullPrompt) { prompt in
-            PullOperationConfirmation(hint: prompt.hint) { pullPrompt = nil } execute: { operation in
+            PullOperationConfirmation(hint: prompt.hint, remoteName: prompt.remoteName) { pullPrompt = nil } execute: { operation in
                 pullPrompt = nil
                 guard store.repository === prompt.repository, !store.isBusy else { return }
-                runToolbarNetwork(operation)
+                runToolbarNetwork(operation, remoteName: prompt.remoteName)
             }
         }
         .auvGitSheet(item: $forcePushPrompt) { prompt in
@@ -507,6 +508,9 @@ struct MainWindow: View {
                 aiScopeRepository = nil
                 aiCommit.generate(store: store, scope: scope)
             }
+        }
+        .auvGitSheet(item: $fetchBranchesPrompt, focusesOnPresentation: false) { prompt in
+            FetchRemoteBranchesSheet(store: store, prompt: prompt) { fetchBranchesPrompt = nil }
         }
         .auvGitSheet(isPresented: $showTags) { TagManagementView(store: store) }
         .auvGitSheet(isPresented: $showNetwork) {
@@ -583,18 +587,18 @@ struct MainWindow: View {
         let root = store.repositoryURL
         confirmation = PendingAction(title: title, message: message) { guard store.repositoryURL == root else { return }; action() }
     }
-    private func runToolbarNetwork(_ operation: NetworkOperation, credential suppliedCredential: NetworkCredential? = nil, saveCredential: Bool = false) {
+    private func runToolbarNetwork(_ operation: NetworkOperation, remoteName: String? = nil, credential suppliedCredential: NetworkCredential? = nil, saveCredential: Bool = false) {
         guard let repository = store.repository, !store.isBusy else { return }
         Task { @MainActor in
             let credential: NetworkCredential?
             if let suppliedCredential { credential = suppliedCredential }
-            else { credential = await authentication.savedCredential(for: repository, operation: operation) }
+            else { credential = await authentication.savedCredential(for: repository, operation: operation, remoteName: remoteName) }
             guard store.repository === repository, !store.isBusy else { return }
             let name = operation == .pull ? "Pull" : "Fetch"
             store.operation(name, onFailure: { error in
                 Task { @MainActor in
-                    let prompted = await authentication.presentIfNeeded(error: error, repository: repository, operation: operation) { retry in
-                        runToolbarNetwork(operation, credential: retry.credential, saveCredential: retry.saveCredential)
+                    let prompted = await authentication.presentIfNeeded(error: error, repository: repository, operation: operation, remoteName: remoteName) { retry in
+                        runToolbarNetwork(operation, remoteName: remoteName, credential: retry.credential, saveCredential: retry.saveCredential)
                     }
                     if operation == .pull, !prompted, store.repository === repository {
                         confirmation = PendingAction(title: networkText("pullRecoveryTitle"), message: PullResultNotice(error: error).message, action: {}, informational: true)
@@ -603,14 +607,14 @@ struct MainWindow: View {
             }) { active in
                 try await authentication.perform(with: credential) {
                     if operation == .pull {
-                        let result = try await active.runNetwork(.pull, credential: credential, progress: { _ in })
+                        let result = try await active.runNetwork(.pull, credential: credential, remoteName: remoteName, progress: { _ in })
                         if let outcome = result.pullOutcome, outcome.needsNotice, store.repository === active {
                             confirmation = PendingAction(title: networkText("pullRecoveryTitle"), message: PullResultNotice(outcome: outcome).message, action: {}, informational: true)
                         }
                     }
-                    else { try await active.fetch(credential: credential) }
+                    else { _ = try await active.runNetwork(.fetch, credential: credential, remoteName: remoteName, progress: { _ in }) }
                 }
-                await saveToolbarCredentialAfterSuccess(credential, requested: saveCredential, repository: active, operation: operation)
+                await saveToolbarCredentialAfterSuccess(credential, requested: saveCredential, repository: active, operation: operation, remoteName: remoteName)
             }
         }
     }
@@ -743,9 +747,9 @@ struct MainWindow: View {
             }
         }
     }
-    private func saveToolbarCredentialAfterSuccess(_ credential: NetworkCredential?, requested: Bool, repository: GitRepository, operation: NetworkOperation) async {
+    private func saveToolbarCredentialAfterSuccess(_ credential: NetworkCredential?, requested: Bool, repository: GitRepository, operation: NetworkOperation, remoteName: String? = nil) async {
         guard requested, let credential else { return }
-        do { try await authentication.save(credential, for: repository, operation: operation) }
+        do { try await authentication.save(credential, for: repository, operation: operation, remoteName: remoteName) }
         catch {
             guard store.repository === repository else { return }
             store.error = OperationFailure.message(error, repository: repository.url)
@@ -1200,6 +1204,15 @@ extension MainWindow {
         case .removeRecent: store.removeRecentRepository(value)
         case .copy: copyText(value)
         case .history: store.showHistory(path: nil, ref: value)
+        case .fetchRemoteBranches:
+            guard let repository = store.repository, !store.isBusy else { return }
+            fetchBranchesPrompt = FetchRemoteBranchesPrompt(repository: repository, remote: value)
+        case .pullRemote:
+            guard let repository = store.repository, !store.isBusy else { return }
+            store.checkNetworkPreflight(.pull) { hint in
+                guard store.repository === repository else { return }
+                pullPrompt = PullOperationPrompt(repository: repository, hint: hint, remoteName: value)
+            }
         case .createLocalBranch:
             askName(interactionText("Create Branch at %@", value), initial: String(value.split(separator: "/", maxSplits: 1).last ?? "")) { name in
                 store.operation(sidebarRefinementText("Create Local Branch…")) { try await $0.createBranch(name: name, startPoint: "refs/remotes/" + value, switchAfterCreation: true) }

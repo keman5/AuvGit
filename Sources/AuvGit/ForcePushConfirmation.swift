@@ -25,6 +25,7 @@ struct PullOperationPrompt: Identifiable {
     let id = UUID()
     let repository: GitRepository
     let hint: LocalNetworkPreflight?
+    var remoteName: String? = nil
 }
 
 struct PullResultNotice: Identifiable {
@@ -57,11 +58,13 @@ struct PullResultNotice: Identifiable {
 
 struct PullOperationConfirmation: View {
     let hint: LocalNetworkPreflight?
+    var remoteName: String? = nil
     let cancel: () -> Void
     let execute: (NetworkOperation) -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(L10n.text("pullTitle", table: "Main")).font(.headline)
+            if let remoteName { Text(remoteName).font(.system(.body, design: .monospaced)) }
             Text(hint.map(networkPreflightMessage) ?? L10n.text("pullMessage", table: "Main"))
             HStack {
                 Spacer()

@@ -30,6 +30,41 @@ final class PullRecoveryTests: XCTestCase {
             _ = try await GitProcess.run(at: repo.url, arguments: ["config"] + pair)
         }
     }
+    func testExplicitRemotePullPreservesRecoveryAndRejectsAnotherTrackingRemote() async throws {
+        let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
+        _ = try await f.local.workflowRead(["remote", "add", "other", f.root.appendingPathComponent("remote.git").path])
+        _ = try await f.local.workflowRead(["branch", "-m", "local-main"])
+        try write("working\n", in: f.local)
+        try write("notes", "notes", in: f.local)
+        try write("remote\n", "peer-file", in: f.peer); try await commit(f.peer, "remote"); try await f.peer.push()
+        let initial = try await f.local.workflowRevision("HEAD")
+        do {
+            _ = try await f.local.runNetwork(.pull, remoteName: "other", progress: { _ in })
+            XCTFail("Must not pull a remote the current branch does not track")
+        } catch { XCTAssertTrue(error is GitError) }
+        let unchanged = try await f.local.workflowRevision("HEAD")
+        XCTAssertEqual(unchanged, initial)
+        let result = try await f.local.runNetwork(.pull, remoteName: "origin", progress: { _ in })
+        XCTAssertEqual(result.pullOutcome?.changesRestored, true)
+        XCTAssertNotNil(result.pullOutcome?.stashHash)
+        XCTAssertEqual(result.pullOutcome?.conflicts, [])
+        let localHead = try await f.local.workflowRevision("HEAD"), peerHead = try await f.peer.workflowRevision("HEAD")
+        XCTAssertEqual(localHead, peerHead)
+        XCTAssertEqual(try String(contentsOf: f.local.url.appendingPathComponent("shared"), encoding: .utf8), "working\n")
+        XCTAssertEqual(try String(contentsOf: f.local.url.appendingPathComponent("notes"), encoding: .utf8), "notes")
+    }
+
+    func testExplicitFetchDoesNotContactOtherRemotesOrChangeHead() async throws {
+        let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
+        _ = try await f.local.workflowRead(["remote", "add", "broken", f.root.appendingPathComponent("missing.git").path])
+        try write("remote\n", in: f.peer); try await commit(f.peer, "remote"); try await f.peer.push()
+        let head = try await f.local.workflowRevision("HEAD")
+        _ = try await f.local.runNetwork(.fetch, remoteName: "origin", progress: { _ in })
+        let fetched = try await f.local.workflowRevision("refs/remotes/origin/main"), peerHead = try await f.peer.workflowRevision("HEAD")
+        let unchanged = try await f.local.workflowRevision("HEAD")
+        XCTAssertEqual(fetched, peerHead)
+        XCTAssertEqual(unchanged, head)
+    }
     func testDivergedHistoryRebasesEvenWithFastForwardOnlyConfiguration() async throws {
         let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
         _ = try await f.local.workflowRead(["config", "pull.rebase", "false"])

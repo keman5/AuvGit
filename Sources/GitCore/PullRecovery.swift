@@ -18,6 +18,7 @@ extension GitRepository {
     /// Rebase first, saving the worktree only when Git refuses dirty input.
     /// Never abort an unresolved rebase or delete its recovery stash.
     func pullWithRecovery(arguments: [String], environment: [String: String],
+                          fetchArguments: [String] = ["fetch", "--progress"],
                           progress: @escaping @Sendable (String) -> Void) async throws -> NetworkOperationResult {
         try await requirePullReady()
         do {
@@ -39,7 +40,7 @@ extension GitRepository {
             if dirtyRebase, let pullIndex = arguments.firstIndex(of: "pull") {
                 // Git rejects dirty rebase input before contacting the remote.
                 // Verify access before moving the user's changes into a stash.
-                _ = try await GitProcess.run(at: url, arguments: Array(arguments[..<pullIndex]) + ["fetch", "--progress"],
+                _ = try await GitProcess.run(at: url, arguments: Array(arguments[..<pullIndex]) + fetchArguments,
                     progress: progress, environmentOverrides: environment)
             }
         }

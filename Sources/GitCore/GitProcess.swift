@@ -139,7 +139,12 @@ enum GitProcess {
         for fd in stdoutFD + stderrFD { posix_spawn_file_actions_addclose(&actions, fd) }
         if destinationFD >= 0 { posix_spawn_file_actions_addclose(&actions, destinationFD) }
         // The process group is installed atomically before exec, so descendants inherit it.
-        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT))
+        // GUI/test worker threads may block signals. Git must be able to stop
+        // transport helpers during error cleanup instead of waiting until timeout.
+        var signalMask = sigset_t()
+        sigemptyset(&signalMask)
+        posix_spawnattr_setsigmask(&attributes, &signalMask)
+        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGMASK))
         posix_spawnattr_setpgroup(&attributes, 0)
         let argv = ([executable] + arguments).map { strdup($0) } + [nil]
         let env = environment.map { strdup($0.key + "=" + $0.value) } + [nil]

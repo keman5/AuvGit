@@ -74,17 +74,33 @@ extension GitRepository {
         return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
     }
 
-    public func runNetwork(_ operation: NetworkOperation, credential: NetworkCredential? = nil, progress: @escaping @Sendable (NetworkProgress) -> Void) async throws -> NetworkOperationResult {
+    public func runNetwork(_ operation: NetworkOperation, credential: NetworkCredential? = nil, remoteName: String? = nil, progress: @escaping @Sendable (NetworkProgress) -> Void) async throws -> NetworkOperationResult {
+        var destination: [String] = []
+        if let remoteName {
+            let remotes = try await workflowRead(["remote"]).split(separator: "\n").map(String.init)
+            guard remotes.contains(remoteName), !remoteName.hasPrefix("-") else { throw GitError("Unknown remote") }
+            guard operation == .fetch || operation == .pull else { throw GitError("Explicit remotes are supported for fetch and pull only.") }
+            destination = ["--", remoteName]
+            if operation == .pull {
+                let branch = try await workflowRead(["symbolic-ref", "--quiet", "--short", "HEAD"]).trimmingCharacters(in: .newlines)
+                let tracked = try await GitProcess.run(at: url, arguments: ["config", "--get", "branch." + branch + ".remote"], allowedCodes: [0, 1]).text.trimmingCharacters(in: .newlines)
+                let merged = try await GitProcess.run(at: url, arguments: ["config", "--get-all", "branch." + branch + ".merge"], allowedCodes: [0, 1]).text.split(separator: "\n").map(String.init)
+                guard tracked == remoteName, merged.count == 1, let ref = merged.first, ref.hasPrefix("refs/heads/") else {
+                    throw GitError("Current branch does not track the selected remote.")
+                }
+                destination.append(ref)
+            }
+        }
         let args: [String]
         switch operation {
-        case .fetch: args = ["fetch", "--all", "--progress"] + (GitRuntimePreferences.shared.fetchPrune ? ["--prune"] : ["--no-prune"])
-        case .pull: args = ["pull", "--rebase", "--ff", "--no-autostash", "--progress"]
+        case .fetch: args = ["fetch", "--progress"] + (remoteName == nil ? ["--all"] : []) + (GitRuntimePreferences.shared.fetchPrune ? ["--prune"] : ["--no-prune"]) + destination
+        case .pull: args = ["pull", "--rebase", "--ff", "--no-autostash", "--progress"] + destination
         case .pushPreview: args = ["push", "--dry-run", "--porcelain", "--progress"]
         case .push: args = ["push", "--porcelain", "--progress"]
         }
         let lease: NetworkCredentialLease?
         if let credential {
-            lease = try NetworkCredentialLease(endpoint: try await remoteAuthenticationTarget(for: operation).endpoint, credential: credential)
+            lease = try NetworkCredentialLease(endpoint: try await remoteAuthenticationTarget(for: operation, remoteName: remoteName).endpoint, credential: credential)
         } else { lease = nil }
         defer { lease?.remove() }
         let lines = ProgressLines(progress)
@@ -92,7 +108,7 @@ extension GitRepository {
         let result = try await GitCommandLog.$privateCredentials.withValue(lease?.privateValues ?? []) {
             if operation == .pull {
                 return try await pullWithRecovery(arguments: (lease?.gitArguments ?? NetworkAuthentication.arguments) + args,
-                    environment: lease?.environment ?? [:], progress: { lines.accept($0) })
+                    environment: lease?.environment ?? [:], fetchArguments: ["fetch", "--progress"] + destination, progress: { lines.accept($0) })
             }
             let output = try await GitProcess.run(at: url, arguments: (lease?.gitArguments ?? NetworkAuthentication.arguments) + args,
                                      progress: { lines.accept($0) }, environmentOverrides: lease?.environment ?? [:])

@@ -27,6 +27,9 @@ struct NativeBranchTable: NSViewRepresentable {
         var upstream: String? = nil
         var expanded: Bool? = nil
         var isGroup: Bool { expanded != nil }
+        var remoteRoot: String? {
+            id.hasPrefix("folder:remote:") && parentFolders.isEmpty ? String(id.dropFirst("folder:remote:".count)) : nil
+        }
         var target: String { String(id.dropFirst(id.firstIndex(of: ":").map { id.distance(from: id.startIndex, to: $0) + 1 } ?? 0)) }
     }
     var rows: [Row] { visibleRows(treeRows(), collapsed: []) }
@@ -310,6 +313,12 @@ struct NativeBranchTable: NSViewRepresentable {
             let remote = row.id.hasPrefix("remote:")
             let branch = parent.branches.first { $0.name == row.target && $0.isRemote == remote }
             switch action {
+            case .fetchRemoteBranches: return row.remoteRoot != nil
+            case .pullRemote:
+                guard let remote = row.remoteRoot,
+                      let current = parent.branches.first(where: { !$0.isRemote && $0.isCurrent }),
+                      let upstream = current.upstream else { return false }
+                return upstream.hasPrefix(remote + "/") || upstream.hasPrefix("refs/remotes/" + remote + "/")
             case .createBranchFromLocal: return !remote && branch != nil
             case .checkout: return !remote && branch?.isCurrent == false
             case .delete: return !remote && branch?.isCurrent == false && branch?.worktreePath == nil
@@ -322,7 +331,7 @@ struct NativeBranchTable: NSViewRepresentable {
             }
         }
         func menu(row: Int) -> NSMenu? {
-            guard rows.indices.contains(row), !rows[row].isGroup else { return nil }
+            guard rows.indices.contains(row), !rows[row].isGroup || rows[row].remoteRoot != nil else { return nil }
             let value = rows[row]; let target = value.target
             let menu = NSMenu(); menu.autoenablesItems = false
             let selectedRows = table.map { table in
@@ -331,7 +340,7 @@ struct NativeBranchTable: NSViewRepresentable {
             let selectedStashes = selectedRows.filter { $0.id.hasPrefix("stash:") }.compactMap { row in
                 parent.stashes.first { $0.ref == row.target }
             }
-            if let table, table.selectedRowIndexes.contains(row), table.selectedRowIndexes.count > 1 {
+            if value.remoteRoot == nil, let table, table.selectedRowIndexes.contains(row), table.selectedRowIndexes.count > 1 {
                 let item = NSMenuItem(title: interactionText("Copy Name"), action: #selector(copySelectedNames), keyEquivalent: "")
                 item.target = self; menu.addItem(item)
                 guard value.id.hasPrefix("stash:") else { return menu }
@@ -343,7 +352,12 @@ struct NativeBranchTable: NSViewRepresentable {
                 item.representedObject = MenuAction(repositoryPath: parent.repositoryPath, repositoryIdentity: parent.repositoryIdentity, row: value, action: action, renameStash: rename, stashes: action == .stashDrop ? selectedStashes : [])
                 menu.addItem(item)
             }
-            if value.id.hasPrefix("stash:") {
+            if value.remoteRoot != nil {
+                add(sidebarRefinementText("Fetch…"), .fetchRemoteBranches)
+                add(sidebarRefinementText("Pull…"), .pullRemote)
+                menu.addItem(.separator())
+                add(interactionText("Copy Name"), .copy)
+            } else if value.id.hasPrefix("stash:") {
                 add(interactionText("Show Changes"), .stashShow)
                 add(interactionText("Apply Stash…"), .stashApply, enabled: !parent.isBusy)
                 add(shortcutText("Rename Stash"), nil, enabled: !parent.isBusy, rename: true)
@@ -386,6 +400,10 @@ struct NativeBranchTable: NSViewRepresentable {
             if payload.renameStash { guard !parent.isBusy else { return }; parent.onRenameStash(payload.row.target); return }
             guard let action = payload.action else { return }
             guard permits(action, row: value) else { return }
+            if let remote = value.remoteRoot {
+                parent.onAction(action, remote)
+                return
+            }
             if action == .stashDrop, let onDropStashes = parent.onDropStashes {
                 guard !payload.stashes.isEmpty, payload.stashes.allSatisfy({ selected in
                     parent.stashes.contains { $0.ref == selected.ref && $0.hash == selected.hash }

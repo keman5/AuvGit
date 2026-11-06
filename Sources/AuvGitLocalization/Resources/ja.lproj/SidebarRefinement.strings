@@ -27,3 +27,11 @@
 "Force Delete Branch…" = "ブランチを強制削除…";
 "Force Delete Branch Message" = "ブランチ %@ に未マージのコミットがあります。強制削除しますか？このブランチだけが参照するコミットは失われる可能性があります。";
 "Create Branch from This Branch…" = "ブランチを作成…";
+"Fetch…" = "取得…";
+"Pull…" = "プル…";
+"Choose remote branches to fetch and track." = "取得して追跡するリモートブランチを選択してください。";
+"Select All" = "すべて選択";
+"Deselect All" = "選択を解除";
+"All remote branches have already been fetched." = "すべてのリモートブランチを取得済みです。";
+"Reload Remote Branches" = "リモートブランチを再読み込み";
+"Fetch Selected Branches" = "選択したブランチを取得";

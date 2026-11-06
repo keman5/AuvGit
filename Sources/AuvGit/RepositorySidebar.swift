@@ -6,7 +6,7 @@ func sidebarRefinementText(_ key: String, _ arguments: CVarArg...) -> String {
     L10n.text(key, table: "SidebarRefinement", arguments: arguments)
 }
 
-enum SidebarAction { case openRepository, revealRepository, removeRecent, checkout, createLocalBranch, createBranchFromLocal, history, rename, delete, deleteRemote, copy, stashShow, stashApply, stashApplyImmediately, stashDrop, merge, stopTracking, setTracking }
+enum SidebarAction { case openRepository, revealRepository, removeRecent, checkout, createLocalBranch, createBranchFromLocal, history, rename, delete, deleteRemote, fetchRemoteBranches, pullRemote, copy, stashShow, stashApply, stashApplyImmediately, stashDrop, merge, stopTracking, setTracking }
 
 /// A retained project's outgoing row selection must not survive reactivation.
 /// Ordinary refreshes keep modifier selections and their range anchor intact.
