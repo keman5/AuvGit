@@ -353,7 +353,7 @@ struct NativeBranchTable: NSViewRepresentable {
                 menu.addItem(item)
             }
             if value.remoteRoot != nil {
-                add(sidebarRefinementText("Fetch…"), .fetchRemoteBranches)
+                add(sidebarRefinementText("Fetch..."), .fetchRemoteBranches)
                 add(sidebarRefinementText("Pull…"), .pullRemote)
                 menu.addItem(.separator())
                 add(interactionText("Copy Name"), .copy)

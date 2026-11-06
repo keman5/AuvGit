@@ -51,7 +51,6 @@ struct MainWindow: View {
     @State private var pullPrompt: PullOperationPrompt?
     @State private var forcePushPrompt: ForcePushPrompt?
     @State private var firstPushPrompt: FirstBranchPushPrompt?
-    @State private var fetchBranchesPrompt: FetchRemoteBranchesPrompt?
     @State private var mergeAction: MergeActionPrompt?
     @State private var mainlineParent = 1
     private struct MergeActionPrompt: Identifiable {
@@ -509,9 +508,6 @@ struct MainWindow: View {
                 aiCommit.generate(store: store, scope: scope)
             }
         }
-        .auvGitSheet(item: $fetchBranchesPrompt, focusesOnPresentation: false) { prompt in
-            FetchRemoteBranchesSheet(store: store, prompt: prompt) { fetchBranchesPrompt = nil }
-        }
         .auvGitSheet(isPresented: $showTags) { TagManagementView(store: store) }
         .auvGitSheet(isPresented: $showNetwork) {
             NetworkOperationsView(store: store, submit: { operation in
@@ -612,7 +608,8 @@ struct MainWindow: View {
                             confirmation = PendingAction(title: networkText("pullRecoveryTitle"), message: PullResultNotice(outcome: outcome).message, action: {}, informational: true)
                         }
                     }
-                    else { _ = try await active.runNetwork(.fetch, credential: credential, remoteName: remoteName, progress: { _ in }) }
+                    else if let remoteName { try await active.fetchAllRemoteBranches(remote: remoteName, credential: credential) }
+                    else { _ = try await active.runNetwork(.fetch, credential: credential, progress: { _ in }) }
                 }
                 await saveToolbarCredentialAfterSuccess(credential, requested: saveCredential, repository: active, operation: operation, remoteName: remoteName)
             }
@@ -1205,8 +1202,7 @@ extension MainWindow {
         case .copy: copyText(value)
         case .history: store.showHistory(path: nil, ref: value)
         case .fetchRemoteBranches:
-            guard let repository = store.repository, !store.isBusy else { return }
-            fetchBranchesPrompt = FetchRemoteBranchesPrompt(repository: repository, remote: value)
+            runToolbarNetwork(.fetch, remoteName: value)
         case .pullRemote:
             guard let repository = store.repository, !store.isBusy else { return }
             store.checkNetworkPreflight(.pull) { hint in

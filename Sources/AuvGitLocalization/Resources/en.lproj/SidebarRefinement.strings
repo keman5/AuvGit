@@ -28,6 +28,7 @@
 "Force Delete Branch Message" = "Branch %@ has unmerged commits. Force delete it? Commits reachable only from this branch may be lost.";
 "Create Branch from This Branch…" = "Create Branch…";
 "Fetch…" = "Fetch…";
+"Fetch All Branches" = "Fetch All Branches";
 "Pull…" = "Pull…";
 "Choose remote branches to fetch and track." = "Choose remote branches to fetch and track.";
 "Select All" = "Select All";

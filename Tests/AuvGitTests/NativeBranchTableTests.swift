@@ -6,16 +6,16 @@ import GitCore
 
 @MainActor
 final class NativeBranchTableTests: XCTestCase {
-    func testRemoteRootHasFetchMoreMenuAndRejectsBusyOrRetargetedActions() throws {
+    func testRemoteRootFetchesAllBranchesAndRejectsBusyOrRetargetedActions() throws {
         var actions: [String] = []
-        let view = pane(action: { _, target in actions.append(target) })
+        let view = pane(action: { action, target in actions.append("\(action):\(target)") })
         let coordinator = view.makeCoordinator(); coordinator.update(view)
         let index = try XCTUnwrap(coordinator.rows.firstIndex { $0.id == "folder:remote:origin" })
         let menu = try XCTUnwrap(coordinator.menu(row: index))
-        let item = try XCTUnwrap(menu.items.first { $0.title == sidebarRefinementText("Fetch…") })
+        let item = try XCTUnwrap(menu.items.first { $0.title == sidebarRefinementText("Fetch...") })
         XCTAssertTrue(item.isEnabled)
         coordinator.performMenuAction(item)
-        XCTAssertEqual(actions, ["origin"])
+        XCTAssertEqual(actions, ["fetchRemoteBranches:origin"])
         coordinator.parent = pane(busy: true, action: view.onAction)
         coordinator.performMenuAction(item)
         XCTAssertEqual(actions.count, 1)

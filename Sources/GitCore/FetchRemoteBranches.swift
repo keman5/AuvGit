@@ -1,6 +1,16 @@
 import Foundation
 
 public extension GitRepository {
+    /// Fetch every head, including branches excluded by a single-branch clone.
+    func fetchAllRemoteBranches(remote: String, credential: NetworkCredential? = nil) async throws {
+        let refspec = "+refs/heads/*:refs/remotes/" + remote + "/*"
+        _ = try await runRemoteBranchCommand(remote: remote, arguments: [
+            "fetch", "--atomic", "--progress", "--no-prune", "--no-tags", "--no-recurse-submodules", "--refmap=", "--", remote, refspec
+        ], credential: credential)
+        // Persist only after a successful fetch so later ordinary fetches include new branches.
+        _ = try await workflowRead(["config", "--local", "--replace-all", "remote." + remote + ".fetch", refspec])
+    }
+
     /// Advertised heads absent from this remote's conventional tracking namespace.
     func unfetchedRemoteBranches(remote: String, credential: NetworkCredential? = nil) async throws -> [String] {
         let output = try await runRemoteBranchCommand(remote: remote, arguments: ["ls-remote", "--heads", "--", remote], credential: credential)

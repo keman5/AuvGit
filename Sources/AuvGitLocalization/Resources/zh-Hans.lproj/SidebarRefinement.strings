@@ -28,6 +28,7 @@
 "Force Delete Branch Message" = "分支 %@ 仍有未合并的提交。是否强制删除？仅由该分支引用的提交可能丢失。";
 "Create Branch from This Branch…" = "创建分支…";
 "Fetch…" = "获取…";
+"Fetch All Branches" = "获取所有分支";
 "Pull…" = "拉取…";
 "Choose remote branches to fetch and track." = "选择要获取并持续跟踪的远程分支。";
 "Select All" = "全选";
