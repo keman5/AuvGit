@@ -1,7 +1,7 @@
 import Foundation
 
 /// An order-sensitive comparison of logical lines, including the final empty line after LF.
-public struct TextLineDiff: Equatable {
+public struct TextLineDiff: Equatable, Sendable {
     public let sourceChangedLines: Set<Int>
     public let targetChangedLines: Set<Int>
     public let sourceToTarget: [Int]

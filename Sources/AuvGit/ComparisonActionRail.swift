@@ -41,28 +41,40 @@ final class ComparisonActionRail: NSView {
     /// Call when custom paragraph/layout metrics change without editing storage.
     func invalidateDocumentGeometry() { geometryInvalid = true }
     func setEntries(_ value: [Entry]) {
-        buttons.values.forEach { $0.removeFromSuperview() }
-        buttons.removeAll(keepingCapacity: true)
-        storageObservers.forEach(NotificationCenter.default.removeObserver)
-        storageObservers.removeAll()
+        let sameGeometry = entries.count == value.count && zip(entries, value).allSatisfy {
+            $0.text === $1.text && $0.range == $1.range && $0.sourceText === $1.sourceText &&
+            $0.sourceRange == $1.sourceRange && $0.insertionLine == $1.insertionLine && $0.sourceInsertionLine == $1.sourceInsertionLine
+        }
         entries = value
+        for index in Array(buttons.keys) {
+            if value.indices.contains(index), let button = buttons[index] { configure(button, for: index) }
+            else { buttons.removeValue(forKey: index)?.removeFromSuperview() }
+        }
         var identities = Set<ObjectIdentifier>()
-        geometryTexts = value.flatMap { [$0.text, $0.sourceText].compactMap { $0 } }.filter {
+        let texts = value.flatMap { [$0.text, $0.sourceText].compactMap { $0 } }.filter {
             identities.insert(ObjectIdentifier($0)).inserted
         }
-        for text in geometryTexts {
-            if let storage = text.textStorage {
-                storageObservers.append(NotificationCenter.default.addObserver(forName: NSTextStorage.didProcessEditingNotification, object: storage, queue: nil) { [weak self] _ in
-                    self?.geometryInvalid = true
-                })
+        if texts.map(ObjectIdentifier.init) != geometryTexts.map(ObjectIdentifier.init) {
+            storageObservers.forEach(NotificationCenter.default.removeObserver); storageObservers.removeAll()
+            geometryTexts = texts
+            for text in geometryTexts {
+                if let storage = text.textStorage {
+                    storageObservers.append(NotificationCenter.default.addObserver(forName: NSTextStorage.didProcessEditingNotification, object: storage, queue: nil) { [weak self] _ in
+                        self?.geometryInvalid = true
+                    })
+                }
             }
         }
-        geometryInvalid = true
+        if !sameGeometry { geometryInvalid = true }
         refresh()
     }
     private func makeButton(for index: Int) -> NSButton {
-        let entry = entries[index]
         let button = NSButton(title: "", target: self, action: #selector(accept(_:)))
+        configure(button, for: index)
+        return button
+    }
+    private func configure(_ button: NSButton, for index: Int) {
+        let entry = entries[index]
         let font = entry.sourceText?.font ?? entry.text.font ?? .monospacedSystemFont(ofSize: 12, weight: .regular)
         button.image = NSImage(systemSymbolName: entry.deletesContent ? "xmark" : pointsRight ? "chevron.right.2" : "chevron.left.2", accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: max(8, font.pointSize - 3), weight: .regular))
@@ -71,7 +83,6 @@ final class ComparisonActionRail: NSView {
         button.contentTintColor = DiffVisualStyle.actionColor
         button.toolTip = entry.title
         button.setAccessibilityLabel(entry.title)
-        return button
     }
     @objc private func accept(_ button: NSButton) {
         guard entries.indices.contains(button.tag) else { return }

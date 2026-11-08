@@ -1101,12 +1101,12 @@ extension MainWindow {
             let eligible = WorkspaceFileActionTargets.paths(for: .stage, files: store.files, selection: paths)
             let targets = store.files.filter { eligible.contains($0.path) }.flatMap { [$0.path] + ($0.originalPath.map { [$0] } ?? []) }
             guard !targets.isEmpty else { return }
-            store.operation("暂存", refreshFilesOnly: true) { try await $0.stage(paths: targets) }
+            store.operation("暂存", refreshFilesOnly: true, fileStatusPaths: targets) { try await $0.stage(paths: targets) }
         case .unstage, .unstageAll:
             let eligible = WorkspaceFileActionTargets.paths(for: .unstage, files: store.files, selection: paths)
             let targets = store.files.filter { eligible.contains($0.path) }.flatMap { [$0.path] + ($0.originalPath.map { [$0] } ?? []) }
             guard !targets.isEmpty else { return }
-            store.operation("取消暂存", refreshFilesOnly: true) { try await $0.unstage(paths: targets) }
+            store.operation("取消暂存", refreshFilesOnly: true, fileStatusPaths: targets) { try await $0.unstage(paths: targets) }
         case .discard:
             let targets = WorkspaceFileActionTargets.paths(for: .discard, files: store.files, selection: paths).sorted()
             guard !targets.isEmpty else { return }

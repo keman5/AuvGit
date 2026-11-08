@@ -5,6 +5,11 @@ caffeinate -di -w $$ &
 BUILD_CAFFEINATE_PID=$!
 trap 'kill "$BUILD_CAFFEINATE_PID" 2>/dev/null || true' EXIT
 if command -v go >/dev/null 2>&1; then go clean -cache; fi
+if [[ "${1:-}" == --test-interaction-latency ]]; then
+  # Disposable repositories and unshown component hosts only. Never activate windows.
+  swift test --build-system native -c release --filter "${AUVGIT_LATENCY_TEST_FILTER:-InteractionLatencyTests|ForegroundRefreshTests|RepositoryQuietRefreshTests|GitRepositoryTests|ConflictResolutionGateTests|ComparisonReviewTests|ComparisonUndoTests|LoadingPerformanceRegressionTests|RepositoryReadCoordinatorTests}"
+  exit
+fi
 if [[ "${1:-}" == --test-fetch-branches ]]; then
   # Disposable repositories and unshown tables only; never activate a window.
   swift test --build-system native --filter "${AUVGIT_FETCH_BRANCHES_TEST_FILTER:-FetchRemoteBranchesTests|NativeBranchTableTests|RemoteAuthenticationTests|GitProcessTests|PullRecoveryTests|NetworkAuthenticationPolicyTests}"

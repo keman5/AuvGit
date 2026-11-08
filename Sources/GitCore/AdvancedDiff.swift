@@ -29,7 +29,7 @@ extension TextLineDiff {
 }
 
 /// UTF-16 ranges can be applied directly to NSTextView without modifying its string.
-public struct CharacterDiff: Equatable {
+public struct CharacterDiff: Equatable, Sendable {
     public let source: [NSRange]
     public let target: [NSRange]
     public init(source a: String, target b: String) {

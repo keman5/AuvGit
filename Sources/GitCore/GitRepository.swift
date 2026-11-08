@@ -30,8 +30,9 @@ public actor GitRepository {
     }
     private func run(_ args: [String], allowedCodes: Set<Int32> = [0]) async throws -> GitOutput { try await GitProcess.run(at: url, arguments: args, allowedCodes: allowedCodes) }
     private func fields(_ data: Data) -> [String] { data.split(separator: 0, omittingEmptySubsequences: false).map { String(decoding: $0, as: UTF8.self) } }
-    public func status() async throws -> [GitFile] {
-        let tokens = fields(try await run(["--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all"]).data)
+    public func status(paths: [String]? = nil) async throws -> [GitFile] {
+        if let paths, paths.isEmpty { return [] }
+        let tokens = fields(try await run(["--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all"] + (paths.map { ["--"] + $0 } ?? [])).data)
         var result: [GitFile] = [], i = 0
         while i < tokens.count {
             let token = tokens[i]; i += 1
@@ -40,6 +41,21 @@ public actor GitRepository {
             var original: String?
             if status.contains("R") || status.contains("C") { if i < tokens.count { original = tokens[i]; i += 1 } }
             result.append(GitFile(path: path, originalPath: original, indexStatus: String(status[0]), worktreeStatus: String(status[1])))
+        }
+        if let paths, result.contains(where: { $0.indexStatus == "A" || $0.indexStatus == "D" }) {
+            // Restricting porcelain to one end of a rename disguises R as A/D.
+            // Discover crossing pairs from HEAD/index, then include both ends in
+            // the scoped status. Unrelated working-tree files remain unread.
+            let records = fields(try await run(["diff", "--cached", "--name-status", "-M", "--diff-filter=R", "-z"]).data)
+            var expanded = Set(paths), index = 0
+            while index + 2 < records.count {
+                let old = records[index + 1], new = records[index + 2]
+                if paths.contains(where: { old == $0 || new == $0 || old.hasPrefix($0 + "/") || new.hasPrefix($0 + "/") }) {
+                    expanded.insert(old); expanded.insert(new)
+                }
+                index += 3
+            }
+            if expanded != Set(paths) { return try await status(paths: expanded.sorted()) }
         }
         return result
     }
@@ -229,40 +245,40 @@ public actor GitRepository {
     }
     public func stage(paths: [String]) async throws {
         guard !paths.isEmpty else { return }
-        let entries = try await status()
-        let selected = Set(paths)
-        guard !entries.contains(where: { selected.contains($0.path) && $0.isConflict }) else {
+        let entries = try await status(paths: paths)
+        guard !entries.contains(where: \.isConflict) else {
             throw GitError("Resolve unmerged conflicts before staging.")
         }
-        let originals = entries.filter { selected.contains($0.path) }.compactMap(\.originalPath)
+        let originals = entries.compactMap(\.originalPath)
         let renameOrigins = Set(entries.compactMap(\.originalPath))
-        let tracked = Set(fields(try await run(["ls-files", "-z"]).data))
+        let tracked = Set(fields(try await run(["ls-files", "-z", "--"] + Array(Set(paths + originals)).sorted()).data))
         let targets = Set(paths + originals).filter { path in
             // Once a rename is staged, its old path is absent from both disk and index.
             !renameOrigins.contains(path) || tracked.contains(path) || (try? FileManager.default.attributesOfItem(atPath: url.appendingPathComponent(path).path)) != nil
         }.sorted()
-        let obstructed = targets.filter { path in
+        var parentTypes: [String: FileAttributeType] = [:]
+        let obstructed = Set(targets.filter { path in
             var parent = URL(fileURLWithPath: path, relativeTo: url).deletingLastPathComponent()
             while parent.path.hasPrefix(url.path + "/") {
-                let type = try? FileManager.default.attributesOfItem(atPath: parent.path)[.type] as? FileAttributeType
-                if let type, type != .typeDirectory { return true }
+                let type = parentTypes[parent.path] ?? ((try? FileManager.default.attributesOfItem(atPath: parent.path)[.type]) as? FileAttributeType)
+                if let type { parentTypes[parent.path] = type; if type != .typeDirectory { return true } }
                 parent.deleteLastPathComponent()
             }
             return false
-        }
+        })
         // A replaced directory's old children must be removed without traversing its new symlink/file.
         let additions = targets.filter { !obstructed.contains($0) }
         if !additions.isEmpty { _ = try await run(["add", "--"] + additions) }
-        let removals = obstructed.filter { tracked.contains($0) }
+        let removals = obstructed.filter { tracked.contains($0) }.sorted()
         if !removals.isEmpty { _ = try await run(["update-index", "--force-remove", "--"] + removals) }
     }
     public func unstage(paths: [String]) async throws {
         guard !paths.isEmpty else { return }
-        let entries = try await status()
+        let entries = try await status(paths: paths)
         let selected = Set(paths)
         let originals = entries.filter { selected.contains($0.path) }.compactMap(\.originalPath)
-        let targets = Array(Set(paths + originals)).sorted()
         let head = try await run(["rev-parse", "--verify", "HEAD"], allowedCodes: [0,128])
+        let targets = Array(Set(paths + originals)).sorted()
         if head.code == 0 { _ = try await run(["reset", "--quiet", "HEAD", "--"] + targets) }
         else { _ = try await run(["rm", "--cached", "--quiet", "--ignore-unmatch", "--"] + targets) }
     }

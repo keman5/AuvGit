@@ -1,12 +1,12 @@
 import Foundation
 
 /// Display-only bands. Ranges refer to original logical lines, never synthetic text.
-public struct ComparisonAlignment {
+public struct ComparisonAlignment: Sendable {
     public let bands: [[Range<Int>]]
-    public init(texts: [String], baseline: Int = 0, conflictBlocks: [ConflictDraft.Block] = []) {
+    public init(texts: [String], baseline: Int = 0, conflictBlocks: [ConflictDraft.Block] = [], diffs cachedDiffs: [TextLineDiff]? = nil) {
         guard texts.indices.contains(baseline) else { bands = []; return }
         let counts = texts.map { $0.components(separatedBy: "\n").count }
-        let diffs = texts.map { TextLineDiff(source: texts[baseline], target: $0) }
+        let diffs = cachedDiffs.flatMap { $0.count == texts.count ? $0 : nil } ?? texts.map { TextLineDiff(source: texts[baseline], target: $0) }
         if conflictBlocks.isEmpty {
             bands = Self.normalBands(texts: texts, baseline: baseline, diffs: diffs)
             return

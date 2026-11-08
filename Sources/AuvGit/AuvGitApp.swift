@@ -1083,14 +1083,16 @@ final class RepositoryStore: ObservableObject {
             filesystemRefresh?.cancel(); filesystemRefresh = nil; filesystemPending = false
             return
         }
+        // Hidden project sessions catch up when selected or polled. Activating
+        // the app must not start a full scan of every previously visited project.
+        if let workspaceProjects, workspaceProjects.active !== self { return }
         activationTask = Task {
             defer { if activationVersion == version { activationTask = nil } }
             guard !Task.isCancelled, applicationActive, AuvGitPreferences.backgroundRefresh else { return }
             lastPoll = Date(); lastAutomaticRefresh = Date()
-            recentSyncDate = .distantPast
             await refreshIfChanged()
             guard !Task.isCancelled, applicationActive else { return }
-            refreshRecentRepositoryStates()
+            Self.checkRemoteUpdatesForActivePanel()
             if persistsSession { prepareRecentProjects() }
         }
     }
@@ -1286,14 +1288,30 @@ final class RepositoryStore: ObservableObject {
         if isRestoringViewState { initialWorkspaceSelectionReady = true }
     }
     /// Re-selecting the current repository updates its files without reopening its history.
-    func refreshFileStatus() async {
+    func refreshFileStatus(paths: [String]? = nil) async {
         guard let repository, !isBusy, refreshingRepository != repository.url else { return }
         let version = repoVersion
         let refreshVersion = UUID(); refreshReadVersion = refreshVersion
         refreshingRepository = repository.url
         defer { if refreshReadVersion == refreshVersion { refreshingRepository = nil } }
         do {
-            let newFiles = try await repository.status()
+            let updated = try await repository.status(paths: paths)
+            let newFiles: [GitFile]
+            if let paths {
+                let scope = Set(paths + updated.map(\.path) + updated.compactMap(\.originalPath))
+                func includes(_ path: String) -> Bool {
+                    var prefix = path[...]
+                    while true {
+                        if scope.contains(String(prefix)) { return true }
+                        guard let slash = prefix.lastIndex(of: "/") else { return false }
+                        prefix = prefix[..<slash]
+                    }
+                }
+                // A local index write changes only these paths. Keep other rows
+                // stable; filesystem events/polling still validate the full tree.
+                newFiles = (files.filter { !includes($0.path) && !($0.originalPath.map(includes) ?? false) } + updated)
+                    .sorted { $0.path < $1.path }
+            } else { newFiles = updated }
             guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
             applyFileStatus(newFiles)
             let state = try await repository.changeState(files: newFiles)
@@ -1730,7 +1748,7 @@ final class RepositoryStore: ObservableObject {
             completion(hint)
         }
     }
-    func operation(_ name: String, refreshFilesOnly: Bool = false, onFailure: ((Error) -> Void)? = nil, body: @escaping (GitRepository) async throws -> Void) {
+    func operation(_ name: String, refreshFilesOnly: Bool = false, fileStatusPaths: [String]? = nil, onFailure: ((Error) -> Void)? = nil, body: @escaping (GitRepository) async throws -> Void) {
         guard let repository, workspaceStatusFailure == nil, !isBusy, pendingRepositoryPath == nil else { return }
         cancelAutomaticRefresh()
         pauseProjectPreparation()
@@ -1742,14 +1760,17 @@ final class RepositoryStore: ObservableObject {
         let operationID = currentUserOperationID
         let progress = progressHandler(for: repository, operationID: operationID)
         Task {
-            await cancelBackgroundRepositorySync()
+            // Local index writes do not depend on unrelated projects' network
+            // requests or optional previews finishing their cancellation.
+            if refreshFilesOnly { stopBackgroundRepositorySync() }
+            else { await cancelBackgroundRepositorySync() }
             var failure: Error?
             do { try await GitCommandLog.$progress.withValue(progress) { try await GitCommandLog.$operationID.withValue(operationID) { try await GitCommandLog.$userInitiated.withValue(true) { try await body(repository) } } }; if !persistsSession { NotificationCenter.default.post(name: .auvGitWorktreeChanged, object: repository.url) }; activityRecords.insert((Date(), name, nil), at: 0); setStatus("%@ completed", arguments: [name]) }
             catch { failure = error }
             finishUserOperation(name, repository: repository, failure: failure)
             isBusy = false
             if let failure { onFailure?(failure) }
-            if refreshFilesOnly { await refreshFileStatus() }
+            if refreshFilesOnly { await refreshFileStatus(paths: failure == nil ? fileStatusPaths : nil) }
             else { await refresh() }
         }
     }
@@ -1791,12 +1812,12 @@ final class RepositoryStore: ObservableObject {
     func stageSelection() {
         let targets = WorkspaceFileActionTargets.paths(for: .stage, files: files, selection: selectedPaths)
         let paths = files.filter { targets.contains($0.path) }.flatMap { [$0.path] + ($0.originalPath.map { [$0] } ?? []) }
-        guard !paths.isEmpty else { return }; operation("暂存", refreshFilesOnly: true) { try await $0.stage(paths: paths) }
+        guard !paths.isEmpty else { return }; operation("暂存", refreshFilesOnly: true, fileStatusPaths: paths) { try await $0.stage(paths: paths) }
     }
     func unstageSelection() {
         let targets = WorkspaceFileActionTargets.paths(for: .unstage, files: files, selection: selectedPaths)
         let paths = files.filter { targets.contains($0.path) }.flatMap { [$0.path] + ($0.originalPath.map { [$0] } ?? []) }
-        guard !paths.isEmpty else { return }; operation("取消暂存", refreshFilesOnly: true) { try await $0.unstage(paths: paths) }
+        guard !paths.isEmpty else { return }; operation("取消暂存", refreshFilesOnly: true, fileStatusPaths: paths) { try await $0.unstage(paths: paths) }
     }
     func completeNetworkOperation(_ name: String, repository: GitRepository) {
         guard self.repository === repository else { return }

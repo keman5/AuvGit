@@ -4,12 +4,12 @@ import GitCore
 /// Groups adjacent changed alignment bands, including bands with an empty side.
 struct ComparisonChangeNavigation {
     let bands: [[Range<Int>]]
-    init(texts: [String], baseline: Int = 0, conflicts: [ConflictDraft.Block] = [], cachedAlignment: ComparisonAlignment? = nil) {
+    init(texts: [String], baseline: Int = 0, conflicts: [ConflictDraft.Block] = [], cachedAlignment: ComparisonAlignment? = nil, diffs: [Int: TextLineDiff] = [:]) {
         guard texts.indices.contains(baseline) else { bands = []; return }
         let alignment = cachedAlignment ?? ComparisonAlignment(texts: texts, baseline: baseline, conflictBlocks: conflicts)
         var changed = Array(repeating: Set<Int>(), count: texts.count)
         for pane in texts.indices where pane != baseline {
-            let diff = TextLineDiff(source: texts[baseline], target: texts[pane])
+            let diff = diffs[pane] ?? TextLineDiff(source: texts[baseline], target: texts[pane])
             changed[baseline].formUnion(diff.sourceChangedLines); changed[pane].formUnion(diff.targetChangedLines)
         }
         var result: [[Range<Int>]] = []

@@ -183,6 +183,12 @@ struct ComparisonEditor: NSViewRepresentable {
         private var cachedConflictBlocks: [ConflictDraft.Block] = []
         private var diffTexts: [String] = []
         private var cachedDiffs: [String: TextLineDiff] = [:]
+        private let editWorker = ComparisonEditWorker()
+        private var editTask: Task<Void, Never>?
+        private var editGeneration = UUID()
+        private var editRequest: ComparisonEditRequest?
+        private var characterCache: [String: [Int: CharacterDiff]] = [:]
+        private(set) var analyzingEdit = false
         private var searchTask: Task<Void, Never>?
         private var searchGeneration = UUID()
         private var searchTexts: [String] = []
@@ -216,12 +222,13 @@ struct ComparisonEditor: NSViewRepresentable {
         var lineDiffs: [String: TextLineDiff] = [:]
         weak var active: NSTextView?
         init(_ model: ComparisonEditor) { self.model = model; lastNavigation = model.navigation; lastChangeNavigation = model.changeNavigation }
-        deinit { searchTask?.cancel(); NotificationCenter.default.removeObserver(self) }
+        deinit { editTask?.cancel(); searchTask?.cancel(); NotificationCenter.default.removeObserver(self) }
 
         func update(_ value: ComparisonEditor) {
             updating = true
             defer { updating = false }
             let rebuild = panes.map(\.id) != value.columns.map(\.id)
+            if rebuild { cancelEditAnalysis() }
             let previousSearch = model.effectiveSearch
             let previousLanguage = model.languagePath
             let paneConfigurationChanged = model.columns != value.columns || model.wrapLines != value.wrapLines || model.showLineNumbers != value.showLineNumbers
@@ -354,8 +361,11 @@ struct ComparisonEditor: NSViewRepresentable {
                 pane.gutter.needsDisplay = true
                 pane.needsLayout = true
             }
-            if changed { decorate() }
-            if changed || previousSearch != value.effectiveSearch { requestSearch() }
+            if changed {
+                if analyzingEdit { scheduleEditAnalysis() }
+                else { characterCache = [:]; decorate() }
+            }
+            if !analyzingEdit, changed || previousSearch != value.effectiveSearch { requestSearch() }
             updateConflictGutters()
             scheduleAlignment()
             scheduleCommandState()
@@ -453,7 +463,10 @@ struct ComparisonEditor: NSViewRepresentable {
             redrawCurrentLines()
             if !navigatingChange { changeBandIndex = nil; panes.forEach { $0.text.navigationHighlightRect = nil; $0.gutter.navigationHighlightRect = nil } }
             scheduleCommandState()
-            if model.resolver != nil, pane.id == "worktree", let index = ConflictDraft.blockIndex(atUTF16Offset: text.selectedRange().location, in: text.string) {
+            if model.resolver != nil, pane.id == "worktree" {
+                if !analyzingEdit, text.string != model.columns.first(where: { $0.id == pane.id })?.text,
+                   panes.reduce(0, { $0 + $1.text.string.utf16.count }) > 8_192 { scheduleEditAnalysis() }
+                guard !analyzingEdit, let index = ConflictDraft.blockIndex(atUTF16Offset: text.selectedRange().location, in: text.string) else { return }
                 model.resolver?.selectedBlock = index
                 updateConflictGutters()
             }
@@ -477,6 +490,7 @@ struct ComparisonEditor: NSViewRepresentable {
             }
         }
         func updateConflictGutters() {
+            guard !analyzingEdit else { return }
             for pane in panes {
                 pane.gutter.conflictBlocks = model.resolver != nil && pane.id == "worktree" ? conflictBlocks(in: pane.text.string) : []
                 pane.gutter.selectedConflict = model.resolver?.selectedBlock ?? 0
@@ -564,12 +578,57 @@ struct ComparisonEditor: NSViewRepresentable {
             pane.gutter.setContent(text.string)
             pane.updateGutterWidth()
             pane.gutter.needsDisplay = true
+            // Drafts/undo update immediately. Full-document analysis must never
+            // execute in AppKit's synchronous typing notification for large files.
+            if panes.reduce(0, { $0 + $1.text.string.utf16.count }) > 8_192 {
+                scheduleEditAnalysis()
+            } else {
+                cancelEditAnalysis(); characterCache = [:]
+                panes.forEach { $0.leftRail.isHidden = false; $0.rightRail.isHidden = false }
+                decorate(); requestSearch(); updateConflictGutters(); scheduleAlignment()
+            }
             model.onEdit(pane.id, text.string)
-            decorate()
-            requestSearch()
-            scheduleSearchStatus()
-            updateConflictGutters()
-            scheduleAlignment()
+            scheduleCommandState()
+        }
+        private func cancelEditAnalysis() {
+            editTask?.cancel(); editTask = nil; editGeneration = UUID()
+            editRequest = nil; analyzingEdit = false
+        }
+        private func scheduleEditAnalysis() {
+            let request = ComparisonEditRequest(ids: panes.map(\.id), texts: paneTexts(), language: model.languagePath,
+                syntax: model.syntaxHighlight, characters: model.characterDiff, conflict: model.resolver != nil)
+            guard !request.ids.isEmpty, !analyzingEdit || editRequest != request else { return }
+            editTask?.cancel(); searchTask?.cancel()
+            let generation = UUID(); editGeneration = generation; editRequest = request; analyzingEdit = true
+            for pane in panes {
+                pane.leftRail.isHidden = true; pane.rightRail.isHidden = true
+                pane.text.conflictBlocks = []; pane.gutter.conflictBlocks = []
+                pane.text.navigationHighlightRect = nil; pane.gutter.navigationHighlightRect = nil
+            }
+            let worker = editWorker
+            editTask = Task { @MainActor [weak self] in
+                do {
+                    try await Task.sleep(for: .milliseconds(150))
+                    let result = try await worker.prepare(request)
+                    guard !Task.isCancelled, let self, self.editGeneration == generation else { return }
+                    self.diffTexts = request.texts; self.cachedDiffs = result.diffs
+                    self.cachedAlignmentTexts = request.texts; self.cachedAlignmentBaseline = request.baseline
+                    self.cachedConflictMode = request.conflict; self.cachedAlignment = result.alignment
+                    self.navigationTexts = request.texts; self.navigationBaseline = request.baseline
+                    self.navigationBands = result.navigation; self.changeBandIndex = nil
+                    self.alignmentBuildCount += 1
+                    self.characterCache = result.characters
+                    if request.conflict {
+                        self.cachedConflictText = request.texts[request.baseline]; self.cachedConflictBlocks = result.conflicts
+                    }
+                    for index in request.ids.indices {
+                        self.syntaxCache[request.ids[index]] = (request.texts[index], request.language, result.tokens[index])
+                    }
+                    self.analyzingEdit = false; self.editTask = nil
+                    self.panes.forEach { $0.leftRail.isHidden = false; $0.rightRail.isHidden = false }
+                    self.decorate(); self.requestSearch(); self.updateConflictGutters(); self.scheduleAlignment()
+                } catch { /* A newer draft supersedes this analysis. */ }
+            }
         }
         func scheduleAlignment() {
             guard !alignmentScheduled, !aligning else { return }
@@ -634,7 +693,7 @@ struct ComparisonEditor: NSViewRepresentable {
             }.joined(separator: ";") + "|\(model.fontName)|\(model.fontSize)|\(model.tabWidth)|\(model.wrapLines)|\(model.resolver != nil)"
         }
         func alignDisplay() {
-            guard !aligning, !panes.isEmpty, panes.allSatisfy({ !$0.scroll.isUpdatingGeometry && ($0.scroll.isHidden || $0.scroll.contentView.bounds.width > ComparisonEditorMetrics.minimumTextViewportWidth) }) else { return }
+            guard !analyzingEdit, !aligning, !panes.isEmpty, panes.allSatisfy({ !$0.scroll.isUpdatingGeometry && ($0.scroll.isHidden || $0.scroll.contentView.bounds.width > ComparisonEditorMetrics.minimumTextViewportWidth) }) else { return }
             let origins = panes.map { $0.scroll.contentView.bounds.origin }
             let sourceIndex = panes.firstIndex(where: { $0.id == scrollSourceID }) ?? panes.firstIndex(where: { $0.text === active }) ?? 0
             let sharedY = origins[sourceIndex].y
@@ -781,6 +840,7 @@ struct ComparisonEditor: NSViewRepresentable {
             }
         }
         func takeBlock(fromLeft: Bool) -> Bool {
+            guard !analyzingEdit else { return false }
             guard let target = historyTarget(), target.text.isEditable,
                   let targetIndex = panes.firstIndex(where: { $0 === target }) else { return false }
             let candidates = panes.enumerated().filter { $0.offset != targetIndex && !$0.element.scroll.isHidden }
@@ -944,7 +1004,7 @@ struct ComparisonEditor: NSViewRepresentable {
                     let sourceLines = baseline.text.string.components(separatedBy: "\n")
                     for block in diff.blocks() {
                         for (a, b) in zip(block.sourceLines, block.targetLines) {
-                            let chars = CharacterDiff(source: sourceLines[a], target: lines[b])
+                            let chars = characterCache[pane.id]?[b] ?? CharacterDiff(source: sourceLines[a], target: lines[b])
                             for range in chars.target where range.length > 0 {
                                 let characterRange = NSRange(location: pane.gutter.starts[b] + range.location, length: range.length)
                                 var color = EditorPreferences.color(model.modificationColor, fallback: .systemOrange)

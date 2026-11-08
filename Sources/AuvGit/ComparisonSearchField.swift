@@ -26,6 +26,11 @@ struct ComparisonSearchField: NSViewRepresentable {
             return false
         }
     }
+    static func isEditingQuery(in window: NSWindow) -> Bool {
+        guard let editor = window.firstResponder as? NSTextView, editor.isFieldEditor,
+              let query = editor.delegate as? ClickableSearchTextField else { return false }
+        return query.isQuery
+    }
     static func focusQuery(in window: NSWindow) -> Bool {
         guard window.attachedSheet == nil else { return false }
         for child in window.childWindows ?? [] where child.isVisible {
