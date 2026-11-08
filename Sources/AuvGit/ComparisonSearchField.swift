@@ -16,9 +16,22 @@ struct ComparisonSearchField: NSViewRepresentable {
         let fallbackScope = NativeFocusCoordinator()
         init(_ parent: ComparisonSearchField) { self.parent = parent }
         func controlTextDidChange(_ notification: Notification) {
-            if let field = notification.object as? NSTextField { parent.text = field.stringValue }
+            guard let field = notification.object as? NSTextField else { return }
+            publishCommittedText(in: field)
+        }
+        func controlTextDidEndEditing(_ notification: Notification) {
+            guard let field = notification.object as? NSTextField else { return }
+            publishCommittedText(in: field)
+        }
+        private func publishCommittedText(in field: NSTextField) {
+            let editor = field.currentEditor() as? NSTextView
+            guard editor?.hasMarkedText() != true else { return }
+            let value = editor?.string ?? field.stringValue
+            if parent.text != value { parent.text = value }
         }
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            // Let the IME confirm/cancel candidates before handling search commands.
+            guard !textView.hasMarkedText() else { return false }
             if commandSelector == #selector(NSResponder.insertNewline(_:)) || commandSelector == #selector(NSResponder.insertLineBreak(_:)) {
                 parent.onNavigate(!(NSApp.currentEvent?.modifierFlags.contains(.shift) ?? false)); return true
             }
@@ -59,7 +72,12 @@ struct ComparisonSearchField: NSViewRepresentable {
     func updateNSView(_ field: NSTextField, context: Context) {
         context.coordinator.parent = self
         if field.isEnabled != enabled { field.isEnabled = enabled }
-        if field.stringValue != text { field.stringValue = text }
+        let editor = field.currentEditor() as? NSTextView
+        // An older search can finish while the IME owns the field editor.
+        // Never overwrite composition with the last committed binding value.
+        if editor?.hasMarkedText() != true, (editor?.string ?? field.stringValue) != text {
+            field.stringValue = text
+        }
         if field.placeholderString != placeholder { field.placeholderString = placeholder }
         let focusScope = scope ?? context.coordinator.fallbackScope
         if scope == nil { focusScope.attach(to: field.window) }

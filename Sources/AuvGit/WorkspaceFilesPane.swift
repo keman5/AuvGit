@@ -46,7 +46,6 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
     @State private var visiblePaths: Set<String> = []
     @State private var statusCounts: [WorkspaceStatusFilter: Int] = [:]
     @State private var initialSelectionRepository: String?
-    @State private var preparationTask: Task<Void, Never>?
     @State private var preparationID = UUID()
     @State private var displayedPreparation: WorkspaceFilePreparation?
     @State private var displayedRepository: String?
@@ -55,10 +54,9 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
     private var preparationRequest: WorkspaceFilePreparation {
         return WorkspaceFilePreparation(repository: repository?.url.path, files: files, ignoredPaths: ignoredRepository == repository?.url.path ? ignoredPaths : [], filter: filter, filterCase: filterCase, category: category, showHidden: showHidden, showIgnored: showIgnored, sort: sortOrder.isEmpty ? [.init(column: .path, ascending: true)] : sortOrder)
     }
-    private func rebuildVisibleFiles() {
+    private func rebuildVisibleFiles() async {
         let request = preparationRequest
         if !preparing, displayedPreparation == request { applyInitialSelection(); return }
-        preparationTask?.cancel()
         let id = UUID()
         preparationID = id
         if let result = WorkspaceFilePreparationCache.shared.cached(request) {
@@ -72,24 +70,22 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
             return
         }
         preparing = true
-        preparationTask = Task { @MainActor in
-            // Coalesce the file, repository and preference changes from one view update.
-            await Task.yield()
-            guard !Task.isCancelled, preparationID == id else { return }
-            let request = preparationRequest
-            let worker = Task.detached(priority: .userInitiated) { try WorkspaceFilePreparationCache.shared.prepare(request) }
-            let result = await withTaskCancellationHandler {
-                try? await worker.value
-            } onCancel: { worker.cancel() }
-            guard !Task.isCancelled, preparationID == id, request.repository == repository?.url.path, let result else { return }
-            displayedPreparation = request
-            visibleFiles = result.rows
-            visiblePaths = result.paths
-            statusCounts = result.counts
-            displayedRepository = request.repository
-            preparing = false
-            applyInitialSelection()
-        }
+        // A lifecycle task restarts on reappearance; cancelling an onAppear
+        // task used to leave retained panes stuck in preparing with no owner.
+        await Task.yield()
+        guard !Task.isCancelled, preparationID == id else { return }
+        let worker = Task.detached(priority: .userInitiated) { try WorkspaceFilePreparationCache.shared.prepare(request) }
+        let result = await withTaskCancellationHandler {
+            try? await worker.value
+        } onCancel: { worker.cancel() }
+        guard !Task.isCancelled, preparationID == id, let result else { return }
+        displayedPreparation = request
+        visibleFiles = result.rows
+        visiblePaths = result.paths
+        statusCounts = result.counts
+        displayedRepository = request.repository
+        preparing = false
+        applyInitialSelection()
     }
     private func applyInitialSelection() {
         guard !preparing, displayedRepository == repository?.url.path else { return }
@@ -177,23 +173,18 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
     }
     private var filteredContent: some View {
         content
-        .onAppear { rebuildVisibleFiles(); if treeMode && showIgnored { treeMode = false } }
+        .task(id: preparationRequest) { await rebuildVisibleFiles() }
+        .onAppear { if treeMode && showIgnored { treeMode = false } }
         .onChange(of: shortcutRequest?.id) { _, _ in performShortcut() }
-        .onChange(of: files) { _, _ in rebuildVisibleFiles(); if showIgnored { scheduleIgnored() } }
-        .onChange(of: repository?.url.path) { _, _ in initialSelectionRepository = nil; rebuildVisibleFiles() }
+        .onChange(of: files) { _, _ in if showIgnored { scheduleIgnored() } }
+        .onChange(of: repository?.url.path) { _, _ in initialSelectionRepository = nil }
         .onChange(of: initialSelectionReady) { _, _ in applyInitialSelection() }
-        .onChange(of: filter) { _, _ in rebuildVisibleFiles() }
-        .onChange(of: filterCase) { _, _ in rebuildVisibleFiles() }
-        .onChange(of: category) { _, _ in rebuildVisibleFiles() }
-        .onChange(of: showHidden) { _, _ in rebuildVisibleFiles() }
     }
     var body: some View {
         filteredContent
-        .onDisappear { preparationTask?.cancel(); ignoredTask?.cancel(); ignoredRequestID = UUID() }
-        .onChange(of: ignoredPaths) { _, _ in rebuildVisibleFiles() }
-        .onChange(of: sortOrder) { _, _ in rebuildVisibleFiles() }
+        .onDisappear { ignoredTask?.cancel(); ignoredRequestID = UUID() }
         .task(id: (repository?.url.path ?? "") + "|\(showIgnored)") { scheduleIgnored() }
-        .onChange(of: showIgnored) { _, value in rebuildVisibleFiles(); if value { treeMode = false } }
+        .onChange(of: showIgnored) { _, value in if value { treeMode = false } }
         .onReceive(NotificationCenter.default.publisher(for: .auvGitWorktreeChanged)) { notification in
             refreshIgnored(notification)
         }

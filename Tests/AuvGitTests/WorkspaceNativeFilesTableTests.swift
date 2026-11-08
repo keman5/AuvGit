@@ -7,6 +7,54 @@ import AuvGitLocalization
 
 @MainActor
 final class WorkspaceNativeFilesTableTests: XCTestCase {
+    func testReturningFromComparisonRestoresDiscardedNativeRowsWithoutGitChanges() throws {
+        _ = NSApplication.shared
+        let parent = WorkspaceNativeFilesTable(rows: ["a.swift", "b.swift"].map { WorkspaceFileRow(path: $0, file: nil) },
+            files: [], repository: nil, selection: .constant(["b.swift"]), isBusy: false,
+            sortOrder: .constant([]), onAction: { _, _ in }, onCompare: { _ in })
+        let coordinator = parent.makeCoordinator()
+        let table = WorkspaceNativeFilesTable.FileTable()
+        table.coordinator = coordinator
+        table.addTableColumn(NSTableColumn(identifier: .init("filename")))
+        table.dataSource = coordinator; table.delegate = coordinator
+        coordinator.table = table; coordinator.update(parent)
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 500, height: 250))
+        scroll.documentView = table
+        let window = NSWindow(contentRect: scroll.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentView = scroll
+        defer { window.close() }
+        // Model AppKit discarding its cached row count while the hosting tree
+        // and coordinator still retain the same prepared file snapshot.
+        table.dataSource = nil; table.reloadData()
+        XCTAssertEqual(table.numberOfRows, 0)
+        table.dataSource = coordinator
+        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
+        XCTAssertEqual(table.numberOfRows, 2)
+        XCTAssertEqual(table.selectedRowIndexes, IndexSet(integer: 1))
+        XCTAssertGreaterThanOrEqual(table.frame.height, table.rect(ofRow: 1).maxY)
+        XCTAssertFalse(window.isVisible)
+    }
+
+    func testRecreatedTableLoadsUnchangedSnapshotAndRestoresSelection() {
+        let parent = WorkspaceNativeFilesTable(rows: ["a.swift", "b.swift"].map { WorkspaceFileRow(path: $0, file: nil) },
+            files: [], repository: nil, selection: .constant(["b.swift"]), isBusy: false,
+            sortOrder: .constant([]), onAction: { _, _ in }, onCompare: { _ in })
+        let coordinator = parent.makeCoordinator()
+        func table() -> WorkspaceNativeFilesTable.FileTable {
+            let table = WorkspaceNativeFilesTable.FileTable()
+            table.addTableColumn(NSTableColumn(identifier: .init("filename")))
+            table.dataSource = coordinator; table.delegate = coordinator
+            return table
+        }
+        let original = table()
+        coordinator.table = original; coordinator.update(parent)
+        XCTAssertEqual(original.numberOfRows, 2)
+        let replacement = table()
+        coordinator.table = replacement; coordinator.update(parent)
+        XCTAssertEqual(replacement.numberOfRows, 2)
+        XCTAssertEqual(replacement.selectedRowIndexes, IndexSet(integer: 1))
+    }
+
     func testFileNameTooltipOmitsDirectoriesAndPathTooltipIsRepositoryRelative() throws {
         let root = URL(fileURLWithPath: "/tmp/Tooltip Repository")
         let path = "Deep Folder/完整的文件名.swift"

@@ -84,6 +84,25 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
     final class FileTable: WorkspacePreviewTable {
         weak var coordinator: Coordinator?
         var isTrackingMouse = false
+        private var activationObserver: NSObjectProtocol?
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let activationObserver { NotificationCenter.default.removeObserver(activationObserver) }
+            activationObserver = nil
+            guard let window else { return }
+            activationObserver = NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification,
+                object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    // Closing a comparison returns to a retained hosting tree.
+                    // Reconcile native row geometry even when Git data is unchanged.
+                    guard let self, !self.isTrackingMouse, let coordinator = self.coordinator else { return }
+                    coordinator.update(coordinator.parent, restoresPresentation: true)
+                }
+            }
+        }
+        deinit {
+            if let activationObserver { NotificationCenter.default.removeObserver(activationObserver) }
+        }
         override func viewDidChangeEffectiveAppearance() {
             super.viewDidChangeEffectiveAppearance()
             if let range = Range(rows(in: visibleRect)), !range.isEmpty {
@@ -201,7 +220,7 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
             default: return L10n.text("directory", table: "Files")
             }
         }
-        func update(_ value: WorkspaceNativeFilesTable) {
+        func update(_ value: WorkspaceNativeFilesTable, restoresPresentation: Bool = false) {
             guard let table else { return }
             let changed = parent.repository?.url != value.repository?.url || !rows.elementsEqual(value.rows, by: { $0.path == $1.path && $0.file == $1.file })
             let languageChanged = columnLanguage != L10n.language
@@ -213,6 +232,8 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
                 generation = UUID()
                 rows = value.rows
                 pathIndices = Dictionary(rows.enumerated().map { ($0.element.path, $0.offset) }, uniquingKeysWith: { first, _ in first })
+            }
+            if changed || restoresPresentation || table.numberOfRows != rows.count {
                 table.reloadData()
             }
             for column in table.tableColumns {
@@ -239,6 +260,13 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
             let indices = IndexSet(value.selection.compactMap { pathIndices[$0] }.sorted())
             // Focus invalidation can reach SwiftUI while AppKit is still tracking the click.
             if (!table.isTrackingMouse || changed), table.selectedRowIndexes != indices { table.selectRowIndexes(indices, byExtendingSelection: false) }
+            if restoresPresentation, let scroll = table.enclosingScrollView {
+                scroll.tile()
+                let clip = scroll.contentView
+                clip.scroll(to: clip.constrainBoundsRect(clip.bounds).origin)
+                scroll.reflectScrolledClipView(clip)
+                table.needsDisplay = true
+            }
         }
         func finishMouseTracking(generation expected: UUID) {
             guard let table else { return }
