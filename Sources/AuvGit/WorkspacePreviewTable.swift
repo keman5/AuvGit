@@ -3,10 +3,68 @@ import QuickLookUI
 
 /// Quick Look belongs to the file table's responder chain, never to text editors
 /// or the terminal. Keep the system panel's data source alive for its lifetime.
-class WorkspacePreviewTable: NSTableView, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
+class WorkspacePreviewTable: NSTableView, QLPreviewPanelDataSource, QLPreviewPanelDelegate, NSViewToolTipOwner {
     var previewURLs: () -> [URL] = { [] }
     var previewRepositoryURL: () -> URL? = { nil }
     private(set) var previewItems: [URL] = []
+    private(set) var fileToolTipTags = Set<NSView.ToolTipTag>()
+    private var fileToolTipRects: [NSRect] = []
+
+    // Resolve the current row when AppKit displays a hint. Reused cells must not
+    // own filename strings that can outlive a commit, refresh or repository switch.
+    func fileToolTip(row: Int, column: NSTableColumn) -> String? { nil }
+
+    func fileToolTip(at point: NSPoint) -> String? {
+        guard visibleRect.contains(point) else { return nil }
+        let row = row(at: point), column = column(at: point)
+        guard row >= 0, row < numberOfRows, tableColumns.indices.contains(column), !tableColumns[column].isHidden else { return nil }
+        return fileToolTip(row: row, column: tableColumns[column])
+    }
+
+    func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData: UnsafeMutableRawPointer?) -> String {
+        guard view === self, fileToolTipTags.contains(tag) else { return "" }
+        return fileToolTip(at: point) ?? ""
+    }
+
+    override func reloadData() {
+        invalidateFileToolTip()
+        super.reloadData()
+        updateFileToolTip()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        updateFileToolTip()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        invalidateFileToolTip()
+        updateFileToolTip()
+    }
+
+    private func invalidateFileToolTip() {
+        for tag in fileToolTipTags { removeToolTip(tag) }
+        fileToolTipTags.removeAll(keepingCapacity: true)
+        fileToolTipRects.removeAll(keepingCapacity: true)
+    }
+
+    private func updateFileToolTip() {
+        let rect = visibleRect.intersection(bounds)
+        guard window != nil, numberOfRows > 0, !rect.isEmpty,
+              let visibleRows = Range(rows(in: rect)) else { invalidateFileToolTip(); return }
+        var regions: [NSRect] = []
+        for row in visibleRows where row < numberOfRows {
+            for column in tableColumns.indices where !tableColumns[column].isHidden {
+                let region = frameOfCell(atColumn: column, row: row).intersection(rect)
+                if !region.isEmpty { regions.append(region) }
+            }
+        }
+        guard fileToolTipRects != regions else { return }
+        invalidateFileToolTip()
+        fileToolTipRects = regions
+        for region in regions { fileToolTipTags.insert(addToolTip(region, owner: self, userData: nil)) }
+    }
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 49,

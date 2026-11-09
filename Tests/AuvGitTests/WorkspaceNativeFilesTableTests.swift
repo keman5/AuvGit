@@ -62,12 +62,61 @@ final class WorkspaceNativeFilesTableTests: XCTestCase {
             selection: .constant([]), isBusy: false, sortOrder: .constant([]), onAction: { _, _ in }, onCompare: { _ in })
         let coordinator = parent.makeCoordinator()
         let table = WorkspaceNativeFilesTable.FileTable()
+        table.coordinator = coordinator
         coordinator.table = table; coordinator.update(parent)
         for id in ["filename", "directory"] {
-            let cell = try XCTUnwrap(coordinator.tableView(table, viewFor: NSTableColumn(identifier: .init(id)), row: 0) as? WorkspaceNativeFilesTable.Cell)
-            XCTAssertEqual(cell.toolTip, id == "filename" ? "完整的文件名.swift" : path)
-            XCTAssertEqual(cell.label.toolTip, cell.toolTip)
+            let column = NSTableColumn(identifier: .init(id))
+            let cell = try XCTUnwrap(coordinator.tableView(table, viewFor: column, row: 0) as? WorkspaceNativeFilesTable.Cell)
+            XCTAssertEqual(table.fileToolTip(row: 0, column: column), id == "filename" ? "完整的文件名.swift" : path)
+            XCTAssertNil(cell.toolTip)
+            XCTAssertNil(cell.label.toolTip)
+            XCTAssertFalse(cell.label.allowsExpansionToolTips)
         }
+    }
+
+    func testStationaryFileTooltipCannotSurviveClearedRowsOrRepositorySwitch() throws {
+        _ = NSApplication.shared
+        func parent(_ path: String, _ names: [String]) -> WorkspaceNativeFilesTable {
+            WorkspaceNativeFilesTable(rows: names.map { .init(path: $0, file: nil) }, files: [],
+                repository: GitRepository(url: URL(fileURLWithPath: path)), selection: .constant([]), isBusy: false,
+                sortOrder: .constant([]), onAction: { _, _ in }, onCompare: { _ in })
+        }
+        let original = parent("/tmp/tooltip-original", ["src/committed.swift", "src/another.swift"])
+        let coordinator = original.makeCoordinator()
+        let table = WorkspaceNativeFilesTable.FileTable()
+        table.coordinator = coordinator
+        let column = NSTableColumn(identifier: .init("filename")); column.width = 400
+        table.addTableColumn(column)
+        let directory = NSTableColumn(identifier: .init("directory")); directory.width = 100
+        table.addTableColumn(directory)
+        table.dataSource = coordinator; table.delegate = coordinator; coordinator.table = table
+        coordinator.update(original)
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 500, height: 240)); scroll.documentView = table
+        let window = NSWindow(contentRect: scroll.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentView = scroll
+        defer { window.close() }
+        scroll.layoutSubtreeIfNeeded(); table.updateTrackingAreas()
+        let point = NSPoint(x: 20, y: table.rect(ofRow: 0).midY)
+        let originalTag = try XCTUnwrap(table.fileToolTipTags.first)
+        XCTAssertEqual(table.fileToolTipTags.count, 4, "Each visible cell needs its own region so moving between files changes the hint")
+        XCTAssertEqual(table.view(table, stringForToolTip: originalTag, point: point, userData: nil), "committed.swift")
+        XCTAssertEqual(table.fileToolTip(at: NSPoint(x: 20, y: table.rect(ofRow: 1).midY)), "another.swift")
+        XCTAssertEqual(table.fileToolTip(at: NSPoint(x: table.rect(ofColumn: 1).midX, y: point.y)), "src/committed.swift")
+
+        // Keep the mouse coordinates unchanged while the commit removes all rows.
+        coordinator.update(parent("/tmp/tooltip-original", []))
+        XCTAssertTrue(table.fileToolTipTags.isEmpty)
+        XCTAssertNil(table.fileToolTip(at: point))
+        XCTAssertEqual(table.view(table, stringForToolTip: originalTag, point: point, userData: nil), "")
+
+        coordinator.update(parent("/tmp/tooltip-next", ["current.swift"]))
+        table.updateTrackingAreas()
+        let nextTag = try XCTUnwrap(table.fileToolTipTags.first)
+        XCTAssertNotEqual(nextTag, originalTag)
+        XCTAssertEqual(table.view(table, stringForToolTip: originalTag, point: point, userData: nil), "")
+        XCTAssertEqual(table.view(table, stringForToolTip: nextTag, point: point, userData: nil), "current.swift")
+        XCTAssertNil(table.fileToolTip(at: NSPoint(x: 20, y: table.rect(ofRow: 0).maxY + 30)))
+        XCTAssertFalse(window.isVisible)
     }
 
     func testHeaderSortCyclesToDefaultAndDropsPreviousColumnsWithoutChangingSelection() {

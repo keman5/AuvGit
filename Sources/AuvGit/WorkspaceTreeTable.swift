@@ -47,6 +47,9 @@ struct WorkspaceTreeTable: NSViewRepresentable {
 
     final class TreeTable: WorkspacePreviewTable {
         weak var coordinator: Coordinator?
+        override func fileToolTip(row: Int, column: NSTableColumn) -> String? {
+            coordinator?.fileToolTip(row: row)
+        }
         var isTrackingMouse = false
         override func menu(for event: NSEvent) -> NSMenu? { coordinator?.menu(at: convert(event.locationInWindow, from: nil)) }
         override func rightMouseDown(with event: NSEvent) {
@@ -94,6 +97,7 @@ struct WorkspaceTreeTable: NSViewRepresentable {
             disclosure.imagePosition = .imageOnly
             label.font = .systemFont(ofSize: 12); label.lineBreakMode = .byTruncatingMiddle
             label.maximumNumberOfLines = 1
+            label.allowsExpansionToolTips = false
             icon.setAccessibilityElement(false)
             addSubview(disclosure); addSubview(icon); addSubview(label)
             textField = label
@@ -163,6 +167,10 @@ struct WorkspaceTreeTable: NSViewRepresentable {
         }
         func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { NativeSelectionRowView() }
         func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
+        func fileToolTip(row: Int) -> String? {
+            guard rows.indices.contains(row) else { return nil }
+            return rows[row].name
+        }
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
             guard rows.indices.contains(row) else { return nil }
             let id = NSUserInterfaceItemIdentifier("treeCell")
@@ -173,8 +181,6 @@ struct WorkspaceTreeTable: NSViewRepresentable {
             cell.selectedIcon = nil
             cell.depth = value.depth; cell.needsLayout = true
             cell.label.stringValue = value.name
-            cell.toolTip = value.name
-            cell.label.toolTip = cell.toolTip
             cell.disclosure.isHidden = !value.isDirectory
             if value.isDirectory {
                 cell.disclosure.isEnabled = enabled

@@ -7,6 +7,29 @@ import AuvGitLocalization
 
 @MainActor
 final class WorkspaceTreeRenderingTests: XCTestCase {
+    func testTreeTooltipUsesCurrentRowsWithoutRetainingCellHints() throws {
+        func parent(_ paths: [String]) -> WorkspaceTreeTable {
+            WorkspaceTreeTable(rows: paths.map { .init(path: $0, isDirectory: false, depth: 0) }, expanded: .constant([]),
+                selection: .constant([]), repository: GitRepository(url: URL(fileURLWithPath: "/tmp/tree-tooltip")),
+                files: [], isBusy: false, openFile: { _ in }, onAction: { _, _ in })
+        }
+        let original = parent(["src/old.swift"])
+        let coordinator = original.makeCoordinator()
+        let table = WorkspaceTreeTable.TreeTable()
+        table.coordinator = coordinator
+        let column = NSTableColumn(identifier: .init("treeName")); table.addTableColumn(column)
+        table.dataSource = coordinator; table.delegate = coordinator; coordinator.table = table
+        coordinator.update(original)
+        let cell = try XCTUnwrap(coordinator.tableView(table, viewFor: column, row: 0) as? WorkspaceTreeTable.Cell)
+        XCTAssertEqual(table.fileToolTip(row: 0, column: column), "old.swift")
+        XCTAssertNil(cell.toolTip); XCTAssertNil(cell.label.toolTip)
+        XCTAssertFalse(cell.label.allowsExpansionToolTips)
+        coordinator.update(parent([]))
+        XCTAssertNil(table.fileToolTip(row: 0, column: column))
+        coordinator.update(parent(["src/new.swift"]))
+        XCTAssertEqual(table.fileToolTip(row: 0, column: column), "new.swift")
+    }
+
     func testDoubleClickSelectsOnlyClickedFileAndFolderBeforeDefaultAction() {
         let model = Model()
         model.nodes = [WorkspaceFileNode(path: "src", isDirectory: true, children: [

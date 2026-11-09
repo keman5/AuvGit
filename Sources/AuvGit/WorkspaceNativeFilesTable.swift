@@ -83,6 +83,9 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
 
     final class FileTable: WorkspacePreviewTable {
         weak var coordinator: Coordinator?
+        override func fileToolTip(row: Int, column: NSTableColumn) -> String? {
+            coordinator?.fileToolTip(row: row, column: column)
+        }
         var isTrackingMouse = false
         private var activationObserver: NSObjectProtocol?
         override func viewDidMoveToWindow() {
@@ -151,6 +154,7 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
             label.font = .systemFont(ofSize: 12)
             label.lineBreakMode = .byTruncatingMiddle
             label.maximumNumberOfLines = 1
+            label.allowsExpansionToolTips = false
             addSubview(label); addSubview(icon)
             textField = label
         }
@@ -326,10 +330,19 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
                 cell.foregroundColor = color(key ?? "none")
                 if code != " " { cell.label.font = .systemFont(ofSize: 10, weight: .medium); cell.badgeColor = cell.foregroundColor }
             }
-            cell.toolTip = id.rawValue == "filename" ? value.name
-                : id.rawValue == "directory" ? value.path : cell.label.stringValue
-            cell.label.toolTip = cell.toolTip
             return cell
+        }
+        func fileToolTip(row: Int, column: NSTableColumn) -> String? {
+            guard parent.isReady, rows.indices.contains(row) else { return nil }
+            switch column.identifier.rawValue {
+            case "filename": return rows[row].name
+            case "directory": return rows[row].path
+            default:
+                guard let table else { return nil }
+                let index = table.column(withIdentifier: column.identifier)
+                guard index >= 0 else { return nil }
+                return (table.view(atColumn: index, row: row, makeIfNecessary: false) as? Cell)?.label.stringValue
+            }
         }
         private func color(_ key: String) -> NSColor {
             switch key {
