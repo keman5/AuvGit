@@ -4,6 +4,7 @@ import GitCore
 
 struct NativeBranchTable: NSViewRepresentable {
     let branches: [GitBranch]
+    var remoteNames: [String] = []
     let stashes: [GitStash]
     let repositoryPath: String?
     var repositoryIdentity: ObjectIdentifier? = nil
@@ -38,19 +39,31 @@ struct NativeBranchTable: NSViewRepresentable {
         for remote in [false, true] {
             let group = remote ? "remote" : "local"
             if !remote { result.append(Row(id: "group:local", title: interactionText("Local Branches"), symbol: "", expanded: localExpanded)) }
-            var folders = Set<String>()
-            for branch in branches.filter({ $0.isRemote == remote }).sorted(by: { $0.name < $1.name }) {
-                let parts = branch.name.split(separator: "/").map(String.init)
-                var parents: [String] = []
-                for index in 0..<max(0, parts.count - 1) {
-                    let id = "folder:" + group + ":" + parts.prefix(index + 1).joined(separator: "/")
-                    if folders.insert(id).inserted {
-                        result.append(Row(id: id, title: parts[index], symbol: "folder", depth: index + (remote ? 0 : 1), parentFolders: parents, expanded: true))
-                    }
-                    parents.append(id)
+            let selected = branches.filter { $0.isRemote == remote }.sorted { $0.name < $1.name }
+            let roots = remote ? Set(remoteNames + selected.compactMap { $0.name.split(separator: "/").first.map(String.init) }).sorted() : []
+            let groups: [(String?, [GitBranch])] = remote
+                ? roots.map { name in (name, selected.filter { $0.name.hasPrefix(name + "/") }) }
+                : [(nil, selected)]
+            for (root, groupBranches) in groups {
+                var folders = Set<String>()
+                if let root {
+                    let id = "folder:remote:" + root
+                    folders.insert(id)
+                    result.append(Row(id: id, title: root, symbol: "folder", expanded: true))
                 }
-                result.append(Row(id: (remote ? "remote:" : "branch:") + branch.name, title: parts.last ?? branch.name,
-                    symbol: remote ? "network" : "arrow.triangle.branch", depth: parts.count - (remote ? 1 : 0), parentFolders: parents, current: branch.isCurrent, upstream: remote ? nil : branch.upstream))
+                for branch in groupBranches {
+                    let parts = branch.name.split(separator: "/").map(String.init)
+                    var parents: [String] = []
+                    for index in 0..<max(0, parts.count - 1) {
+                        let id = "folder:" + group + ":" + parts.prefix(index + 1).joined(separator: "/")
+                        if folders.insert(id).inserted {
+                            result.append(Row(id: id, title: parts[index], symbol: "folder", depth: index + (remote ? 0 : 1), parentFolders: parents, expanded: true))
+                        }
+                        parents.append(id)
+                    }
+                    result.append(Row(id: (remote ? "remote:" : "branch:") + branch.name, title: parts.last ?? branch.name,
+                        symbol: remote ? "network" : "arrow.triangle.branch", depth: parts.count - (remote ? 1 : 0), parentFolders: parents, current: branch.isCurrent, upstream: remote ? nil : branch.upstream))
+                }
             }
         }
         if !stashes.isEmpty {
@@ -229,7 +242,7 @@ struct NativeBranchTable: NSViewRepresentable {
         init(_ parent: NativeBranchTable) { self.parent = parent }
         func update(_ value: NativeBranchTable) {
             let repositoryChanged = parent.repositoryPath != value.repositoryPath || parent.repositoryIdentity != value.repositoryIdentity
-            let rebuild = treeRows.isEmpty || repositoryChanged || parent.branches != value.branches || parent.stashes != value.stashes
+            let rebuild = treeRows.isEmpty || repositoryChanged || parent.branches != value.branches || parent.remoteNames != value.remoteNames || parent.stashes != value.stashes
                 || treeRows.first(where: { $0.id == "group:local" })?.expanded != value.localExpanded
                 || (!value.stashes.isEmpty && treeRows.first(where: { $0.id == "group:stash" })?.expanded != value.stashesExpanded)
             let currentChanged = repositoryChanged || parent.currentBranch != value.currentBranch

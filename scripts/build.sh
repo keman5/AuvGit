@@ -5,6 +5,11 @@ caffeinate -di -w $$ &
 BUILD_CAFFEINATE_PID=$!
 trap 'kill "$BUILD_CAFFEINATE_PID" 2>/dev/null || true' EXIT
 if command -v go >/dev/null 2>&1; then go clean -cache; fi
+if [[ "${1:-}" == --test-configured-remotes ]]; then
+  # Unshown branch tables and disposable local remotes; never activate windows.
+  swift test --build-system native --filter 'NativeBranchTableTests|RepositoryRemoteSyncTests.testConfiguredRemote|RepositoryChangeStateTests|RepositoryPresentationCacheTests'
+  exit
+fi
 if [[ "${1:-}" == --test-comparison-lifecycle ]]; then
   # Native IME and list lifecycle regressions use unshown hosts only.
   swift test --build-system native --filter "${AUVGIT_COMPARISON_LIFECYCLE_FILTER:-ComparisonSearchInputTests|ComparisonSearchShortcutFocusTests|ComparisonSearchTests|WorkspaceNativeFilesTableTests|WorkspaceFilesLifecycleTests|WorkspaceFilePreparationTests}"

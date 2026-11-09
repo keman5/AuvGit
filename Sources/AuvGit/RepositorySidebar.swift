@@ -156,7 +156,7 @@ struct RepositorySidebar: View {
     private var branchPane: some View {
         VStack(spacing: 0) {
                 HStack { Text(interactionText("Branches")).font(.system(size: 13, weight: .semibold)); Spacer(); AuvGitBadge(String(store.branches.count), tint: .secondary) }.padding(.horizontal, 10).frame(height: 32)
-                NativeBranchTable(branches: store.branches, stashes: store.stashes,
+                NativeBranchTable(branches: store.branches, remoteNames: store.remoteNames, stashes: store.stashes,
                     repositoryPath: store.repositoryURL?.path, repositoryIdentity: store.repository.map { ObjectIdentifier($0) }, currentBranch: store.branch, isBusy: store.isBusy,
                     localExpanded: $localBranchesExpanded, stashesExpanded: $stashesExpanded, selection: $branchSelection,
                     onAction: onAction, onRenameStash: prepareStashRename, onShortcut: handleShortcut, onDropStashes: onDropStashes)

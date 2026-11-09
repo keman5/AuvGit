@@ -4,6 +4,30 @@ import XCTest
 
 @MainActor
 final class RepositoryRemoteSyncTests: XCTestCase {
+    func testConfiguredRemoteSurvivesOpeningAndRefreshWithoutTrackingRefs() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        _ = try await GitProcess.run(at: root, arguments: ["init", "-b", "main"])
+        // An empty local remote has no tracking refs to discover or fetch.
+        let remote = root.appendingPathComponent("remote.git")
+        _ = try await GitProcess.run(at: root, arguments: ["init", "--bare", remote.path])
+        _ = try await GitProcess.run(at: root, arguments: ["remote", "add", "origin", remote.path])
+        let store = RepositoryStore(persistsSession: false)
+        defer { store.closeTransientSession() }
+        await store.open(root)
+        await store.cancelBackgroundRepositorySync()
+        XCTAssertNotNil(store.repository)
+        XCTAssertFalse(store.branches.contains(where: \.isRemote))
+        XCTAssertEqual(store.remoteNames, ["origin"], "Opening copies the prepared remote configuration into the visible store")
+        _ = try await GitProcess.run(at: root, arguments: ["remote", "add", "upstream", remote.path])
+        await store.refreshIfChanged()
+        XCTAssertEqual(store.remoteNames, ["origin", "upstream"], "Config-only changes must invalidate metadata")
+        _ = try await GitProcess.run(at: root, arguments: ["remote", "remove", "origin"])
+        await store.refreshIfChanged()
+        XCTAssertEqual(store.remoteNames, ["upstream"])
+    }
+
     func testSlowRemoteCannotHideAlreadyKnownIncomingUpdatesInLaterProjects() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

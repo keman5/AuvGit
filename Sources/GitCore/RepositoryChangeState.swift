@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 public enum RepositoryOperationState: String, Codable, Sendable {
     case merge, rebase
@@ -63,11 +64,13 @@ public extension GitRepository {
         async let refs = GitProcess.run(at: url, arguments: ["--no-optional-locks", "show-ref", "--head"], allowedCodes: [0, 1]).text
         async let head = GitProcess.run(at: url, arguments: ["--no-optional-locks", "symbolic-ref", "--quiet", "HEAD"], allowedCodes: [0, 1]).text
         async let index = workflowRead(["--no-optional-locks", "ls-files", "--stage", "-z"])
-        async let tracking = GitProcess.run(at: url, arguments: ["--no-optional-locks", "config", "--local", "--null", "--get-regexp", "^branch\\..*\\.(remote|merge)$"], allowedCodes: [0, 1]).text
+        async let tracking = GitProcess.run(at: url, arguments: ["--no-optional-locks", "config", "--local", "--null", "--get-regexp", "^(branch\\..*\\.(remote|merge)|remote\\..*\\.(url|fetch))$"], allowedCodes: [0, 1]).text
         async let stashLogPath = workflowRead(["rev-parse", "--git-path", "logs/refs/stash"])
         async let operation = operationState()
         async let undo = recreatableConflictPaths()
         let trackingText = try await tracking
+        // Remote URLs may contain credentials; keep only an identity in snapshots.
+        let configurationIdentity = trackingText.isEmpty ? "" : "\0" + SHA256.hash(data: Data(trackingText.utf8)).map { String(format: "%02x", $0) }.joined()
         let stashPath = try await stashLogPath.trimmingCharacters(in: .newlines)
         let stashURL = stashPath.hasPrefix("/") ? URL(fileURLWithPath: stashPath) : url.appendingPathComponent(stashPath)
         let stashAttributes = try? FileManager.default.attributesOfItem(atPath: stashURL.path)
@@ -75,7 +78,7 @@ public extension GitRepository {
             let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970.bitPattern
             return "\0stash:\(modified.map(String.init) ?? "missing"):\(String(describing: attributes[.size])):\(String(describing: attributes[.systemFileNumber]))"
         } ?? ""
-        return try await RepositoryChangeState(history: head + refs + (trackingText.isEmpty ? "" : "\0" + trackingText) + stashIdentity, index: index, files: files, root: url, operation: operation, recreatableConflicts: undo)
+        return try await RepositoryChangeState(history: head + refs + configurationIdentity + stashIdentity, index: index, files: files, root: url, operation: operation, recreatableConflicts: undo)
     }
 
     func recreatableConflictPaths() async throws -> Set<String> {

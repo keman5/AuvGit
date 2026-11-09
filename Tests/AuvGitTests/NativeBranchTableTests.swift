@@ -6,13 +6,50 @@ import GitCore
 
 @MainActor
 final class NativeBranchTableTests: XCTestCase {
+    func testConfiguredRemoteWithoutTrackingRefsStillOffersFetch() throws {
+        var actions: [String] = []
+        var view = pane(action: { action, target in actions.append("\(action):\(target)") })
+        view = NativeBranchTable(branches: view.branches.filter { !$0.isRemote }, remoteNames: ["origin", "upstream"],
+            stashes: [], repositoryPath: view.repositoryPath, currentBranch: view.currentBranch, isBusy: false,
+            localExpanded: .constant(false), stashesExpanded: .constant(true), selection: .constant(nil),
+            onAction: view.onAction, onRenameStash: { _ in }, onShortcut: { _ in false })
+        let coordinator = view.makeCoordinator(); coordinator.update(view)
+        XCTAssertEqual(coordinator.rows.compactMap(\.remoteRoot), ["origin", "upstream"])
+        XCTAssertFalse(coordinator.rows.contains { $0.id.hasPrefix("remote:") })
+        let index = try XCTUnwrap(coordinator.rows.firstIndex { $0.remoteRoot == "origin" })
+        let fetch = try XCTUnwrap(coordinator.menu(row: index)?.items.first {
+            ($0.representedObject as? NativeBranchTable.Coordinator.MenuAction)?.action == .fetchRemoteBranches
+        })
+        XCTAssertTrue(fetch.isEnabled)
+        coordinator.performMenuAction(fetch)
+        XCTAssertEqual(actions, ["fetchRemoteBranches:origin"])
+        view.remoteNames = ["upstream"]
+        coordinator.update(view)
+        XCTAssertEqual(coordinator.rows.compactMap(\.remoteRoot), ["upstream"])
+        coordinator.performMenuAction(fetch)
+        XCTAssertEqual(actions.count, 1, "A removed remote cannot be fetched through a stale menu")
+    }
+
+    func testConfiguredRemoteAndTrackingRefsShareOneRoot() {
+        var view = pane()
+        view.remoteNames = ["origin", "upstream", "origin"]
+        XCTAssertEqual(view.rows.compactMap(\.remoteRoot), ["origin", "upstream"])
+        XCTAssertTrue(view.rows.contains { $0.id == "remote:origin/main" })
+        let coordinator = view.makeCoordinator(); coordinator.update(view)
+        view.remoteNames.append("backup")
+        coordinator.update(view)
+        XCTAssertEqual(coordinator.rows.compactMap(\.remoteRoot), ["backup", "origin", "upstream"])
+    }
+
     func testRemoteRootFetchesAllBranchesAndRejectsBusyOrRetargetedActions() throws {
         var actions: [String] = []
         let view = pane(action: { action, target in actions.append("\(action):\(target)") })
         let coordinator = view.makeCoordinator(); coordinator.update(view)
         let index = try XCTUnwrap(coordinator.rows.firstIndex { $0.id == "folder:remote:origin" })
         let menu = try XCTUnwrap(coordinator.menu(row: index))
-        let item = try XCTUnwrap(menu.items.first { $0.title == sidebarRefinementText("Fetch...") })
+        let item = try XCTUnwrap(menu.items.first {
+            ($0.representedObject as? NativeBranchTable.Coordinator.MenuAction)?.action == .fetchRemoteBranches
+        })
         XCTAssertTrue(item.isEnabled)
         coordinator.performMenuAction(item)
         XCTAssertEqual(actions, ["fetchRemoteBranches:origin"])

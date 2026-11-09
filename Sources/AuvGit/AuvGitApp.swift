@@ -97,6 +97,7 @@ final class RepositoryStore: ObservableObject {
         let files: [GitFile]
         let filesGeneration: UUID
         let branches: [GitBranch]
+        var remoteNames: [String] = []
         let branch: String
         let stashes: [GitStash]
         let observedState: RepositoryChangeState?
@@ -290,7 +291,7 @@ final class RepositoryStore: ObservableObject {
         cancelAutomaticRefresh()
         historyTask?.cancel(); detailTask?.cancel(); diffTask?.cancel()
         fileObserver = nil; filesystemRefresh?.cancel(); repository = nil; repositoryURL = nil
-        files = []; commits = []; localUnpushedCommitHashes = nil; branches = []; stashes = []; commitFiles = []; selectedPaths = []; selectedCommit = nil; selectedCommitPath = nil
+        files = []; commits = []; localUnpushedCommitHashes = nil; branches = []; remoteNames = []; stashes = []; commitFiles = []; selectedPaths = []; selectedCommit = nil; selectedCommitPath = nil
         commitMessage = ""; amend = false; recentCommitMessages = []; accessedURL?.stopAccessingSecurityScopedResource(); accessedURL = nil
         let candidates = Array(openRepositories.reversed()); session.activeRepository = candidates.first; flushSession()
         guard workspaceProjects == nil || workspaceProjects?.active === self else { return }
@@ -415,6 +416,7 @@ final class RepositoryStore: ObservableObject {
     @Published var files: [GitFile] = []
     @Published var filesGeneration = UUID()
     @Published var branches: [GitBranch] = []
+    @Published var remoteNames: [String] = []
     @Published var stashes: [GitStash] = []
     @Published var branch = ""
     @Published var commits: [GitCommit] = []
@@ -852,7 +854,7 @@ final class RepositoryStore: ObservableObject {
             }
         }
         if let tree = saved.tree { WorkspaceTreeCache.shared.store(tree, for: url.path) }
-        return HistoryMemorySnapshot(files: saved.files, filesGeneration: UUID(), branches: saved.branches, branch: saved.branch,
+        return HistoryMemorySnapshot(files: saved.files, filesGeneration: UUID(), branches: saved.branches, remoteNames: saved.remoteNames ?? [], branch: saved.branch,
             stashes: saved.stashes, observedState: saved.observedState, historyState: saved.historyState, mainHistoryHead: saved.mainHistoryHead,
             historyScope: saved.historyScope, commits: saved.commits, loadedCount: saved.loadedCount, hasMore: saved.hasMore,
             localUnpushedCommitHashes: saved.localUnpushedCommitHashes, viewState: viewState, commitFiles: saved.commitFiles,
@@ -1162,8 +1164,9 @@ final class RepositoryStore: ObservableObject {
         defer { if refreshReadVersion == refreshVersion { refreshingRepository = nil } }
         do {
             async let newFiles: [GitFile] = { if let knownFiles { return knownFiles }; return try await repository.status() }()
-            let cachedBranches = branches, cachedBranch = branch
+            let cachedBranches = branches, cachedBranch = branch, cachedRemotes = remoteNames
             async let newBranches = reuseMetadata ? cachedBranches : try await repository.branches()
+            async let newRemotes = reuseMetadata ? cachedRemotes : try await repository.workflowRead(["remote"]).split(separator: "\n").map(String.init)
             async let newBranch = reuseMetadata ? cachedBranch : try await repository.currentBranch()
             let cachedStashes = stashes
             async let newStashes = reuseStashes ? cachedStashes : try await repository.stashes()
@@ -1178,9 +1181,10 @@ final class RepositoryStore: ObservableObject {
             async let workspaceDiff: Void = shouldLoadWorkspaceDiff ? loadDiff() : ()
             guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
             publishRepositoryChangeCount(fileStatus.count, path: repository.url.path)
-            let result = try await (fileStatus, newBranches, newBranch, newStashes)
+            let result = try await (fileStatus, newBranches, newBranch, newStashes, newRemotes)
             guard !Task.isCancelled, version == repoVersion, refreshReadVersion == refreshVersion else { return }
             if branches != result.1 { branches = result.1 }
+            if remoteNames != result.4 { remoteNames = result.4 }
             if branch != result.2 { branch = result.2 }
             if stashes != result.3 {
                 lastHistoryState = nil
@@ -1231,9 +1235,10 @@ final class RepositoryStore: ObservableObject {
         async let refs = repository.branches()
         async let head = repository.currentBranch()
         async let stashList = repository.stashes()
-        guard let metadata = try? await (refs, head, stashList), !Task.isCancelled, version == repoVersion,
+        async let remotes = repository.workflowRead(["remote"]).split(separator: "\n").map(String.init)
+        guard let metadata = try? await (refs, head, stashList, remotes), !Task.isCancelled, version == repoVersion,
               self.repository?.url == repository.url else { return false }
-        branches = metadata.0; branch = metadata.1; stashes = metadata.2
+        branches = metadata.0; branch = metadata.1; stashes = metadata.2; remoteNames = metadata.3
         applyFileStatus([]); selectedPaths = []; clearDiff()
         workspaceStatusFailure = error.localizedDescription
         await loadHistory(reset: true)
@@ -1432,7 +1437,7 @@ final class RepositoryStore: ObservableObject {
         }
         historyMemoryCache[path] = snapshot
         if persist, followsCurrentBranch, let presentationCache {
-            let saved = RepositoryPresentationSnapshot(files: snapshot.files, branches: snapshot.branches, branch: snapshot.branch,
+            let saved = RepositoryPresentationSnapshot(files: snapshot.files, branches: snapshot.branches, remoteNames: snapshot.remoteNames, branch: snapshot.branch,
                 stashes: snapshot.stashes, commits: snapshot.commits, commitFiles: snapshot.commitFiles,
                 tree: WorkspaceTreeCache.shared.nodes(for: path), loadedCount: snapshot.loadedCount, hasMore: snapshot.hasMore,
                 // Disk snapshots only present content; fresh validation supplies filesystem state.
@@ -1452,7 +1457,7 @@ final class RepositoryStore: ObservableObject {
     private func currentHistorySnapshot() -> HistoryMemorySnapshot {
         let revisions = [staticPreview, conflictPreview].compactMap { $0 }.flatMap { [$0.head, $0.index, $0.worktree, $0.base, $0.ours, $0.theirs].compactMap { $0 } }
         return HistoryMemorySnapshot(
-            files: files, filesGeneration: filesGeneration, branches: branches, branch: branch, stashes: stashes,
+            files: files, filesGeneration: filesGeneration, branches: branches, remoteNames: remoteNames, branch: branch, stashes: stashes,
             observedState: lastObservedState, historyState: lastHistoryState, mainHistoryHead: lastMainHistoryHead,
             historyScope: loadedHistoryScope, commits: commits, incomingCommits: incomingHistory, hasMoreIncoming: incomingHistoryHasMore,
             loadedCount: historyLoadedCount,
@@ -1479,7 +1484,7 @@ final class RepositoryStore: ObservableObject {
         setDiffTitle(snapshot.diffTitle, arguments: snapshot.diffArguments)
         loadingDiff = false; loadingHistory = false; selectFirstHistoryCommit = false
         files = snapshot.files; filesGeneration = snapshot.filesGeneration
-        branches = snapshot.branches; branch = snapshot.branch; stashes = snapshot.stashes
+        branches = snapshot.branches; remoteNames = snapshot.remoteNames; branch = snapshot.branch; stashes = snapshot.stashes
         repositoryOperation = snapshot.observedState?.operation
         recreatableConflicts = snapshot.observedState?.recreatableConflicts ?? []
         incomingHistory = snapshot.incomingCommits; incomingHistoryHasMore = snapshot.hasMoreIncoming

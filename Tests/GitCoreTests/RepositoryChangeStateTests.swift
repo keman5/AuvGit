@@ -2,6 +2,23 @@ import XCTest
 @testable import GitCore
 
 final class RepositoryChangeStateTests: XCTestCase {
+    func testRemoteConfigurationInvalidatesMetadataWithoutRetainingCredentialURLs() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        _ = try await GitProcess.run(at: root, arguments: ["init", "-b", "main"])
+        let repository = GitRepository(url: root)
+        let before = try await repository.changeState(files: [])
+        _ = try await repository.workflowRead(["remote", "add", "origin", "https://user:fixture-private-token@example.invalid/project.git"])
+        let added = try await repository.changeState(files: [])
+        XCTAssertNotEqual(before.history, added.history)
+        XCTAssertFalse(added.history.contains("fixture-private-token"))
+        XCTAssertFalse(added.history.contains("https://"))
+        _ = try await repository.workflowRead(["remote", "remove", "origin"])
+        let removed = try await repository.changeState(files: [])
+        XCTAssertEqual(removed.history, before.history)
+    }
+
     func testDroppingAnOlderStashChangesHistoryEvenWhenItsTipIsUnchanged() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

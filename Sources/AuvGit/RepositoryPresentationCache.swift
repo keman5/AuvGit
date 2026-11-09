@@ -6,6 +6,7 @@ import GitCore
 struct RepositoryPresentationSnapshot: Codable, Sendable {
     var files: [GitFile] = []
     var branches: [GitBranch] = []
+    var remoteNames: [String]? = nil
     var branch = ""
     var stashes: [GitStash] = []
     var commits: [GitCommit] = []

@@ -12,7 +12,7 @@ final class RepositoryPresentationCacheTests: XCTestCase {
         let file = GitFile(path: "file.txt", originalPath: "old.txt", indexStatus: "R", worktreeStatus: "M")
         let commit = GitCommit(hash: "abc", parents: ["def"], author: "Test", date: Date(timeIntervalSince1970: 100), subject: "Subject", body: "Body", refs: ["main"])
         let state = RepositoryChangeState(history: "history", index: "index", files: [file], root: repository)
-        let snapshot = RepositoryPresentationSnapshot(files: [file], branches: [.init(name: "main", isCurrent: true, isRemote: false)], branch: "main",
+        let snapshot = RepositoryPresentationSnapshot(files: [file], branches: [.init(name: "main", isCurrent: true, isRemote: false)], remoteNames: ["origin"], branch: "main",
             stashes: [.init(ref: "stash@{0}", subject: "Saved", hash: "stash-hash")], commits: [commit], commitFiles: [.init(path: "file.txt", status: "M")],
             tree: [.init(path: "folder", isDirectory: true, children: [.init(path: "folder/file.txt", isDirectory: false, children: [])])],
             loadedCount: 1, hasMore: true, observedState: state, historyState: "history", mainHistoryHead: "abc", historyScope: ["scope"],
@@ -22,6 +22,7 @@ final class RepositoryPresentationCacheTests: XCTestCase {
         let loaded = try XCTUnwrap(result)
         XCTAssertEqual(loaded.files, [file]); XCTAssertEqual(loaded.commits, [commit])
         XCTAssertEqual(loaded.branch, "main"); XCTAssertEqual(loaded.branches, snapshot.branches)
+        XCTAssertEqual(loaded.remoteNames, ["origin"])
         XCTAssertEqual(loaded.stashes, snapshot.stashes); XCTAssertEqual(loaded.commitFiles, snapshot.commitFiles)
         XCTAssertEqual(loaded.observedState, state); XCTAssertEqual(loaded.mainHistoryHead, "abc")
         XCTAssertEqual(loaded.tree?.first?.children.first?.path, "folder/file.txt")
@@ -31,6 +32,15 @@ final class RepositoryPresentationCacheTests: XCTestCase {
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
         XCTAssertEqual(files.count, 1)
         XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: files[0].path)[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+    }
+
+    func testOlderSnapshotWithoutRemoteNamesStillDecodes() throws {
+        let snapshot = RepositoryPresentationSnapshot(branch: "main")
+        var payload = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(snapshot)) as? [String: Any])
+        payload.removeValue(forKey: "remoteNames")
+        let loaded = try JSONDecoder().decode(RepositoryPresentationSnapshot.self, from: JSONSerialization.data(withJSONObject: payload))
+        XCTAssertEqual(loaded.branch, "main")
+        XCTAssertNil(loaded.remoteNames)
     }
 
     func testCorruptionVersionAndRepositoryMismatchFallBackWithoutDeletingSource() async throws {
