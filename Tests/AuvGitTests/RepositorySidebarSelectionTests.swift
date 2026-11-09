@@ -4,6 +4,33 @@ import XCTest
 final class RepositorySidebarSelectionTests: XCTestCase {
     private let paths = ["first", "second", "third"]
 
+    func testOpeningNewProjectRetainsSelectionUntilItsRowIsRegistered() {
+        var selection = RepositorySidebarSelection()
+        selection.synchronize(primary: "cloned", orderedIDs: paths, reactivating: true)
+        XCTAssertTrue(selection.selected(primary: "cloned", orderedIDs: paths).isEmpty)
+
+        let registered = paths + ["cloned"]
+        selection.synchronize(primary: "cloned", orderedIDs: registered, reactivating: false)
+        XCTAssertEqual(selection.selected(primary: "cloned", orderedIDs: registered), ["cloned"],
+                       "Opening sets the pending path before the successful clone is added to the project list")
+        selection.click("second", current: "cloned", shift: true, command: false, orderedIDs: registered)
+        XCTAssertEqual(selection.selected(primary: "cloned", orderedIDs: registered), ["second", "third", "cloned"],
+                       "The newly registered project must also remain the range-selection anchor")
+    }
+
+    func testNewProjectIsHighlightedBeforeNavigationObserverRuns() {
+        var selection = RepositorySidebarSelection()
+        selection.synchronize(primary: nil, orderedIDs: paths, reactivating: true)
+        XCTAssertEqual(selection.selected(primary: "cloned", orderedIDs: paths + ["cloned"]), ["cloned"])
+    }
+
+    func testCommandClickCanDeselectTheActiveProject() {
+        var selection = RepositorySidebarSelection()
+        selection.synchronize(primary: "first", orderedIDs: paths, reactivating: true)
+        selection.click("first", current: "first", shift: false, command: true, orderedIDs: paths)
+        XCTAssertTrue(selection.selected(primary: "first", orderedIDs: paths).isEmpty)
+    }
+
     func testReturningToAProjectReplacesItsOutgoingSelectionOnFirstActivation() {
         var first = RepositorySidebarSelection()
         var second = RepositorySidebarSelection()

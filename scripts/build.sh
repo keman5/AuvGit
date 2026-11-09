@@ -22,7 +22,7 @@ if [[ "${1:-}" == --test-fetch-branches ]]; then
 fi
 if [[ "${1:-}" == --test-project-selection ]]; then
   # Selection models, unshown list hosts and disposable repositories only.
-  swift test --build-system native --filter 'RepositorySidebarScrollTests|RepositorySidebarSelectionTests|WorkspaceProjectsTests|ListRangeSelectionTests|WorktreeRepositoryStoreTests|RepositorySwitchLatencyTests.testLatestRepositoryClickWinsWhilePreviousOpenIsWaiting'
+  swift test --build-system native --filter 'RepositorySidebarScrollTests|RepositorySidebarSelectionTests|RepositoryCreationOperationTests|WorkspaceProjectsTests|ListRangeSelectionTests|WorktreeRepositoryStoreTests|RepositorySwitchLatencyTests.testLatestRepositoryClickWinsWhilePreviousOpenIsWaiting'
   exit
 fi
 if [[ "${1:-}" == --test-batch-stash-drop ]]; then

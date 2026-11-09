@@ -16,7 +16,7 @@ struct RepositorySidebarSelection {
     private var navigationPath: String?
 
     func selected(primary: String?, orderedIDs: [String]) -> Set<String> {
-        let selection = initialized ? range.ids : Set(primary.map { [$0] } ?? [])
+        let selection = initialized && primary == navigationPath ? range.ids : Set(primary.map { [$0] } ?? [])
         return selection.intersection(orderedIDs)
     }
 
@@ -30,7 +30,10 @@ struct RepositorySidebarSelection {
     mutating func synchronize(primary: String?, orderedIDs: [String], reactivating: Bool) {
         guard reactivating || primary != navigationPath else { return }
         range = .init()
-        range.synchronize(primary: primary, orderedIDs: orderedIDs)
+        // Opening publishes the pending path before registering a new project.
+        // Keep that selection and its anchor; selected() hides it until its row exists.
+        let pendingIDs = primary.map { orderedIDs.contains($0) ? [] : [$0] } ?? []
+        range.synchronize(primary: primary, orderedIDs: orderedIDs + pendingIDs)
         navigationPath = primary
         initialized = true
     }
@@ -133,10 +136,11 @@ struct RepositorySidebar: View {
                         DispatchQueue.main.async { focusedRepository = path }
                     }
                     .onReceive(NotificationCenter.default.publisher(for: .auvGitRepositoryCreated)) { event in
-                        guard let owner = event.object as? RepositoryStore, owner === store,
-                              let path = event.userInfo?["path"] as? String else { return }
+                        guard isActiveProject, let owner = event.object as? RepositoryStore,
+                              owner === store || (owner.workspaceProjects != nil && owner.workspaceProjects === store.workspaceProjects),
+                              let path = event.userInfo?["path"] as? String,
+                              path == store.highlightedRepositoryPath else { return }
                         proxy.scrollTo(path, anchor: .center)
-                        focusedRepository = path
                     }
                 }
             }.frame(minHeight: 130, idealHeight: 300)
