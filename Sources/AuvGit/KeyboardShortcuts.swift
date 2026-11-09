@@ -52,7 +52,7 @@ enum ShortcutCommand: String, CaseIterable {
         .filterFiles: ("Filter Files", "f", 1, [.files]),
         .selectCommittable: ("Select Committable Files", "a", 5, [.files]),
         .selectAllFiles: ("Select All Files", "a", 1, [.files]),
-        .copyFiles: ("Copy Files", "c", 1, [.files]),
+        .copyFiles: ("Copy Name", "c", 1, [.files]),
         .copyPath: ("Copy Path", "c", 5, [.files]),
         .copyRelativePath: ("Copy Relative Path", "c", 3, [.files]),
         .selectChildCommit: ("Select Child Commit", "Up", 4, [.history]),

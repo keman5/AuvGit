@@ -92,6 +92,6 @@
 "Shortcut conflicts with another enabled action or needs Command/Control." = "別の有効な操作と競合しているか、Command/Control が必要です。";
 
 "Select All Files" = "すべてのファイルを選択";
-"Copy Files" = "ファイルをコピー";
+"Copy Name" = "ファイル名をコピー";
 
 "Copy Commit Message" = "コミットメッセージをコピー";

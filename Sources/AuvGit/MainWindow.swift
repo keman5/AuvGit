@@ -999,7 +999,9 @@ extension MainWindow {
             case .selectAllFiles:
                 guard let shortcutWindow else { return false }
                 return fileFocus.selectAll(in: shortcutWindow)
-            case .copyFiles: fileAction(.copyFiles, selection)
+            case .copyFiles:
+                guard !selection.isEmpty else { return true }
+                fileAction(.copyName, selection)
             case .filterFiles, .showUnversionedFiles, .showIgnoredFiles: fileShortcutRequest = FilePaneShortcutRequest(command: command)
             case .selectCommittable: store.selectedPaths = WorkspaceFileActionTargets.paths(for: .stage, files: store.files, selection: [])
             case .copyPath: fileAction(.copyPath, selection)
