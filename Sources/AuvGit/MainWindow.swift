@@ -891,7 +891,7 @@ struct MainWindow: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(!store.canCommit)
             }
-        }.controlSize(.small).padding(12).background(AuvGitStyle.chrome)
+        }.controlSize(.small).padding(8).background(AuvGitStyle.chrome)
     }
     private func requestAICommit() {
         guard AICommitConfiguration.isConfigured else { showAISettings = true; return }
@@ -943,7 +943,7 @@ struct MainWindow: View {
                     .help(refinementText("Commit options")).disabled(store.isBusy)
             }
             CommitMessageEditor(text: $store.commitMessage, focused: Binding(get: { commitFocused }, set: { commitFocused = $0 }), placeholder: mainText("commitPlaceholder"))
-                .auvGitInputSurface().frame(minHeight: 80).disabled(store.pendingRepositoryPath != nil)
+                .auvGitInputSurface().frame(minHeight: 64).disabled(store.pendingRepositoryPath != nil)
 
         }
     }

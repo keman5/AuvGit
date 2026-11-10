@@ -52,16 +52,52 @@ struct CommitAvatar: View {
 
 struct CommitIdentityDetails: View {
     let commit: GitCommit
+    var compact = false
     @AppStorage("history.showAuthorAvatars") private var avatars = true
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            identity(name: commit.committer, email: commit.committerEmail, role: "Committer")
-            Text(historyRefinementText("Commit date") + ": " + HistoryCalendarDate.text(commit.committedDate)).font(.caption).foregroundStyle(.secondary)
+        Group {
+            if compact {
+                HStack(spacing: 6) {
+                    if avatars { CommitAvatar(email: commit.committerEmail, size: 20) }
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            compactName
+                            if !commit.committerEmail.isEmpty { compactEmail }
+                            compactDate
+                        }.fixedSize(horizontal: true, vertical: false)
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 8) {
+                                compactName
+                                Spacer(minLength: 0)
+                                compactDate.fixedSize()
+                            }
+                            if !commit.committerEmail.isEmpty { compactEmail }
+                        }
+                    }
+                }.font(.system(size: 11))
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    identity(name: commit.committer, email: commit.committerEmail, role: "Committer")
+                    Text(historyRefinementText("Commit date") + ": " + HistoryCalendarDate.text(commit.committedDate)).font(.caption).foregroundStyle(.secondary)
+                }
+            }
         }.textSelection(.enabled)
+    }
+    private var compactName: some View {
+        Text(commit.committer).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
+            .help(historyRefinementText("Committer") + ": " + commit.committer)
+    }
+    private var compactEmail: some View {
+        Text(commit.committerEmail).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            .help(commit.committerEmail)
+    }
+    private var compactDate: some View {
+        Text(HistoryCalendarDate.text(commit.committedDate)).foregroundStyle(.secondary)
+            .help(historyRefinementText("Commit date"))
     }
     private func identity(name: String, email: String, role: String) -> some View {
         HStack(alignment: .top, spacing: 8) {
-            if avatars { CommitAvatar(email: email, size: 28) }
+            if avatars { CommitAvatar(email: email, size: compact ? 22 : 28) }
             VStack(alignment: .leading, spacing: 2) {
                 Text(historyRefinementText(role) + ": " + name).font(.caption).fontWeight(.medium)
                 if !email.isEmpty { Text(email).font(.caption).foregroundStyle(.secondary) }

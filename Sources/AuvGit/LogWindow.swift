@@ -5,6 +5,16 @@ import GitCore
 import AuvGitLocalization
 
 func logText(_ key: String) -> String { L10n.text(key, table: "LogWindow") }
+enum LogCommitMessage {
+    static func body(_ commit: GitCommit) -> String {
+        let message = commit.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if message == commit.subject { return "" }
+        if message.hasPrefix(commit.subject + "\n") {
+            return String(message.dropFirst(commit.subject.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return message
+    }
+}
 extension Notification.Name { static let auvGitReuseCommitMessage = Notification.Name("AuvGitReuseCommitMessage") }
 
 extension GitCommitFile {
@@ -151,6 +161,7 @@ private struct LogWindowContent: View {
     @State private var refSearch = ""
     @State private var highlightedReference: String?
     @State private var referenceRange = ListSelectionState<String>()
+    @StateObject private var branchSelection = LogBranchSelection()
     @State private var fileRange = ListSelectionState<String>()
     @State private var tags: [ManagedTag] = []
     @State private var showOperationLog = false
@@ -169,22 +180,21 @@ private struct LogWindowContent: View {
         VStack(spacing: 0) {
             HSplitView {
                 referenceSidebar.frame(minWidth: 185, idealWidth: 220, maxWidth: 300)
-                VSplitView {
+                LogComparisonSplit(overview:
                     HSplitView {
                         HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch,
                             isLoading: store.loadingHistory, hasMore: store.hasMore,
                             onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy,
-                            onAction: historyAction, onShowChanges: { if let path = store.selectedCommitPath { compare(path) } }, showsDetails: false, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), visibleRemoteBranchNames: store.visibleHistoryRemoteBranchNames, currentBranch: store.branches.first { $0.isCurrent && !$0.isRemote }, localUnpushedCommitHashes: store.localUnpushedCommitHashes, navigationGeneration: store.historyNavigationGeneration, onJump: jump, authorFilter: $store.historyAuthor)
+                            onAction: historyAction, onShowChanges: { if let path = store.selectedCommitPath { compare(path) } }, showsDetails: false, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), visibleRemoteBranchNames: store.visibleHistoryRemoteBranchNames, currentBranch: store.branches.first { $0.isCurrent && !$0.isRemote }, localUnpushedCommitHashes: store.localUnpushedCommitHashes, navigationGeneration: branchSelection.navigationGeneration, onJump: jump, authorFilter: $store.historyAuthor)
                             .frame(minWidth: 520, minHeight: 270, idealHeight: 470)
                             .background { if let historyFocus { WorkspaceFileFocusRegion(focus: historyFocus) } }
                         VSplitView {
-                            commitMetadata.frame(minWidth: 270, minHeight: 145, idealHeight: 230)
+                            commitMetadata.frame(minWidth: 270, minHeight: 90, idealHeight: 120, maxHeight: 220)
                             changedFiles.frame(minWidth: 270, minHeight: 130, idealHeight: 220)
                         }.frame(minWidth: 270, idealWidth: 420, maxWidth: 580)
-                    }.frame(minHeight: 300, idealHeight: 500)
+                    }.frame(minHeight: 300, idealHeight: 500), comparison:
                     DiffPane(text: store.diffText, title: store.diffTitle, isLoading: store.loadingDiff, preview: store.staticPreview, leftRevisionTitle: store.diffLeftRevisionTitle, rightRevisionTitle: store.diffRightRevisionTitle)
-                        .frame(minHeight: 180, idealHeight: 290)
-                }
+                )
             }
             Divider()
             HStack(spacing: 10) {
@@ -205,6 +215,9 @@ private struct LogWindowContent: View {
                 if !store.branch.isEmpty { Label(store.branch, systemImage: "arrow.triangle.branch") }
             }.font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 12).frame(height: 28).auvGitChrome()
         }.background(AuvGitStyle.canvas).buttonBorderShape(.roundedRectangle(radius: 6)).environment(\.locale, L10n.locale)
+            .onDisappear { branchSelection.cancel() }
+            .onChange(of: store.checkedHistoryRefs) { _, _ in branchSelection.cancel() }
+            .onChange(of: store.historyNavigationGeneration) { _, _ in branchSelection.reset() }
             .onChange(of: store.selectedCommit) { _, _ in guard !store.isRestoringViewState else { return }; Task { await store.loadCommitFiles() } }
             .onChange(of: store.selectedCommitPath) { _, _ in guard !store.isRestoringViewState else { return }; Task { await store.loadDiff() } }
             .onChange(of: store.historySearch) { _, _ in guard !store.isRestoringViewState else { return }; store.scheduleSearch() }
@@ -232,7 +245,7 @@ private struct LogWindowContent: View {
             HStack { Image(systemName: "magnifyingglass").foregroundStyle(.secondary); StableTextField(logText("Filter references"), text: $refSearch, rounded: false) }
                 .font(.system(size: 12)).padding(8).auvGitInputSurface().padding(10)
             ScrollViewReader { proxy in
-            List(selection: ListSelectionState.binding($referenceRange, primary: $highlightedReference, orderedIDs: visibleReferenceIDs)) {
+            List(selection: referenceListSelection) {
                 scopeRow("HEAD", title: "HEAD", symbol: "arrow.triangle.branch")
                 scopeRow(HistoryBranchScope.recyclable, title: logText("Recyclable commits"), symbol: "arrow.uturn.backward")
                 Section(logText("Local branches")) { referenceRows(remote: false) }
@@ -266,6 +279,13 @@ private struct LogWindowContent: View {
         }.background(AuvGitStyle.sidebar)
     }
     private var referenceSelection: String { store.historyStashRef ?? HistoryReference.canonical(store.historyRef, branches: store.branches) ?? "" }
+    private var referenceListSelection: Binding<Set<String>> {
+        let selection = ListSelectionState.binding($referenceRange, primary: $highlightedReference, orderedIDs: visibleReferenceIDs)
+        return Binding(get: { selection.wrappedValue }, set: { references in
+            selection.wrappedValue = references
+            branchSelection.select(references, in: store)
+        })
+    }
     private var visibleReferenceIDs: [String] {
         ["HEAD", HistoryBranchScope.recyclable]
         + [false, true].flatMap { remote in
@@ -291,26 +311,15 @@ private struct LogWindowContent: View {
     }
     private func scopeRow(_ ref: String, title: String, symbol: String) -> some View {
         HStack(spacing: 6) {
-            Toggle("", isOn: Binding(get: { HistoryBranchScope.isChecked(ref, in: store.checkedHistoryRefs ?? []) }, set: { store.setHistoryBranchChecked(ref, checked: $0) }))
-                .labelsHidden().toggleStyle(.checkbox).accessibilityLabel(title)
+            LogScopeCheckbox(title: title, isOn: Binding(get: { HistoryBranchScope.isChecked(ref, in: store.checkedHistoryRefs ?? []) }, set: { store.setHistoryBranchChecked(ref, checked: $0) }))
+                .frame(width: 22, height: 24)
             Label(title, systemImage: symbol).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
         }.contentShape(Rectangle()).tag(ref).id(ref).help(ref)
     }
     private var commitMetadata: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            AuvGitPaneHeader(title: logText("Commit"), systemImage: "info.circle")
-            if let commit {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(commit.subject).font(.system(size: 13, weight: .semibold)).textSelection(.enabled)
-                        Text(commit.hash).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
-                        CommitIdentityDetails(commit: commit)
-                        if !commit.parents.isEmpty { Text(logText("Parents") + ": " + commit.parents.map { String($0.prefix(10)) }.joined(separator: ", ")).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled) }
-                        Divider()
-                        Text(commit.body.isEmpty ? commit.subject : commit.body).font(.system(size: 12)).textSelection(.enabled)
-                    }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                }
-            } else { AuvGitEmptyState(title: logText("Select a commit"), systemImage: "clock.arrow.circlepath") }
+        Group {
+            if let commit { LogCommitMetadata(commit: commit) }
+            else { AuvGitEmptyState(title: logText("Select a commit"), systemImage: "clock.arrow.circlepath") }
         }.background(AuvGitStyle.canvas)
     }
     private var changedFiles: some View {

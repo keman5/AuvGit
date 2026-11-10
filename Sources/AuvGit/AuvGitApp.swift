@@ -519,7 +519,7 @@ final class RepositoryStore: ObservableObject {
     private var selectFirstHistoryCommit = false
     private var historyMemoryCache: [String: HistoryMemorySnapshot] = [:]
     private var loadedHistoryScope: [String]?
-    private var currentHistoryScope: [String] {
+    var currentHistoryScope: [String] {
         [historySearch, historyAuthor, String(describing: historyPath), String(describing: historyRef),
          String(describing: historyPinnedCommit), String(describing: historyStashHash), String(showMergedCommits)]
         + (checkedHistoryRefs?.sorted() ?? [])

@@ -5,9 +5,14 @@ caffeinate -di -w $$ &
 BUILD_CAFFEINATE_PID=$!
 trap 'kill "$BUILD_CAFFEINATE_PID" 2>/dev/null || true' EXIT
 if command -v go >/dev/null 2>&1; then go clean -cache; fi
+if [[ "${1:-}" == --test-log-layout ]]; then
+  # Unshown component hosts only. Never activate or order a test window in front.
+  swift test --build-system native --filter "${AUVGIT_LOG_LAYOUT_TEST_FILTER:-LogLayoutAndSelectionTests|WorkspaceSplitLayoutTests|NativeFocusAppearanceTests|NativeBranchTableTests|WorkspaceNativeFilesTableTests|WorkspaceTreeRenderingTests|LogFileSortingTests}"
+  exit
+fi
 if [[ "${1:-}" == --test-log-branch-selection ]]; then
   # Model fixtures only; never activate the app or present a test window.
-  swift test --build-system native --filter 'LogBranchSelectionTests|HistoryRemoteScopeTests|MainHistoryScopeTests|HistoryBranchUnionTests|HistoryScopeAndDateTests|ListRangeSelectionTests'
+  swift test --build-system native --filter 'LogBranchNavigationTests|LogBranchSelectionTests|HistoryRemoteScopeTests|MainHistoryScopeTests|HistoryBranchUnionTests|HistoryScopeAndDateTests|ListRangeSelectionTests'
   exit
 fi
 if [[ "${1:-}" == --test-configured-remotes ]]; then

@@ -26,6 +26,7 @@ final class NativeFocusAppearance: ObservableObject {
     }
     private var rings: [ObjectIdentifier: Ring] = [:]
     private var applicationPending = false
+    private let listSelection = PersistentListSelection()
 
     static func forWindow(_ window: NSWindow) -> NativeFocusAppearance {
         if let existing = windows.object(forKey: window) { return existing }
@@ -167,10 +168,12 @@ final class NativeFocusAppearance: ObservableObject {
     }
 
     func apply() {
-        guard let content = window?.contentView else { return }
+        guard let window, let content = window.contentView else { return }
+        listSelection.retainRows(in: window)
         rings = rings.filter { $0.value.view?.window === window }
         func visit(_ view: NSView) {
             guard !view.isHidden else { return }
+            if let row = view as? NSTableRowView { listSelection.register(row) }
             let id = ObjectIdentifier(view)
             if rings[id] == nil {
                 let original = Self.originalRings.object(forKey: view).flatMap { NSFocusRingType(rawValue: $0.uintValue) } ?? view.focusRingType
