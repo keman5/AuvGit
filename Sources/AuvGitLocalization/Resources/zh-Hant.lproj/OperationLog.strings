@@ -89,3 +89,5 @@
 "Finish or abort the current merge before continuing" = "請先完成或中止目前的合併，再繼續操作。";
 "The tracked remote branch is unavailable. Fetch and choose an existing tracking branch." = "所追蹤的遠端分支已無法使用。請先擷取，再選擇現有的遠端追蹤分支。";
 "Branch or upstream changed. Fetch again before setting a tracking branch." = "目前分支或上游關聯已變更，請重新擷取後再設定追蹤分支。";
+
+"Remote branch changed; fetch updates and confirm deletion again" = "遠端分支已更新，請擷取更新後重新確認刪除";

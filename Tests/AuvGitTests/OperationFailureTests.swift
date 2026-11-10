@@ -5,6 +5,17 @@ import AuvGitLocalization
 
 final class OperationFailureTests: XCTestCase {
     @MainActor
+    func testRemoteDeletionUsesDeletionGuidanceInsteadOfForcePushGuidance() {
+        let previous = UserDefaults.standard.object(forKey: L10n.preferenceKey)
+        defer { UserDefaults.standard.set(previous, forKey: L10n.preferenceKey) }
+        let key = "Remote branch changed; fetch updates and confirm deletion again"
+        for language in ["en", "zh-Hans", "zh-Hant", "ja"] {
+            UserDefaults.standard.set(language, forKey: L10n.preferenceKey)
+            XCTAssertEqual(OperationFailure.message(GitError(key + "\n[rejected] (stale info)")), L10n.text(key, table: "OperationLog"))
+            if language != "en" { XCTAssertNotEqual(L10n.text(key, table: "OperationLog"), key) }
+        }
+    }
+    @MainActor
     func testMergeDialogTranslatesButOperationLogKeepsOriginalDiagnostic() {
         let previous = UserDefaults.standard.object(forKey: L10n.preferenceKey)
         defer { UserDefaults.standard.set(previous, forKey: L10n.preferenceKey) }

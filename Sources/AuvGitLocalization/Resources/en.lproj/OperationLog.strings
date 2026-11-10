@@ -89,3 +89,5 @@
 "Finish or abort the current merge before continuing" = "Finish or abort the current merge before continuing";
 "The tracked remote branch is unavailable. Fetch and choose an existing tracking branch." = "The tracked remote branch is unavailable. Fetch and choose an existing tracking branch.";
 "Branch or upstream changed. Fetch again before setting a tracking branch." = "Branch or upstream changed. Fetch again before setting a tracking branch.";
+
+"Remote branch changed; fetch updates and confirm deletion again" = "Remote branch changed; fetch updates and confirm deletion again";

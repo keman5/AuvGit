@@ -154,6 +154,7 @@ public enum GitFailureSummary {
         if text.contains("you have not concluded your merge") { return "Finish or abort the current merge before continuing" }
         if text.contains("finish or abort the active git operation before resetting") { return "Finish or abort the active Git operation before resetting" }
         if text.contains("repository or head changed. reopen the reset confirmation.") { return "Repository or HEAD changed. Reopen the reset confirmation." }
+        if text.hasPrefix("remote branch changed; fetch updates and confirm deletion again") { return "Remote branch changed; fetch updates and confirm deletion again" }
         if text.contains("stale info") { return "Remote changed; preview and confirm force push again" }
         if text.contains("branch or push configuration changed") { return "Branch or push configuration changed; preview and confirm force push again" }
         if text.contains("[remote rejected]") || text.split(separator: "\n").contains(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("remote: error:") }) { return "Remote rejected the push" }

@@ -163,8 +163,88 @@ final class GitInteractionTests: XCTestCase {
         _ = try await GitProcess.run(at: bare, arguments: ["fetch", url.path, "main:refs/heads/topic"])
         let tracking = try await repo.workflowRevision("refs/remotes/custom/topic")
         XCTAssertEqual(tracking, original)
-        await rejected { try await repo.deleteRemoteBranch(reference: "refs/remotes/custom/topic") }
+        do {
+            try await repo.deleteRemoteBranch(reference: "refs/remotes/custom/topic")
+            XCTFail("Deletion must refuse unseen server commits")
+        } catch {
+            XCTAssertEqual(GitFailureSummary.key(for: error.localizedDescription), "Remote branch changed; fetch updates and confirm deletion again")
+        }
         let head = try await GitProcess.run(at: bare, arguments: ["rev-parse", "refs/heads/topic"]).text.trimmingCharacters(in: .newlines)
         XCTAssertEqual(head, newHash)
+    }
+    func testRemoteDeletionCleansAlreadyDeletedTrackingRefAndPreservesLocalBranch() async throws {
+        let (url, repo) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let bare = url.appendingPathComponent("remote.git")
+        _ = try await GitProcess.run(at: url, arguments: ["init", "--bare", bare.path])
+        try write("base", "base", at: url); try await repo.stage(paths: ["base"]); try await repo.commit(message: "base")
+        _ = try await repo.workflowRead(["remote", "add", "team", bare.path])
+        _ = try await repo.workflowRead(["config", "remote.team.fetch", "+refs/heads/*:refs/remotes/custom/*"])
+        _ = try await repo.workflowRead(["push", "team", "HEAD:refs/heads/topic"])
+        _ = try await repo.workflowRead(["fetch", "team"])
+        let original = try await repo.workflowRevision("HEAD")
+        _ = try await GitProcess.run(at: bare, arguments: ["update-ref", "-d", "refs/heads/topic"])
+        try await repo.deleteRemoteBranch(reference: "refs/remotes/custom/topic")
+        let refs = try await repo.workflowRead(["for-each-ref", "--format=%(refname)", "refs/remotes/custom/topic"])
+        XCTAssertTrue(refs.isEmpty)
+        let local = try await repo.workflowRevision("refs/heads/main")
+        XCTAssertEqual(local, original)
+    }
+    func testRemoteDeletionChecksPushEndpointInsteadOfFetchEndpoint() async throws {
+        let (url, repo) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let fetchURL = url.appendingPathComponent("fetch.git"), pushURL = url.appendingPathComponent("push.git")
+        for remote in [fetchURL, pushURL] { _ = try await GitProcess.run(at: url, arguments: ["init", "--bare", remote.path]) }
+        try write("base", "base", at: url); try await repo.stage(paths: ["base"]); try await repo.commit(message: "base")
+        _ = try await repo.workflowRead(["remote", "add", "team", fetchURL.path])
+        _ = try await repo.workflowRead(["push", "team", "HEAD:refs/heads/topic"])
+        _ = try await repo.workflowRead(["fetch", "team"])
+        _ = try await repo.workflowRead(["push", pushURL.path, "HEAD:refs/heads/topic"])
+        _ = try await repo.workflowRead(["config", "remote.team.pushurl", pushURL.path])
+        _ = try await GitProcess.run(at: fetchURL, arguments: ["update-ref", "-d", "refs/heads/topic"])
+        try await repo.deleteRemoteBranch(reference: "refs/remotes/team/topic")
+        let heads = try await GitProcess.run(at: pushURL, arguments: ["for-each-ref", "--format=%(refname)", "refs/heads/topic"]).text
+        XCTAssertTrue(heads.isEmpty)
+    }
+    func testRemoteDeletionLeaseRejectsCommitArrivingAfterPreflight() async throws {
+        let (url, repo) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let bare = url.appendingPathComponent("remote.git")
+        _ = try await GitProcess.run(at: url, arguments: ["init", "--bare", bare.path])
+        try write("base", "base", at: url); try await repo.stage(paths: ["base"]); try await repo.commit(message: "base")
+        _ = try await repo.workflowRead(["remote", "add", "team", bare.path])
+        _ = try await repo.workflowRead(["push", "team", "HEAD:refs/heads/topic"])
+        _ = try await repo.workflowRead(["fetch", "team"])
+        let original = try await repo.workflowRevision("HEAD")
+        try write("next", "base", at: url); try await repo.stage(paths: ["base"]); try await repo.commit(message: "next")
+        let next = try await repo.workflowRevision("HEAD")
+        _ = try await GitProcess.run(at: bare, arguments: ["fetch", url.path, "main"])
+        try write(next, ".git/advance-to", at: url)
+        let wrapper = url.appendingPathComponent("git-wrapper")
+        try """
+        #!/bin/sh
+        for arg in "$@"; do
+          if [ "$arg" = push ]; then
+            /usr/bin/git --git-dir=remote.git update-ref refs/heads/topic "$(cat .git/advance-to)" || exit 1
+            break
+          fi
+        done
+        exec /usr/bin/git "$@"
+        """.write(to: wrapper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
+        let defaults = UserDefaults.standard, key = "auvgit.git.executablePath", previous = defaults.object(forKey: key)
+        defaults.set(wrapper.path, forKey: key)
+        defer { if let previous { defaults.set(previous, forKey: key) } else { defaults.removeObject(forKey: key) } }
+        do {
+            try await repo.deleteRemoteBranch(reference: "refs/remotes/team/topic")
+            XCTFail("Deletion must retain the lease after preflight")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("stale info"))
+            XCTAssertEqual(GitFailureSummary.key(for: error.localizedDescription), "Remote branch changed; fetch updates and confirm deletion again")
+        }
+        let server = try await GitProcess.run(at: bare, arguments: ["rev-parse", "refs/heads/topic"]).text.trimmingCharacters(in: .newlines)
+        XCTAssertEqual(server, next)
+        let tracking = try await repo.workflowRevision("refs/remotes/team/topic")
+        XCTAssertEqual(tracking, original)
     }
 }

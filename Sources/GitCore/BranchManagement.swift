@@ -43,11 +43,33 @@ public extension GitRepository {
         if let credential { lease = try NetworkCredentialLease(endpoint: try await remoteAuthenticationTarget(for: .push, remoteName: target.remote).endpoint, credential: credential) }
         else { lease = nil }
         defer { lease?.remove() }
-        // The lease refuses deletion if new commits arrived after our last fetch.
+        // Query the push endpoint: fetch and push URLs may refer to different servers.
         _ = try await GitCommandLog.$privateCredentials.withValue(lease?.privateValues ?? []) {
-            try await GitProcess.run(at: url, arguments: (lease?.gitArguments ?? NetworkAuthentication.arguments) +
-                ["push", "--porcelain", "--force-with-lease=" + target.branch + ":" + hash, "--", target.remote, ":" + target.branch],
+            let authentication = lease?.gitArguments ?? NetworkAuthentication.arguments
+            let advertised = try await GitProcess.run(at: url, arguments: authentication +
+                ["ls-remote", "--refs", "--", String(urls[0]), target.branch],
                 environmentOverrides: lease?.environment ?? [:])
+            let serverHash = advertised.text.split(separator: "\n").compactMap { line -> String? in
+                let fields = line.split(whereSeparator: { $0.isWhitespace })
+                return fields.count == 2 && fields[1] == target.branch ? String(fields[0]) : nil
+            }.first
+            if serverHash == nil {
+                // Already deleted on the server. Remove only the unchanged local tracking ref.
+                return try await GitProcess.run(at: url, arguments: ["update-ref", "--no-deref", "-d", reference, hash])
+            }
+            let changedMessage = "Remote branch changed; fetch updates and confirm deletion again"
+            guard serverHash == hash else { throw GitError(changedMessage) }
+            // Keep the lease: a commit can still arrive between this read and the push.
+            do {
+                return try await GitProcess.run(at: url, arguments: authentication +
+                    ["push", "--porcelain", "--force-with-lease=" + target.branch + ":" + hash, "--", target.remote, ":" + target.branch],
+                    environmentOverrides: lease?.environment ?? [:])
+            } catch {
+                if error.localizedDescription.lowercased().contains("stale info") {
+                    throw GitError(changedMessage + "\n" + error.localizedDescription)
+                }
+                throw error
+            }
         }
     }
 }
