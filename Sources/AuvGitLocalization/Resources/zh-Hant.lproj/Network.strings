@@ -55,3 +55,14 @@
 "firstPushHint" = "此本機分支尚未關聯遠端。請選擇已有遠端分支或輸入新分支名；確認後立即推送，成功後建立追蹤關係。";
 "chooseExistingBranch" = "選擇已有分支";
 "firstPushDestination" = "推送目標：";
+"fetchResultTitle" = "擷取結果";
+"fetchBranchCounts" = "遠端分支：新增 %d 個，更新 %d 個，清理失效追蹤記錄 %d 個。";
+"fetchNoChanges" = "遠端追蹤記錄沒有變化。本機分支和工作區檔案未被修改。";
+"fetchAdded" = "新增";
+"fetchUpdated" = "更新";
+"fetchPruned" = "已清理追蹤記錄";
+"fetchMissingUpstream" = "本機分支 %@ 仍追蹤 %@，但遠端已不再提供該分支。本次擷取成功，拉取仍會失敗，請選擇有效的遠端追蹤分支。本機分支更名不會自動更新上游關聯。";
+"fetchUpstreamCheckFailed" = "擷取已完成，但無法核實目前上游分支是否存在。請在拉取前重新擷取。";
+"fetchNoTrackingCandidates" = "沒有可供追蹤的現有遠端分支。請檢查遠端儲存庫後重新擷取。";
+"fetchChooseTracking" = "選擇遠端追蹤分支";
+"fetchTrackingOnly" = "僅修改上游關聯，不會拉取、推送、重定基底或改動本機檔案。";

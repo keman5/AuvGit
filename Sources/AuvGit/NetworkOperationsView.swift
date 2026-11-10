@@ -22,6 +22,7 @@ struct NetworkOperationsView: View {
     @State private var keychainConfirm = false
     @State private var pullPrompt: PullOperationPrompt?
     @State private var pullResultNotice: PullResultNotice?
+    @State private var fetchResult: FetchResultPrompt?
     @State private var forcePushPrompt: ForcePushPrompt?
     @State private var firstPushPrompt: FirstBranchPushPrompt?
     @State private var preflightPrompt: NetworkPreflightPrompt?
@@ -199,6 +200,12 @@ struct NetworkOperationsView: View {
                 AuvGitAlertButton(networkText("close"), role: .cancel) { pullResultNotice = nil }
             ])
         }
+        .auvGitSheet(item: $fetchResult, focusesOnPresentation: false) { prompt in
+            FetchResultSheet(store: store, prompt: prompt) {
+                fetchResult = nil
+                Task { await loadRepositoryContext() }
+            }
+        }
         .auvGitSheet(item: $forcePushPrompt) { prompt in
             ForcePushConfirmation(preview: prompt.preview) { forcePushPrompt = nil } execute: {
                 forcePushPrompt = nil
@@ -320,6 +327,10 @@ struct NetworkOperationsView: View {
                 }
                 let result = try await repository.runNetwork(operation, credential: credential, progress: { _ in })
                 output = result.output + "\n" + networkText("completed")
+                if let outcome = result.fetchOutcome, store.repository === repository {
+                    output = FetchResultNotice(outcome: outcome).message + "\n\n" + result.output
+                    fetchResult = FetchResultPrompt(repository: repository, outcome: outcome)
+                }
                 if let outcome = result.pullOutcome, outcome.needsNotice, store.repository === repository {
                     pullResultNotice = PullResultNotice(outcome: outcome)
                 }

@@ -41,8 +41,9 @@ final class ProgressLines: @unchecked Sendable {
 public struct NetworkOperationResult: Sendable {
     public let output: String
     public let pullOutcome: PullOperationOutcome?
-    public init(output: String, pullOutcome: PullOperationOutcome? = nil) {
-        self.output = output; self.pullOutcome = pullOutcome
+    public let fetchOutcome: FetchOperationOutcome?
+    public init(output: String, pullOutcome: PullOperationOutcome? = nil, fetchOutcome: FetchOperationOutcome? = nil) {
+        self.output = output; self.pullOutcome = pullOutcome; self.fetchOutcome = fetchOutcome
     }
 }
 public struct CredentialConfiguration: Sendable {
@@ -98,6 +99,7 @@ extension GitRepository {
         case .pushPreview: args = ["push", "--dry-run", "--porcelain", "--progress"]
         case .push: args = ["push", "--porcelain", "--progress"]
         }
+        let before = operation == .fetch ? try await fetchTrackingSnapshot(remote: remoteName) : nil
         let lease: NetworkCredentialLease?
         if let credential {
             lease = try NetworkCredentialLease(endpoint: try await remoteAuthenticationTarget(for: operation, remoteName: remoteName).endpoint, credential: credential)
@@ -112,7 +114,10 @@ extension GitRepository {
             }
             let output = try await GitProcess.run(at: url, arguments: (lease?.gitArguments ?? NetworkAuthentication.arguments) + args,
                                      progress: { lines.accept($0) }, environmentOverrides: lease?.environment ?? [:])
-            return NetworkOperationResult(output: GitProgressParser.redact(output.text + (output.error.isEmpty ? "" : "\n" + output.error)))
+            let outcome: FetchOperationOutcome?
+            if let before { outcome = try await fetchOutcome(before: before, remote: remoteName, credential: credential) }
+            else { outcome = nil }
+            return NetworkOperationResult(output: GitProgressParser.redact(output.text + (output.error.isEmpty ? "" : "\n" + output.error)), fetchOutcome: outcome)
         }
         return result
     }

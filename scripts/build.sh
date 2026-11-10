@@ -22,7 +22,7 @@ if [[ "${1:-}" == --test-interaction-latency ]]; then
 fi
 if [[ "${1:-}" == --test-fetch-branches ]]; then
   # Disposable repositories and unshown tables only; never activate a window.
-  swift test --build-system native --filter "${AUVGIT_FETCH_BRANCHES_TEST_FILTER:-FetchRemoteBranchesTests|NativeBranchTableTests|RemoteAuthenticationTests|GitProcessTests|PullRecoveryTests|NetworkAuthenticationPolicyTests}"
+  swift test --build-system native --filter "${AUVGIT_FETCH_BRANCHES_TEST_FILTER:-FetchOutcomeTests|FetchResultNoticeTests|FetchRemoteBranchesTests|NativeBranchTableTests|RemoteAuthenticationTests|GitProcessTests|PullRecoveryTests|NetworkAuthenticationPolicyTests|OperationFailureTests|GitCommandLogTests}"
   exit
 fi
 if [[ "${1:-}" == --test-project-selection ]]; then

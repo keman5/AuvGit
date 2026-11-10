@@ -49,6 +49,7 @@ struct MainWindow: View {
     @State private var trackingRepository: GitRepository?
     @State private var selectedUpstream = ""
     @State private var pullPrompt: PullOperationPrompt?
+    @State private var fetchResult: FetchResultPrompt?
     @State private var forcePushPrompt: ForcePushPrompt?
     @State private var firstPushPrompt: FirstBranchPushPrompt?
     @State private var mergeAction: MergeActionPrompt?
@@ -460,6 +461,9 @@ struct MainWindow: View {
                 runToolbarNetwork(operation, remoteName: prompt.remoteName)
             }
         }
+        .auvGitSheet(item: $fetchResult, focusesOnPresentation: false) { prompt in
+            FetchResultSheet(store: store, prompt: prompt) { fetchResult = nil }
+        }
         .auvGitSheet(item: $forcePushPrompt) { prompt in
             ForcePushConfirmation(preview: prompt.preview) { forcePushPrompt = nil } execute: {
                 forcePushPrompt = nil
@@ -608,8 +612,14 @@ struct MainWindow: View {
                             confirmation = PendingAction(title: networkText("pullRecoveryTitle"), message: PullResultNotice(outcome: outcome).message, action: {}, informational: true)
                         }
                     }
-                    else if let remoteName { try await active.fetchAllRemoteBranches(remote: remoteName, credential: credential) }
-                    else { _ = try await active.runNetwork(.fetch, credential: credential, progress: { _ in }) }
+                    else {
+                        let outcome: FetchOperationOutcome?
+                        if let remoteName { outcome = try await active.fetchAllRemoteBranches(remote: remoteName, credential: credential) }
+                        else { outcome = try await active.runNetwork(.fetch, credential: credential, progress: { _ in }).fetchOutcome }
+                        if let outcome, store.repository === active {
+                            fetchResult = FetchResultPrompt(repository: active, outcome: outcome)
+                        }
+                    }
                 }
                 await saveToolbarCredentialAfterSuccess(credential, requested: saveCredential, repository: active, operation: operation, remoteName: remoteName)
             }

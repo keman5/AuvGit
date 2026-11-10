@@ -55,3 +55,14 @@
 "firstPushHint" = "此本地分支尚未关联远端。请选择已有远端分支或输入新分支名；确认后立即推送，成功后建立跟踪关系。";
 "chooseExistingBranch" = "选择已有分支";
 "firstPushDestination" = "推送目标：";
+"fetchResultTitle" = "获取结果";
+"fetchBranchCounts" = "远端分支：新增 %d 个，更新 %d 个，清理失效跟踪记录 %d 个。";
+"fetchNoChanges" = "远端跟踪记录没有变化。本地分支和工作区文件未被修改。";
+"fetchAdded" = "新增";
+"fetchUpdated" = "更新";
+"fetchPruned" = "已清理跟踪记录";
+"fetchMissingUpstream" = "本地分支 %@ 仍跟踪 %@，但远端已不再提供该分支。本次获取成功，拉取仍会失败，请选择有效的远端跟踪分支。本地分支改名不会自动更新上游关联。";
+"fetchUpstreamCheckFailed" = "获取已完成，但无法核实当前上游分支是否存在。请在拉取前重新获取。";
+"fetchNoTrackingCandidates" = "没有可供跟踪的现有远端分支。请检查远程仓库后重新获取。";
+"fetchChooseTracking" = "选择远端跟踪分支";
+"fetchTrackingOnly" = "只修改上游关联，不会拉取、推送、变基或改动本地文件。";

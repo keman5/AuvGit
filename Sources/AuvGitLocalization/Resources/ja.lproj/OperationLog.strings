@@ -87,3 +87,5 @@
 "Resolve the existing local conflicts before pulling." = "既存のローカル競合を解決してからプルしてください。";
 "Finish the current merge, rebase, cherry-pick or revert before pulling." = "現在のマージ、リベース、チェリーピック、またはリバートを完了または中止してからプルしてください。";
 "Finish or abort the current merge before continuing" = "現在のマージを完了または中止してから続行してください。";
+"The tracked remote branch is unavailable. Fetch and choose an existing tracking branch." = "追跡中のリモートブランチを利用できません。フェッチして既存の追跡ブランチを選択してください。";
+"Branch or upstream changed. Fetch again before setting a tracking branch." = "ブランチまたは上流が変更されました。再度フェッチしてから追跡ブランチを設定してください。";

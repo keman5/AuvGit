@@ -55,3 +55,14 @@
 "firstPushHint" = "This local branch has no upstream. Choose an existing remote branch or enter a new name. Confirming pushes immediately and saves tracking after success.";
 "chooseExistingBranch" = "Existing branches";
 "firstPushDestination" = "Destination:";
+"fetchResultTitle" = "Fetch Result";
+"fetchBranchCounts" = "Remote branches: %d added, %d updated, %d stale tracking records removed.";
+"fetchNoChanges" = "No remote-tracking changes. Local branches and workspace files were not changed.";
+"fetchAdded" = "Added";
+"fetchUpdated" = "Updated";
+"fetchPruned" = "Removed tracking records";
+"fetchMissingUpstream" = "Local branch %@ still tracks %@, but that branch is no longer advertised by the remote. Fetch succeeded, but pulling will still fail until you select a valid tracking branch. Renaming a local branch does not update its upstream.";
+"fetchUpstreamCheckFailed" = "Fetch succeeded, but the current upstream could not be verified. Fetch again before pulling.";
+"fetchNoTrackingCandidates" = "No available remote branch was found for tracking. Check the remote repository and fetch again.";
+"fetchChooseTracking" = "Choose a tracking branch";
+"fetchTrackingOnly" = "This only changes the upstream setting. It does not pull, push, rebase, or change local files.";

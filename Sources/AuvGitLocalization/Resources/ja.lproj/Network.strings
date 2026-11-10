@@ -55,3 +55,14 @@
 "firstPushHint" = "このローカルブランチには上流がありません。既存ブランチを選ぶか新しい名前を入力してください。確認後すぐ push し、成功後に追跡を設定します。";
 "chooseExistingBranch" = "既存のブランチ";
 "firstPushDestination" = "送信先：";
+"fetchResultTitle" = "フェッチ結果";
+"fetchBranchCounts" = "リモートブランチ：追加 %d、更新 %d、削除した古い追跡レコード %d。";
+"fetchNoChanges" = "リモート追跡レコードに変更はありません。ローカルブランチと作業ファイルは変更されていません。";
+"fetchAdded" = "追加";
+"fetchUpdated" = "更新";
+"fetchPruned" = "削除した追跡レコード";
+"fetchMissingUpstream" = "ローカルブランチ %@ は引き続き %@ を追跡していますが、リモートはそのブランチを提供していません。フェッチは成功しましたが、有効な追跡ブランチを選ぶまでプルは失敗します。ローカルブランチの改名では上流は更新されません。";
+"fetchUpstreamCheckFailed" = "フェッチは完了しましたが、現在の上流を確認できませんでした。プルの前に再度フェッチしてください。";
+"fetchNoTrackingCandidates" = "追跡可能なリモートブランチが見つかりません。リモートリポジトリを確認して再度フェッチしてください。";
+"fetchChooseTracking" = "追跡ブランチを選択";
+"fetchTrackingOnly" = "上流の設定のみを変更します。プル、プッシュ、リベースやローカルファイルの変更は行いません。";

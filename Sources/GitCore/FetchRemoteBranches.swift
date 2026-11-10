@@ -2,13 +2,17 @@ import Foundation
 
 public extension GitRepository {
     /// Fetch every head, including branches excluded by a single-branch clone.
-    func fetchAllRemoteBranches(remote: String, credential: NetworkCredential? = nil) async throws {
+    @discardableResult
+    func fetchAllRemoteBranches(remote: String, credential: NetworkCredential? = nil) async throws -> FetchOperationOutcome {
+        let before = try await fetchTrackingSnapshot(remote: remote)
         let refspec = "+refs/heads/*:refs/remotes/" + remote + "/*"
         _ = try await runRemoteBranchCommand(remote: remote, arguments: [
-            "fetch", "--atomic", "--progress", "--no-prune", "--no-tags", "--no-recurse-submodules", "--refmap=", "--", remote, refspec
+            "fetch", "--atomic", "--progress", GitRuntimePreferences.shared.fetchPrune ? "--prune" : "--no-prune",
+            "--no-tags", "--no-recurse-submodules", "--refmap=", "--", remote, refspec
         ], credential: credential)
         // Persist only after a successful fetch so later ordinary fetches include new branches.
         _ = try await workflowRead(["config", "--local", "--replace-all", "remote." + remote + ".fetch", refspec])
+        return try await fetchOutcome(before: before, remote: remote, credential: credential)
     }
 
     /// Advertised heads absent from this remote's conventional tracking namespace.
@@ -48,7 +52,7 @@ public extension GitRepository {
         }
     }
 
-    private func runRemoteBranchCommand(remote: String, arguments: [String], credential: NetworkCredential?) async throws -> GitOutput {
+    internal func runRemoteBranchCommand(remote: String, arguments: [String], credential: NetworkCredential?) async throws -> GitOutput {
         let remotes = try await workflowRead(["remote"]).split(separator: "\n").map(String.init)
         guard remotes.contains(remote), !remote.hasPrefix("-"), !remote.contains("\0") else { throw GitError("Invalid remote name") }
         let lease: NetworkCredentialLease?

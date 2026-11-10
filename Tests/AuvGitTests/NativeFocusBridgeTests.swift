@@ -16,6 +16,7 @@ final class NativeFocusBridgeTests: XCTestCase {
         drain(host)
         func buttons(_ view: NSView) -> [NSButton] { (view as? NSButton).map { [$0] } ?? view.subviews.flatMap(buttons) }
         let checkbox = try XCTUnwrap(buttons(host).first { $0.title == workflowText("Include untracked files") })
+        XCTAssertEqual(checkbox.state, .on, "New commit dialogs include untracked files by default")
         let initialFont = try XCTUnwrap(checkbox.font)
         let initialSize = checkbox.intrinsicContentSize
         XCTAssertTrue(checkbox.canBecomeKeyView)
@@ -30,11 +31,11 @@ final class NativeFocusBridgeTests: XCTestCase {
         let space = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
             windowNumber: window.windowNumber, context: nil, characters: " ", charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49))
         checkbox.keyDown(with: space); drain(host)
-        XCTAssertEqual(checkbox.state, .on)
+        XCTAssertEqual(checkbox.state, .off)
         XCTAssertEqual(checkbox.font, initialFont, "Checking must not change the label font")
         XCTAssertEqual(checkbox.intrinsicContentSize, initialSize, "Checking must not resize the control")
         checkbox.keyDown(with: space); drain(host)
-        XCTAssertEqual(checkbox.state, .off)
+        XCTAssertEqual(checkbox.state, .on)
         XCTAssertEqual(checkbox.font, initialFont, "Unchecking must restore only state, not change typography")
         XCTAssertEqual(checkbox.intrinsicContentSize, initialSize)
     }

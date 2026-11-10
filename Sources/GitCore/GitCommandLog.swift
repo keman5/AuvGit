@@ -170,6 +170,12 @@ public enum GitFailureSummary {
         }
         if text.contains("could not read username") || text.contains("authentication failed") || text.contains("askpass") { return "Authentication required" }
         if text.contains("permission denied (publickey)") { return "SSH authentication failed" }
+        if text.contains("couldn't find remote ref") || text.contains("no such ref was fetched") {
+            return "The tracked remote branch is unavailable. Fetch and choose an existing tracking branch."
+        }
+        if text.contains("branch or upstream changed. fetch again before setting a tracking branch.") {
+            return "Branch or upstream changed. Fetch again before setting a tracking branch."
+        }
         if text.contains("no upstream branch") || text.contains("no tracking information") { return "No upstream branch configured" }
         if text.contains("non-fast-forward") || text.contains("fetch first") || text.contains("not possible to fast-forward") { return "Remote and local branches have diverged" }
         if text.contains("timed out") { return "Git operation timed out" }

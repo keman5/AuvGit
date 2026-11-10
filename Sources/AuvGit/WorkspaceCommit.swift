@@ -75,7 +75,7 @@ struct WorkspaceCommitSheet: View {
     @ObservedObject var store: RepositoryStore
     let request: WorkspaceCommitRequest
     @Environment(\.dismiss) private var dismiss
-    @State private var includeUntracked = false
+    @State private var includeUntracked = true
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(workflowText("Commit workspace changes")).font(.headline)
