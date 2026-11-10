@@ -309,7 +309,7 @@ struct NativeBranchTable: NSViewRepresentable {
             guard !parent.isBusy else { return }
             let value = rows[row]
             if value.id.hasPrefix("branch:") { parent.onAction(.checkout, value.target) }
-            else if value.id.hasPrefix("remote:") { parent.onAction(.history, "refs/remotes/" + value.target) }
+            else if value.id.hasPrefix("remote:") { parent.onAction(.checkoutRemote, value.target) }
             else if value.id.hasPrefix("stash:") { parent.onAction(.stashApplyImmediately, value.target) }
         }
         struct MenuAction {

@@ -6,6 +6,18 @@ import GitCore
 
 @MainActor
 final class NativeBranchTableTests: XCTestCase {
+    func testDoubleClickRemoteChecksOutLocalBranchAndBusyStateBlocksIt() throws {
+        var actions: [String] = []
+        let view = pane(action: { action, target in actions.append("\(action):\(target)") })
+        let coordinator = view.makeCoordinator(); coordinator.update(view)
+        let remote = try XCTUnwrap(coordinator.rows.firstIndex { $0.id == "remote:origin/main" })
+        coordinator.activate(row: remote)
+        XCTAssertEqual(actions, ["checkoutRemote:origin/main"])
+        coordinator.update(pane(busy: true, action: view.onAction))
+        coordinator.activate(row: remote)
+        XCTAssertEqual(actions.count, 1)
+    }
+
     func testConfiguredRemoteWithoutTrackingRefsStillOffersFetch() throws {
         var actions: [String] = []
         var view = pane(action: { action, target in actions.append("\(action):\(target)") })
@@ -405,7 +417,7 @@ final class NativeBranchTableTests: XCTestCase {
         let check = cell.convert(cell.check.frame, to: scroll)
         XCTAssertLessThanOrEqual(check.maxX, try XCTUnwrap(scroll.verticalScroller).frame.minX)
     }
-    func testOldContextMenuCannotActOnNewRepositoryAndRemoteUsesFullReference() throws {
+    func testOldContextMenuCannotActOnNewRepositoryAndRemoteCheckoutUsesBranchName() throws {
         var actions: [String] = []
         let coordinator = pane(action: { _, target in actions.append(target) }).makeCoordinator()
         coordinator.rows = coordinator.parent.rows
@@ -418,7 +430,7 @@ final class NativeBranchTableTests: XCTestCase {
         coordinator.performMenuAction(merge)
         XCTAssertEqual(actions.count, 1)
         coordinator.activate(row: 3)
-        XCTAssertEqual(actions.last, "refs/remotes/origin/main")
+        XCTAssertEqual(actions.last, "origin/main")
         let firstRepository = GitRepository(url: URL(fileURLWithPath: "/second"))
         let replacement = GitRepository(url: URL(fileURLWithPath: "/second"))
         coordinator.parent.repositoryIdentity = ObjectIdentifier(firstRepository)
@@ -475,7 +487,7 @@ final class NativeBranchTableTests: XCTestCase {
         XCTAssertTrue(coordinator.rows.contains { $0.id == "branch:feature/team/bar" && $0.current }, "A changed current branch must reveal its ancestors")
         let remoteIndex = try XCTUnwrap(coordinator.rows.firstIndex { $0.id == leaf.id })
         coordinator.activate(row: remoteIndex)
-        XCTAssertEqual(actions.last, "refs/remotes/origin/foo/bar")
+        XCTAssertEqual(actions.last, "origin/foo/bar")
         let menu = try XCTUnwrap(coordinator.menu(row: remoteIndex))
         XCTAssertEqual((menu.items.first?.representedObject as? NativeBranchTable.Coordinator.MenuAction)?.action, .createLocalBranch)
         coordinator.performMenuAction(try XCTUnwrap(menu.items.first))

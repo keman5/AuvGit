@@ -1520,7 +1520,8 @@ final class RepositoryStore: ObservableObject {
         historyStashHash = nil; historyStashRef = nil; historyPath = nil; historyPinnedCommit = nil
         if historyRef?.hasPrefix("refs/tags/") == true { historyRef = ref }
         selectedCommit = nil; selectedCommitPath = nil; commitFiles = []
-        selectFirstHistoryCommit = true; historyNavigationGeneration = UUID()
+        // A scope checkbox reloads commits without navigating the reference sidebar.
+        selectFirstHistoryCommit = true
         Task { await loadHistory(reset: true) }
     }
     func loadHistory(reset: Bool) async {

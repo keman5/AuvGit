@@ -5,6 +5,11 @@ caffeinate -di -w $$ &
 BUILD_CAFFEINATE_PID=$!
 trap 'kill "$BUILD_CAFFEINATE_PID" 2>/dev/null || true' EXIT
 if command -v go >/dev/null 2>&1; then go clean -cache; fi
+if [[ "${1:-}" == --test-log-branch-selection ]]; then
+  # Model fixtures only; never activate the app or present a test window.
+  swift test --build-system native --filter 'LogBranchSelectionTests|HistoryRemoteScopeTests|MainHistoryScopeTests|HistoryBranchUnionTests|HistoryScopeAndDateTests|ListRangeSelectionTests'
+  exit
+fi
 if [[ "${1:-}" == --test-configured-remotes ]]; then
   # Unshown branch tables and disposable local remotes; never activate windows.
   swift test --build-system native --filter 'NativeBranchTableTests|RepositoryRemoteSyncTests.testConfiguredRemote|RepositoryChangeStateTests|RepositoryPresentationCacheTests'
@@ -115,7 +120,8 @@ if [[ "${1:-}" == --test-checkbox-focus ]]; then
   exit
 fi
 if [[ "${1:-}" == --test-terminal ]]; then
-  swift test --build-system native --filter TerminalAppearanceTests
+  # Unshown AppKit hosts and isolated PTYs only; never activate a test window.
+  swift test --build-system native --filter "${AUVGIT_TERMINAL_TEST_FILTER:-TerminalAppearanceTests|WorkspaceKeyboardShortcutsTests|TerminalTests}"
   exit
 fi
 if [[ "${1:-}" == --test-context-focus ]]; then

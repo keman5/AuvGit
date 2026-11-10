@@ -284,6 +284,14 @@ public actor GitRepository {
     }
     public func commit(message: String, amend: Bool = false) async throws { _ = try await run(["commit"] + (amend ? ["--amend"] : []) + (GitRuntimePreferences.shared.commitCleanup == "default" ? [] : ["--cleanup=" + GitRuntimePreferences.shared.commitCleanup]) + ["-m", message]) }
     public func checkout(branch: String) async throws { _ = try await run(["switch", "--", branch]) }
+    /// `switch -c` creates the ref only when checkout succeeds, including on the
+    /// retry after an overwrite refusal. Never reset an existing local branch.
+    public func checkoutNewTrackingBranch(name: String, remoteReference: String) async throws {
+        try await validateBranch(name)
+        guard remoteReference.hasPrefix("refs/remotes/") else { throw GitError("Invalid remote branch") }
+        _ = try await validatedCommit(remoteReference)
+        _ = try await run(["switch", "--track=direct", "-c", name, "--", remoteReference])
+    }
     public func createBranch(name: String) async throws { try await validateBranch(name); _ = try await run(["switch", "-c", name]) }
     private func validatedCommit(_ revision: String) async throws -> String {
         guard !revision.isEmpty, !revision.hasPrefix("-"), !revision.contains("\0") else { throw GitError("Invalid revision") }

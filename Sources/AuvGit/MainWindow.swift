@@ -1225,8 +1225,8 @@ extension MainWindow {
             askName(interactionText("Create Branch at %@", value), initial: String(value.split(separator: "/", maxSplits: 1).last ?? "")) { name in
                 store.operation(sidebarRefinementText("Create Local Branch…")) { try await $0.createBranch(name: name, startPoint: "refs/remotes/" + value, switchAfterCreation: true) }
             }
-        case .checkout:
-            store.switchBranch(to: value) { stash in
+        case .checkout, .checkoutRemote:
+            store.switchBranch(to: value, isRemote: action == .checkoutRemote) { stash in
                 confirmation = PendingAction(title: sidebarRefinementText("Changes Saved in Stash"), message: sidebarRefinementText("Auto Stash Retained", String(stash.prefix(12))), action: {}, informational: true)
             }
         case .createBranchFromLocal:

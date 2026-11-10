@@ -38,6 +38,13 @@ struct WorkspaceKeyboardRegion: NSViewRepresentable {
         }
         func handle(_ event: NSEvent) -> NSEvent? {
             guard let window, event.window === window, window.attachedSheet == nil, !isHiddenOrHasHiddenAncestor else { return event }
+            // SwiftTerm is an NSView, not an NSTextView. A remembered file scope
+            // must not consume Return, Delete or shell editing chords from it.
+            var inputView = window.firstResponder as? NSView
+            while let current = inputView {
+                if current is RepositoryTerminalView { return event }
+                inputView = current.superview
+            }
             let responder = window.firstResponder as? NSView
             let textEditing = (responder is NSTextView || responder is NSTextField) &&
                 responder.map { WorkspaceFileFocus.isExposed($0, in: window) } == true
@@ -45,13 +52,6 @@ struct WorkspaceKeyboardRegion: NSViewRepresentable {
                 if textEditing && !command.worksWhileEditingText { continue }
                 if command == .reset || command == .resetAdvanced {
                     if window.firstResponder is ReadOnlyDiffTextView || window.firstResponder is ComparisonTextView { continue }
-                    var view = window.firstResponder as? NSView
-                    var terminalOwnsFocus = false
-                    while let current = view {
-                        if current is RepositoryTerminalView { terminalOwnsFocus = true; break }
-                        view = current.superview
-                    }
-                    if terminalOwnsFocus { continue }
                 }
                 if action(command) { return nil }
             }
