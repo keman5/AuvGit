@@ -4,10 +4,20 @@ import QuickLookUI
 /// Quick Look belongs to the file table's responder chain, never to text editors
 /// or the terminal. Keep the system panel's data source alive for its lifetime.
 class WorkspacePreviewTable: NSTableView, QLPreviewPanelDataSource, QLPreviewPanelDelegate, NSViewToolTipOwner {
+    final class FileToolTipOwner: NSObject, NSViewToolTipOwner {
+        weak var table: WorkspacePreviewTable?
+        init(table: WorkspacePreviewTable) { self.table = table }
+        func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData: UnsafeMutableRawPointer?) -> String {
+            guard let table, table.fileToolTipOwner === self, view === table,
+                  table.fileToolTipTags.contains(tag) else { return "" }
+            return table.fileToolTip(at: point) ?? ""
+        }
+    }
     var previewURLs: () -> [URL] = { [] }
     var previewRepositoryURL: () -> URL? = { nil }
     private(set) var previewItems: [URL] = []
     private(set) var fileToolTipTags = Set<NSView.ToolTipTag>()
+    private(set) var fileToolTipOwner: FileToolTipOwner?
     private var fileToolTipRects: [NSRect] = []
     var fileToolTipsEnabled = true {
         didSet {
@@ -28,8 +38,7 @@ class WorkspacePreviewTable: NSTableView, QLPreviewPanelDataSource, QLPreviewPan
     }
 
     func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData: UnsafeMutableRawPointer?) -> String {
-        guard view === self, fileToolTipTags.contains(tag) else { return "" }
-        return fileToolTip(at: point) ?? ""
+        fileToolTipOwner?.view(view, stringForToolTip: tag, point: point, userData: userData) ?? ""
     }
 
     override func reloadData() {
@@ -61,9 +70,11 @@ class WorkspacePreviewTable: NSTableView, QLPreviewPanelDataSource, QLPreviewPan
     }
 
     private func invalidateFileToolTip() {
-        // Revoke pending hints even when the pointer stays still. Remove each
-        // region individually so AppKit does not reset and reuse its tooltip tags.
+        // AppKit can reuse numeric tags. Revoke the owner identity as well so a
+        // delayed callback from a previous registration can never become valid again.
+        fileToolTipOwner?.table = nil
         for tag in fileToolTipTags { removeToolTip(tag) }
+        fileToolTipOwner = nil
         fileToolTipTags.removeAll(keepingCapacity: true)
         fileToolTipRects.removeAll(keepingCapacity: true)
     }
@@ -82,7 +93,9 @@ class WorkspacePreviewTable: NSTableView, QLPreviewPanelDataSource, QLPreviewPan
         guard fileToolTipRects != regions else { return }
         invalidateFileToolTip()
         fileToolTipRects = regions
-        for region in regions { fileToolTipTags.insert(addToolTip(region, owner: self, userData: nil)) }
+        let owner = FileToolTipOwner(table: self)
+        fileToolTipOwner = owner
+        for region in regions { fileToolTipTags.insert(addToolTip(region, owner: owner, userData: nil)) }
     }
 
     override func keyDown(with event: NSEvent) {

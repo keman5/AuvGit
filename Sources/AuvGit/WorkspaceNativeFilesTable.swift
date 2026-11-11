@@ -195,6 +195,7 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
         var parent: WorkspaceNativeFilesTable
         weak var table: FileTable?
         private var rows: [WorkspaceFileRow] = []
+        private var toolTipFilesByPath: [String: GitFile]
         private var pathIndices: [String: Int] = [:]
         private var updating = false
         private var generation = UUID()
@@ -203,7 +204,10 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
         private var statusWidths: [String: CGFloat] = [:]
         private var columnLanguage = L10n.language
         private var menuActions: [Int: (FileAction, Set<String>, UUID)] = [:]
-        init(_ parent: WorkspaceNativeFilesTable) { self.parent = parent }
+        init(_ parent: WorkspaceNativeFilesTable) {
+            self.parent = parent
+            toolTipFilesByPath = Dictionary(parent.files.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
+        }
         var statusWidth: CGFloat {
             let language = L10n.language
             if let width = statusWidths[language.rawValue] { return width }
@@ -226,11 +230,15 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
         }
         func update(_ value: WorkspaceNativeFilesTable, restoresPresentation: Bool = false) {
             guard let table else { return }
+            let sourceFilesChanged = parent.files != value.files
             let changed = parent.repository?.url != value.repository?.url || !rows.elementsEqual(value.rows, by: { $0.path == $1.path && $0.file == $1.file })
             let languageChanged = columnLanguage != L10n.language
             columnLanguage = L10n.language
             parent = value
-            table.fileToolTipsEnabled = value.isReady
+            if sourceFilesChanged {
+                toolTipFilesByPath = Dictionary(value.files.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
+            }
+            table.fileToolTipsEnabled = value.isReady && !value.isBusy
             updating = true
             defer { updating = false }
             if changed {
@@ -262,7 +270,7 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
                 return NSSortDescriptor(key: column.id, ascending: order.ascending)
             }
             if table.sortDescriptors != descriptors { table.sortDescriptors = descriptors }
-            if languageChanged { table.refreshFileToolTips() }
+            if languageChanged || (sourceFilesChanged && !changed) { table.refreshFileToolTips() }
             let indices = IndexSet(value.selection.compactMap { pathIndices[$0] }.sorted())
             // Focus invalidation can reach SwiftUI while AppKit is still tracking the click.
             if (!table.isTrackingMouse || changed), table.selectedRowIndexes != indices { table.selectRowIndexes(indices, byExtendingSelection: false) }
@@ -335,8 +343,10 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
             return cell
         }
         func fileToolTip(row: Int, column: NSTableColumn) -> String? {
-            guard parent.isReady, rows.indices.contains(row) else { return nil }
+            guard parent.isReady, !parent.isBusy, rows.indices.contains(row) else { return nil }
             let value = rows[row]
+            // Prepared rows may still be visible after Git publishes a newer status.
+            guard value.file == toolTipFilesByPath[value.path] else { return nil }
             switch column.identifier.rawValue {
             case "filename": return value.name
             case "directory": return value.path

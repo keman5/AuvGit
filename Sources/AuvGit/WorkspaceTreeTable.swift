@@ -142,6 +142,7 @@ struct WorkspaceTreeTable: NSViewRepresentable {
             let changedExpansion = parent.expanded != value.expanded
             let changedEnabled = enabled != (!value.isBusy && value.isEnabled)
             parent = value
+            table.fileToolTipsEnabled = enabled
             updating = true
             defer { updating = false }
             if changedStatus || filesByPath.isEmpty {
@@ -168,7 +169,7 @@ struct WorkspaceTreeTable: NSViewRepresentable {
         func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { NativeSelectionRowView() }
         func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
         func fileToolTip(row: Int) -> String? {
-            guard rows.indices.contains(row) else { return nil }
+            guard enabled, rows.indices.contains(row) else { return nil }
             return rows[row].name
         }
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {

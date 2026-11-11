@@ -8,10 +8,10 @@ import AuvGitLocalization
 @MainActor
 final class WorkspaceTreeRenderingTests: XCTestCase {
     func testTreeTooltipUsesCurrentRowsWithoutRetainingCellHints() throws {
-        func parent(_ paths: [String]) -> WorkspaceTreeTable {
+        func parent(_ paths: [String], busy: Bool = false) -> WorkspaceTreeTable {
             WorkspaceTreeTable(rows: paths.map { .init(path: $0, isDirectory: false, depth: 0) }, expanded: .constant([]),
                 selection: .constant([]), repository: GitRepository(url: URL(fileURLWithPath: "/tmp/tree-tooltip")),
-                files: [], isBusy: false, openFile: { _ in }, onAction: { _, _ in })
+                files: [], isBusy: busy, openFile: { _ in }, onAction: { _, _ in })
         }
         let original = parent(["src/old.swift"])
         let coordinator = original.makeCoordinator()
@@ -24,6 +24,8 @@ final class WorkspaceTreeRenderingTests: XCTestCase {
         XCTAssertEqual(table.fileToolTip(row: 0, column: column), "old.swift")
         XCTAssertNil(cell.toolTip); XCTAssertNil(cell.label.toolTip)
         XCTAssertFalse(cell.label.allowsExpansionToolTips)
+        coordinator.update(parent(["src/old.swift"], busy: true))
+        XCTAssertNil(table.fileToolTip(row: 0, column: column))
         coordinator.update(parent([]))
         XCTAssertNil(table.fileToolTip(row: 0, column: column))
         coordinator.update(parent(["src/new.swift"]))
