@@ -2,20 +2,20 @@ import SwiftUI
 import AppKit
 import GitCore
 
-/// A quiet file/repository outline with a small, colored action mark.
+/// Consistent symbol weight and optical size make the icon-only toolbar readable.
 struct RepositoryOperationIcon: View {
     let symbol: String
     private var appearance: (String, String?, Color) {
         switch symbol {
-        case "arrow.down.to.line": return ("shippingbox", "arrow.down", .blue)
-        case "arrow.up.to.line": return ("shippingbox", "arrow.up", .orange)
-        case "plus.circle": return ("doc", "checkmark", .green)
-        case "minus.circle": return ("doc", "minus", .orange)
-        case "arrow.uturn.backward": return ("doc", "arrow.uturn.backward", .red)
-        case "archivebox": return ("tray", "arrow.turn.down.right", .blue)
-        case "archivebox.fill": return ("tray", "arrow.turn.up.right", .orange)
-        case "arrow.clockwise": return ("folder", "arrow.clockwise", .blue)
-        case "folder.badge.plus": return ("folder", "plus", .green)
+        case "arrow.down.to.line": return ("arrow.down.to.line", nil, AuvGitStyle.blue)
+        case "arrow.up.to.line": return ("arrow.up.to.line", nil, AuvGitStyle.blue)
+        case "plus.circle": return ("checkmark.circle", nil, .primary)
+        case "minus.circle": return ("minus.circle", nil, .primary)
+        case "arrow.uturn.backward": return ("arrow.uturn.backward", nil, .primary)
+        case "archivebox": return ("archivebox", nil, .primary)
+        case "archivebox.fill": return ("archivebox", "arrow.up", .primary)
+        case "arrow.clockwise": return ("arrow.clockwise", nil, .primary)
+        case "folder.badge.plus": return ("folder.badge.plus", nil, .primary)
         default: return (symbol, nil, .secondary)
         }
     }
@@ -36,12 +36,12 @@ struct RepositoryOperationIcon: View {
     var body: some View {
         let (base, mark, tint) = appearance
         ZStack(alignment: .bottomTrailing) {
-            Image(systemName: base).font(.system(size: 18, weight: .regular)).foregroundStyle(.secondary)
+            Image(systemName: base).font(.system(size: 16, weight: .medium)).foregroundStyle(tint)
                 .frame(width: 21, height: 21)
             if let mark {
-                Image(systemName: mark).font(.system(size: 10, weight: .bold)).foregroundStyle(tint)
-                    .frame(width: 12, height: 12).background(AuvGitStyle.chrome, in: Circle())
-                    .offset(x: 2, y: 1)
+                Image(systemName: mark).font(.system(size: 8, weight: .bold)).foregroundStyle(AuvGitStyle.blue)
+                    .frame(width: 10, height: 10).background(AuvGitStyle.toolbar, in: Circle())
+                    .offset(x: 1, y: 0)
             }
         }.frame(width: 24, height: 23).accessibilityHidden(true)
     }

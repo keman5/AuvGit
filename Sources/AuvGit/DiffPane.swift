@@ -63,8 +63,7 @@ struct DiffPane: View {
                         Spacer(minLength: 0)
                     }
                 }
-            }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 4).auvGitChrome()
-            Divider()
+            }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 5).auvGitSectionChrome()
             if let preview { StaticComparisonView(snapshot: preview, showsControls: false) }
             else if text.isEmpty {
                 if isLoading { ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity) }
@@ -103,8 +102,8 @@ struct DiffPane: View {
     }
     private var documentIdentity: String { title + "|" + (leftRevisionTitle ?? "") + "|" + (rightRevisionTitle ?? "") }
     private var titleLabel: some View {
-        Label(title.isEmpty ? diffText("diff.title") : title, systemImage: "doc.text")
-            .font(.system(size: 12, weight: .semibold)).lineLimit(1).truncationMode(.middle).help(title)
+        AuvGitSectionLabel(title: title.isEmpty ? diffText("diff.title") : title, systemImage: "doc.text")
+            .truncationMode(.middle).help(title)
     }
     private func hunkControls(_ diff: ParsedDiff) -> some View {
         HStack(spacing: 2) {

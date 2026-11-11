@@ -262,7 +262,9 @@ final class CompactHistoryCell: NSView {
                 let rect = NSRect(x: x, y: (bounds.height - 18) / 2, width: 18, height: 18)
                 NSGraphicsContext.saveGraphicsState()
                 NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).addClip()
-                (avatar ?? NSImage(systemSymbolName: "person.crop.circle", accessibilityDescription: nil))?.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+                let image = avatar ?? NSImage(systemSymbolName: "person.crop.circle", accessibilityDescription: nil)?
+                    .withSymbolConfiguration(.init(paletteColors: [secondary]))
+                image?.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
                 NSGraphicsContext.restoreGraphicsState()
             }
             if parent.showNames { drawText(commit.author, x: x + (parent.showAvatars ? 22 : 0), width: parent.nameWidth, font: .systemFont(ofSize: 10), color: primary) }

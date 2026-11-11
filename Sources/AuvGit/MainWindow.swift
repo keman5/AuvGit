@@ -107,10 +107,14 @@ struct MainWindow: View {
                     ProgressView(value: fraction).frame(width: 90)
                     Text("\(Int(fraction * 100))%").monospacedDigit()
                 }
-                if !store.branch.isEmpty { Label(store.branch, systemImage: "arrow.triangle.branch").font(.system(size: 11, weight: .medium)).fixedSize(horizontal: true, vertical: false) }
-                Button { terminals.toggle(for: store.repositoryURL, store: store) } label: { Image(systemName: "terminal").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(.plain).help(terminalText("toggle")).accessibilityLabel(terminalText("toggle")).disabled(store.repository == nil)
-                Button { showActivity = true } label: { Image(systemName: "list.bullet.rectangle").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(.plain).help(mainText("activity"))
-            }.font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 12).frame(height: 30).auvGitChrome()
+                if !store.branch.isEmpty {
+                    Label(store.branch, systemImage: "arrow.triangle.branch")
+                        .font(.system(size: 11, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                        .frame(maxWidth: 180, alignment: .trailing)
+                }
+                Button { terminals.toggle(for: store.repositoryURL, store: store) } label: { Image(systemName: "terminal").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(ToolbarRowButtonStyle()).help(terminalText("toggle")).accessibilityLabel(terminalText("toggle")).disabled(store.repository == nil)
+                Button { showActivity = true } label: { Image(systemName: "list.bullet.rectangle").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(ToolbarRowButtonStyle()).help(mainText("activity")).accessibilityLabel(mainText("activity"))
+            }.font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 12).frame(height: 28).auvGitChrome()
         }
         .background(AuvGitStyle.canvas)
         .controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6))
@@ -764,11 +768,12 @@ struct MainWindow: View {
     }
     var sidebar: some View { RepositorySidebar(store: store, onAction: sidebarAction, onDropStashes: dropStashes, repositoryFocusRequest: repositoryFocusRequest, branchFocus: branchesFocus, isActiveProject: isActiveProject).background(WorkspaceFileFocusRegion(focus: sidebarFocus).allowsHitTesting(false).accessibilityHidden(true)) }
     var welcome: some View {
-        VStack(spacing: 18) {
-            Image(systemName: "arrow.triangle.branch").font(.system(size: 58, weight: .light)).foregroundStyle(Color.accentColor)
-            Text("AuvGit").font(.largeTitle.bold())
-            Text(mainText("welcomeSubtitle")).font(.title3).foregroundStyle(.secondary)
-            Button(mainText("openLocal")) { store.chooseRepository() }.buttonStyle(.borderedProminent).controlSize(.large)
+        VStack(spacing: 16) {
+            Image(systemName: "arrow.triangle.branch").font(.system(size: 32, weight: .medium)).foregroundStyle(Color.accentColor)
+                .frame(width: 64, height: 64).background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+            Text("AuvGit").font(.system(size: 28, weight: .semibold)).tracking(-0.6)
+            Text(mainText("welcomeSubtitle")).font(.system(size: 13)).foregroundStyle(.secondary)
+            Button(mainText("openLocal")) { store.chooseRepository() }.buttonStyle(AuvGitCommitButtonStyle())
             Text([ShortcutCommand.open, .refresh].map { shortcuts.binding($0).displayString + " " + shortcutText($0.title) }.joined(separator: "  ·  ")).font(.caption).foregroundStyle(.tertiary)
         }
     }
@@ -887,11 +892,11 @@ struct MainWindow: View {
                 Spacer()
                 Button {
                     store.commit()
-                } label: { Text(mainText("commit")) }
-                    .buttonStyle(.borderedProminent)
+                } label: { Label(mainText("commit"), systemImage: "checkmark") }
+                    .buttonStyle(AuvGitCommitButtonStyle())
                     .disabled(!store.canCommit)
             }
-        }.controlSize(.small).padding(8).background(AuvGitStyle.chrome)
+        }.controlSize(.small).padding(.horizontal, 12).padding(.bottom, 10).padding(.top, 4).background(AuvGitStyle.chrome)
     }
     private func requestAICommit() {
         guard AICommitConfiguration.isConfigured else { showAISettings = true; return }
@@ -901,7 +906,7 @@ struct MainWindow: View {
     private var commitForm: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Label(mainText("commit"), systemImage: "point.3.connected.trianglepath.dotted").font(.system(size: 12, weight: .semibold))
+                AuvGitSectionLabel(title: mainText("commit"), systemImage: "checkmark.circle")
                 Spacer(minLength: 0)
                 if let error = aiCommit.error {
                     FloatingNotice(message: error,
@@ -915,7 +920,7 @@ struct MainWindow: View {
                 if aiCommit.isLoading { ProgressView().controlSize(.small); Button { aiCommit.cancel() } label: { Image(systemName: "xmark.circle").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(ToolbarRowButtonStyle()).help(aiCommitText("Cancel")) }
                 else {
                     Button { requestAICommit() } label: { Image(systemName: "sparkles").foregroundStyle(AuvGitStyle.blue).frame(width: 24, height: 24).contentShape(Rectangle()) }
-                        .buttonStyle(.plain).help(aiCommitText("Generate commit message")).accessibilityLabel(aiCommitText("Generate commit message"))
+                        .buttonStyle(ToolbarRowButtonStyle()).help(aiCommitText("Generate commit message")).accessibilityLabel(aiCommitText("Generate commit message"))
                         .disabled(store.isBusy || store.repository == nil)
                 }
                 Menu {
@@ -938,12 +943,13 @@ struct MainWindow: View {
                             store.clearRecentCommitMessages()
                         }.disabled(store.recentCommitMessages.isEmpty)
                     }.disabled(store.repository == nil)
-                } label: { Label(refinementText("More"), systemImage: "ellipsis").frame(minHeight: 24).contentShape(Rectangle()) }
+                } label: { Image(systemName: "ellipsis").frame(width: 24, height: 24).contentShape(Rectangle()) }
                     .menuIndicator(.hidden).menuStyle(.borderlessButton).fixedSize()
-                    .help(refinementText("Commit options")).disabled(store.isBusy)
-            }
+                    .buttonStyle(ToolbarRowButtonStyle()).help(refinementText("Commit options"))
+                    .accessibilityLabel(refinementText("Commit options")).disabled(store.isBusy)
+            }.frame(height: 28)
             CommitMessageEditor(text: $store.commitMessage, focused: Binding(get: { commitFocused }, set: { commitFocused = $0 }), placeholder: mainText("commitPlaceholder"))
-                .auvGitInputSurface().frame(minHeight: 64).disabled(store.pendingRepositoryPath != nil)
+                .auvGitInputSurface().frame(minHeight: 64, maxHeight: .infinity).disabled(store.pendingRepositoryPath != nil)
 
         }
     }
@@ -970,7 +976,16 @@ struct MainWindow: View {
 extension MainWindow {
     private func historyPane(compact: Bool) -> some View {
         VStack(spacing: 0) {
-            if compact { HStack { Label(interactionText("Log"), systemImage: "clock.arrow.circlepath").font(.system(size: 12, weight: .semibold)); HistorySearchControl(search: $store.historySearch, focusRequest: historySearchFocusRequest).frame(maxWidth: .infinity); HistoryDisplayMenu(showMergedCommits: Binding(get: { store.showMergedCommits }, set: { store.setShowMergedCommits($0) })); Button { if let repo = store.repository { LogPresenter.show(repository: repo) } } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(.plain).help(interactionText("Expand History")) }.padding(.horizontal, 12).frame(height: 36).auvGitChrome() }
+            if compact {
+                HStack(spacing: 8) {
+                    AuvGitSectionLabel(title: interactionText("Log"), systemImage: "clock.arrow.circlepath")
+                    HistorySearchControl(search: $store.historySearch, focusRequest: historySearchFocusRequest).frame(maxWidth: .infinity)
+                    HistoryDisplayMenu(showMergedCommits: Binding(get: { store.showMergedCommits }, set: { store.setShowMergedCommits($0) }))
+                    Button { if let repo = store.repository { LogPresenter.show(repository: repo) } } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right").frame(width: 24, height: 24).contentShape(Rectangle())
+                    }.buttonStyle(ToolbarRowButtonStyle()).help(interactionText("Expand History")).accessibilityLabel(interactionText("Expand History"))
+                }.padding(.horizontal, 12).frame(height: AuvGitStyle.sectionHeight).auvGitSectionChrome()
+            }
             HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch, isLoading: store.loadingHistory, hasMore: store.hasMore, onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy, onAction: historyAction, onShowChanges: { if let path = store.selectedCommitPath { compareCommitFile(path) } }, compact: compact, showsSearch: !compact, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), visibleRemoteBranchNames: store.visibleHistoryRemoteBranchNames, currentBranch: store.branches.first { $0.isCurrent && !$0.isRemote }, localUnpushedCommitHashes: store.localUnpushedCommitHashes, navigationGeneration: store.historyNavigationGeneration, onJump: jumpToCommit, firstParentGraph: store.followsCurrentBranch && !store.showMergedCommits, onFind: { historySearchFocusRequest = UUID() }, authorFilter: $store.historyAuthor)
                 .background(WorkspaceFileFocusRegion(focus: historyFocus).allowsHitTesting(false).accessibilityHidden(true))
         }

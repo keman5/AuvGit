@@ -19,7 +19,7 @@ struct CommitMessageEditor: NSViewRepresentable {
         editor.isVerticallyResizable = true; editor.isHorizontallyResizable = false
         editor.autoresizingMask = [.width]; editor.textContainer?.widthTracksTextView = true
         editor.textContainer?.heightTracksTextView = false
-        editor.textContainerInset = NSSize(width: 7, height: 7)
+        editor.textContainerInset = NSSize(width: 10, height: 9)
         editor.textContainer?.lineFragmentPadding = 0
         editor.font = .systemFont(ofSize: 13); editor.textColor = .textColor
         editor.drawsBackground = false; editor.allowsUndo = true

@@ -100,7 +100,7 @@ struct RepositorySidebar: View {
                                repositoryViewport: store.workspaceProjects?.repositoryListViewport,
                                isActiveProject: isActiveProject)
         .controlSize(.small)
-        .background(AuvGitStyle.sidebar)
+        .background(AuvGitNavigationSurface(sidebar: true))
         .auvGitSheet(item: $contextTarget) { target in RepositoryContextEditor(store: store, target: target) }
         .auvGitSheet(isPresented: Binding(get: { rebaseReference != nil }, set: { if !$0 { rebaseReference = nil } })) {
             RebaseWorkflowView(store: store, onClose: { rebaseReference = nil }, initialBase: rebaseReference ?? "HEAD~1")
@@ -123,7 +123,14 @@ struct RepositorySidebar: View {
     }
     private var repositoryPane: some View {
         VStack(spacing: 0) {
-                HStack { Text(interactionText("Repositories")).font(.system(size: 13, weight: .semibold)); Spacer(); Button { store.chooseRepository() } label: { Image(systemName: "plus").font(.system(size: 11, weight: .medium)).frame(width: 18, height: 18).contentShape(Rectangle()) }.buttonStyle(.plain).disabled(!store.canOpenRepository) }.padding(.horizontal, 10).frame(height: 32)
+                HStack(spacing: 6) {
+                    AuvGitSectionLabel(title: interactionText("Repositories"), systemImage: "folder")
+                    Spacer(minLength: 0)
+                    Button { store.chooseRepository() } label: {
+                        Image(systemName: "plus").font(.system(size: 11, weight: .medium))
+                    }.buttonStyle(ToolbarRowButtonStyle())
+                        .help(L10n.text("open", table: "Main")).accessibilityLabel(L10n.text("open", table: "Main")).disabled(!store.canOpenRepository)
+                }.padding(.horizontal, 10).frame(height: AuvGitStyle.sectionHeight)
                 ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 2) {
@@ -155,13 +162,18 @@ struct RepositorySidebar: View {
     }
     private var branchPane: some View {
         VStack(spacing: 0) {
-                HStack { Text(interactionText("Branches")).font(.system(size: 13, weight: .semibold)); Spacer(); AuvGitBadge(String(store.branches.count), tint: .secondary) }.padding(.horizontal, 10).frame(height: 32)
+                HStack {
+                    AuvGitSectionLabel(title: interactionText("Branches"), systemImage: "arrow.triangle.branch")
+                    Spacer()
+                    AuvGitBadge(String(store.branches.count), tint: .secondary)
+                }.padding(.horizontal, 10).frame(height: AuvGitStyle.sectionHeight)
                 NativeBranchTable(branches: store.branches, remoteNames: store.remoteNames, stashes: store.stashes,
                     repositoryPath: store.repositoryURL?.path, repositoryIdentity: store.repository.map { ObjectIdentifier($0) }, currentBranch: store.branch, isBusy: store.isBusy,
                     localExpanded: $localBranchesExpanded, stashesExpanded: $stashesExpanded, selection: $branchSelection,
                     onAction: onAction, onRenameStash: prepareStashRename, onShortcut: handleShortcut, onDropStashes: onDropStashes)
                     .background { if let branchFocus { WorkspaceFileFocusRegion(focus: branchFocus).allowsHitTesting(false).accessibilityHidden(true) } }
             }.frame(minHeight: 170)
+                .overlay(alignment: .top) { Rectangle().fill(AuvGitStyle.border).frame(height: 0.5) }
     }
 
     private func prepareStashRename(_ reference: String) {
@@ -214,7 +226,7 @@ struct RepositorySidebar: View {
             HStack(spacing: 6) {
                 RepositoryRowIcon(symbol: symbol, hasConflict: hasConflict, hasSync: hasPush || hasPull)
                     .help(status).accessibilityLabel(status)
-                Text(URL(fileURLWithPath: path).lastPathComponent).font(.system(size: 12))
+                Text(URL(fileURLWithPath: path).lastPathComponent).font(.system(size: 12, weight: active ? .medium : .regular))
                     .lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 0)
                 if store.workspaceProjects?.isBusy(path: path) == true {
@@ -231,7 +243,7 @@ struct RepositorySidebar: View {
                         .padding(.horizontal, 5).padding(.vertical, 1)
                         .background((active ? Color.white : Color.secondary).opacity(0.14), in: RoundedRectangle(cornerRadius: 5))
                 }
-            }.padding(.horizontal, 6).frame(height: 26).frame(maxWidth: .infinity, alignment: .leading)
+            }.padding(.horizontal, 8).frame(height: 28).frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
         }.buttonStyle(RepositoryRowButtonStyle(selected: active, allowsSelection: store.canOpenRepository)).help(path).transaction { $0.animation = nil }
             .accessibilityAddTraits(active ? .isSelected : [])

@@ -12,8 +12,7 @@ struct ToolbarRowButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.frame(minWidth: minimumWidth).frame(height: height)
             .contentShape(Rectangle())
-            .background(configuration.isPressed ? Color.secondary.opacity(0.12) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 6))
+            .modifier(AuvGitControlFeedback(pressed: configuration.isPressed))
             .opacity(isEnabled ? 1 : 0.45)
     }
 }
@@ -25,9 +24,36 @@ struct ComparisonToolbarButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.frame(width: 22, height: 24).fixedSize()
             .contentShape(Rectangle())
-            .background(configuration.isPressed ? Color.secondary.opacity(0.12) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 6))
+            .modifier(AuvGitControlFeedback(pressed: configuration.isPressed))
             .opacity(isEnabled ? 1 : 0.45)
+    }
+}
+
+/// Hover reveals the hit area, while press feedback is immediate and never delays an action.
+private struct AuvGitControlFeedback: ViewModifier {
+    let pressed: Bool
+    @Environment(\.isEnabled) private var enabled
+    @Environment(\.colorSchemeContrast) private var contrast
+    @State private var hovered = false
+    func body(content: Content) -> some View {
+        content
+            .background(Color.primary.opacity(enabled ? (pressed ? 0.12 : hovered ? 0.055 : 0) : 0),
+                        in: RoundedRectangle(cornerRadius: 5))
+            .overlay(RoundedRectangle(cornerRadius: 5)
+                .strokeBorder(Color.primary.opacity(enabled && (pressed || hovered) && contrast == .increased ? 0.45 : 0), lineWidth: 0.5))
+            .onHover { hovered = $0 }
+    }
+}
+
+struct AuvGitCommitButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.font(.system(size: 12, weight: .semibold))
+            .padding(.horizontal, 14).frame(minWidth: 72, minHeight: 28)
+            .foregroundStyle(enabled ? Color.white : Color.secondary)
+            .background(enabled ? Color.accentColor : Color.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(enabled && configuration.isPressed ? 0.14 : 0)))
+            .contentShape(RoundedRectangle(cornerRadius: 6))
     }
 }
 

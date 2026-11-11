@@ -5,6 +5,11 @@ caffeinate -di -w $$ &
 BUILD_CAFFEINATE_PID=$!
 trap 'kill "$BUILD_CAFFEINATE_PID" 2>/dev/null || true' EXIT
 if command -v go >/dev/null 2>&1; then go clean -cache; fi
+if [[ "${1:-}" == --test-apple-design ]]; then
+  # All design snapshots and interaction checks use unshown hosts only.
+  swift test --build-system native --filter 'AppleWorkspaceDesignTests|WorkspaceSplitLayoutTests|ControlTypographyTests|ComparisonChromeGeometryTests.testChangeArrowPairIgnoresInheritedToolbarMinimumWidth|WorkspaceNativeFilesTableTests|NativeBranchTableTests|DialogAppearanceTests.testSheetUsesSharedRadiusWithoutSystemModalFrame|DialogAppearanceTests.testMainWindowClipsTheFrameContainingTheSheetDimmer'
+  exit
+fi
 if [[ "${1:-}" == --test-log-layout ]]; then
   # Unshown component hosts only. Never activate or order a test window in front.
   swift test --build-system native --filter "${AUVGIT_LOG_LAYOUT_TEST_FILTER:-LogLayoutAndSelectionTests|WorkspaceSplitLayoutTests|NativeFocusAppearanceTests|NativeBranchTableTests|WorkspaceNativeFilesTableTests|WorkspaceTreeRenderingTests|LogFileSortingTests}"

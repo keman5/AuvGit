@@ -108,10 +108,13 @@ private final class ShellTitlebar: NSView {
             button.action = index == 0 ? #selector(closeWindow) : index == 1 ? #selector(minimizeWindow) : #selector(fullScreenWindow)
             addSubview(button)
         }
-        title.font = .systemFont(ofSize: 12, weight: .medium); title.lineBreakMode = .byTruncatingMiddle
+        wantsLayer = true
+        title.font = .systemFont(ofSize: 12, weight: .semibold); title.lineBreakMode = .byTruncatingMiddle
         title.alignment = .center; addSubview(title)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override var wantsUpdateLayer: Bool { true }
+    override func updateLayer() { layer?.backgroundColor = AuvGitStyle.toolbarColor.cgColor }
     override func layout() {
         super.layout(); title.stringValue = window?.title ?? ""
         title.frame = NSRect(x: 84, y: 9, width: max(0, bounds.width - 168), height: 18)

@@ -9,13 +9,19 @@ class WorkspacePreviewTable: NSTableView, QLPreviewPanelDataSource, QLPreviewPan
     private(set) var previewItems: [URL] = []
     private(set) var fileToolTipTags = Set<NSView.ToolTipTag>()
     private var fileToolTipRects: [NSRect] = []
+    var fileToolTipsEnabled = true {
+        didSet {
+            guard oldValue != fileToolTipsEnabled else { return }
+            refreshFileToolTips()
+        }
+    }
 
     // Resolve the current row when AppKit displays a hint. Reused cells must not
     // own filename strings that can outlive a commit, refresh or repository switch.
     func fileToolTip(row: Int, column: NSTableColumn) -> String? { nil }
 
     func fileToolTip(at point: NSPoint) -> String? {
-        guard visibleRect.contains(point) else { return nil }
+        guard fileToolTipsEnabled, visibleRect.contains(point) else { return nil }
         let row = row(at: point), column = column(at: point)
         guard row >= 0, row < numberOfRows, tableColumns.indices.contains(column), !tableColumns[column].isHidden else { return nil }
         return fileToolTip(row: row, column: tableColumns[column])
@@ -32,6 +38,17 @@ class WorkspacePreviewTable: NSTableView, QLPreviewPanelDataSource, QLPreviewPan
         updateFileToolTip()
     }
 
+    override func reloadData(forRowIndexes rowIndexes: IndexSet, columnIndexes: IndexSet) {
+        invalidateFileToolTip()
+        super.reloadData(forRowIndexes: rowIndexes, columnIndexes: columnIndexes)
+        updateFileToolTip()
+    }
+
+    func refreshFileToolTips() {
+        invalidateFileToolTip()
+        updateFileToolTip()
+    }
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         updateFileToolTip()
@@ -44,6 +61,8 @@ class WorkspacePreviewTable: NSTableView, QLPreviewPanelDataSource, QLPreviewPan
     }
 
     private func invalidateFileToolTip() {
+        // Revoke pending hints even when the pointer stays still. Remove each
+        // region individually so AppKit does not reset and reuse its tooltip tags.
         for tag in fileToolTipTags { removeToolTip(tag) }
         fileToolTipTags.removeAll(keepingCapacity: true)
         fileToolTipRects.removeAll(keepingCapacity: true)
@@ -51,7 +70,7 @@ class WorkspacePreviewTable: NSTableView, QLPreviewPanelDataSource, QLPreviewPan
 
     private func updateFileToolTip() {
         let rect = visibleRect.intersection(bounds)
-        guard window != nil, numberOfRows > 0, !rect.isEmpty,
+        guard fileToolTipsEnabled, window != nil, numberOfRows > 0, !rect.isEmpty,
               let visibleRows = Range(rows(in: rect)) else { invalidateFileToolTip(); return }
         var regions: [NSRect] = []
         for row in visibleRows where row < numberOfRows {

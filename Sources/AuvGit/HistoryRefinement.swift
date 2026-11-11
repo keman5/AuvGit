@@ -20,6 +20,7 @@ struct HistoryDisplayMenu: View {
         } label: {
             Image(systemName: "ellipsis").frame(width: 24, height: 24).contentShape(Rectangle())
         }.menuIndicator(.hidden).menuStyle(.borderlessButton).fixedSize()
+            .buttonStyle(ToolbarRowButtonStyle())
             .help(historyRefinementText("History display options")).accessibilityLabel(historyRefinementText("History display options"))
     }
 }

@@ -249,7 +249,7 @@ final class WorkspaceNativeFilesTableTests: XCTestCase {
         let elapsed = start.duration(to: .now)
         print("Native workspace cold 6000 rows: \(elapsed)")
         XCTAssertEqual(native.numberOfRows, 6000)
-        XCTAssertTrue(native.usesAlternatingRowBackgroundColors)
+        XCTAssertFalse(native.usesAlternatingRowBackgroundColors, "The document canvas should stay quiet below the file rows")
         // A native table creates cells for the viewport, not for all 6000 identities.
         XCTAssertNil(native.view(atColumn: 0, row: 5999, makeIfNecessary: false))
         native.selectRowIndexes(IndexSet([1, 4]), byExtendingSelection: false)

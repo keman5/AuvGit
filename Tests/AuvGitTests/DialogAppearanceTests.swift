@@ -525,7 +525,7 @@ final class DialogAppearanceTests: XCTestCase {
         for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             XCTAssertNotEqual(window.standardWindowButton(button)?.isHidden, false)
         }
-        XCTAssertEqual(window.contentView?.superview?.layer?.cornerRadius, 12)
+        XCTAssertEqual(window.contentView?.superview?.layer?.cornerRadius, 8)
         XCTAssertEqual(window.contentView?.superview?.layer?.masksToBounds, true)
         XCTAssertFalse(window.isOpaque)
     }
@@ -536,7 +536,7 @@ final class DialogAppearanceTests: XCTestCase {
         window.isReleasedWhenClosed = false
         defer { window.close() }
         window.contentView = EightPointFrameView(content: NSView())
-        XCTAssertEqual(window.contentView?.superview?.layer?.cornerRadius, 12)
+        XCTAssertEqual(window.contentView?.superview?.layer?.cornerRadius, 8)
         XCTAssertEqual(window.contentView?.superview?.layer?.masksToBounds, true)
     }
     func testAlertDefaultSkipsDisabledActionsAndPrefersCancelToDestructive() {

@@ -47,7 +47,7 @@ extension View {
                                     @ViewBuilder content: @escaping () -> Content) -> some View {
         sheet(isPresented: isPresented, onDismiss: onDismiss) {
             content().nativeFocusRoot().environment(\.isEnabled, true)
-                .background(Color(nsColor: .windowBackgroundColor))
+                .background(AuvGitStyle.chrome)
                 .background(DialogFrameStyle(forceClose: { isPresented.wrappedValue = false }))
                 .presentationCornerRadius(AuvGitStyle.windowCornerRadius)
         }
@@ -62,7 +62,7 @@ extension View {
                                                        @ViewBuilder content: @escaping (Item) -> Content) -> some View {
         sheet(item: item, onDismiss: onDismiss) { value in
             content(value).nativeFocusRoot(focusesOnPresentation: focusesOnPresentation).environment(\.isEnabled, true)
-                .background(Color(nsColor: .windowBackgroundColor))
+                .background(AuvGitStyle.chrome)
                 .background(DialogFrameStyle(forceClose: { item.wrappedValue = nil }))
                 .presentationCornerRadius(AuvGitStyle.windowCornerRadius)
         }

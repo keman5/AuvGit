@@ -61,7 +61,7 @@ final class ComparisonChromeGeometryTests: XCTestCase {
                 XCTAssertEqual(color.greenComponent, expected.greenComponent, accuracy: 0.03)
                 XCTAssertEqual(color.blueComponent, expected.blueComponent, accuracy: 0.03)
             }
-            XCTAssertEqual(content.superview?.layer?.cornerRadius, 12)
+            XCTAssertEqual(content.superview?.layer?.cornerRadius, 8)
             XCTAssertFalse(window.isOpaque, "The rounded outer corners must stay transparent")
         }
     }

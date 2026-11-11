@@ -1,25 +1,70 @@
 import SwiftUI
 import AppKit
 
-/// Shared chrome for the native workspace. Content remains edge-to-edge and dense.
+/// Neutral, adaptive surfaces keep navigation behind the work and code on a solid canvas.
 enum AuvGitStyle {
     static let canvas = Color(nsColor: .textBackgroundColor)
-    static let sidebar = Color(nsColor: NSColor(name: nil) { appearance in
-        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(calibratedRed: 0.13, green: 0.15, blue: 0.19, alpha: 1) : NSColor(calibratedRed: 0.92, green: 0.935, blue: 0.955, alpha: 1)
-    })
-    static let chrome = Color(nsColor: NSColor(name: nil) { appearance in
-        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .controlBackgroundColor : NSColor(calibratedRed: 0.98, green: 0.985, blue: 0.995, alpha: 1)
-    })
-    static let windowCornerRadius: CGFloat = 12
-    static let toolbar = Color(nsColor: NSColor(name: nil) { appearance in
-        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            ? NSColor(calibratedWhite: 0.16, alpha: 1)
-            : NSColor(calibratedRed: 0.94, green: 0.95, blue: 0.965, alpha: 1)
-    })
-    static let border = Color(nsColor: .separatorColor).opacity(0.65)
+    static let sidebarColor = adaptive(light: 0.945, dark: 0.155)
+    static let chromeColor = adaptive(light: 0.978, dark: 0.185)
+    static let toolbarColor = adaptive(light: 0.958, dark: 0.165)
+    static let sidebar = Color(nsColor: sidebarColor)
+    static let chrome = Color(nsColor: chromeColor)
+    static let toolbar = Color(nsColor: toolbarColor)
+    static let windowCornerRadius: CGFloat = 8
+    static let border = Color(nsColor: .separatorColor).opacity(0.45)
     static let horizontalInset: CGFloat = 12
     static let rowHeight: CGFloat = 30
-    static let blue = Color(red: 0.04, green: 0.46, blue: 1)
+    static let blue = Color.accentColor
+    static let sectionHeight: CGFloat = 34
+
+    private static func adaptive(light: CGFloat, dark: CGFloat) -> NSColor {
+        NSColor(name: nil) { appearance in
+            NSColor(calibratedWhite: appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light, alpha: 1)
+        }
+    }
+}
+
+/// Limit live material to navigation chrome; editors and tables retain solid, legible surfaces.
+struct AuvGitNavigationSurface: View {
+    var sidebar = false
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+    var body: some View {
+        Group {
+            if reduceTransparency || contrast == .increased {
+                sidebar ? AuvGitStyle.sidebar : AuvGitStyle.toolbar
+            } else {
+                NavigationMaterial(sidebar: sidebar)
+                    .overlay((sidebar ? AuvGitStyle.sidebar : AuvGitStyle.toolbar).opacity(0.55))
+            }
+        }.allowsHitTesting(false).accessibilityHidden(true)
+    }
+
+    private struct NavigationMaterial: NSViewRepresentable {
+        let sidebar: Bool
+        func makeNSView(context: Context) -> NSVisualEffectView {
+            let view = NSVisualEffectView()
+            view.blendingMode = .behindWindow
+            view.state = .followsWindowActiveState
+            return view
+        }
+        func updateNSView(_ view: NSVisualEffectView, context: Context) {
+            view.material = sidebar ? .sidebar : .headerView
+        }
+    }
+}
+
+struct AuvGitSectionLabel: View {
+    let title: String
+    let systemImage: String
+    var body: some View {
+        Label {
+            Text(title).font(.system(size: 12, weight: .semibold))
+        } icon: {
+            Image(systemName: systemImage).font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary).frame(width: 16)
+        }.lineLimit(1)
+    }
 }
 
 extension HistoryGraphColorToken {
@@ -44,14 +89,12 @@ struct AuvGitPaneHeader: View {
     var count: Int? = nil
     var body: some View {
         HStack(spacing: 7) {
-            Image(systemName: systemImage).foregroundStyle(.secondary).frame(width: 15)
-            Text(title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+            AuvGitSectionLabel(title: title, systemImage: systemImage)
             Spacer(minLength: 4)
             if let count { AuvGitBadge(String(count), tint: .secondary).accessibilityHidden(true) }
         }
-        .padding(.horizontal, AuvGitStyle.horizontalInset).frame(height: 34)
-        .auvGitChrome()
-        .overlay(alignment: .bottom) { Rectangle().fill(AuvGitStyle.border).frame(height: 0.5) }
+        .padding(.horizontal, AuvGitStyle.horizontalInset).frame(height: AuvGitStyle.sectionHeight)
+        .auvGitSectionChrome()
         .accessibilityElement(children: .combine)
     }
 }
@@ -61,10 +104,10 @@ struct AuvGitBadge: View {
     var tint: Color
     init(_ title: String, tint: Color = .accentColor) { self.title = title; self.tint = tint }
     var body: some View {
-        Text(title).font(.system(size: 10, weight: .medium))
+        Text(title).font(.system(size: 10, weight: .semibold)).monospacedDigit()
             .foregroundStyle(tint).lineLimit(1)
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 4))
+            .padding(.horizontal, 6).frame(minHeight: 18)
+            .background(tint.opacity(0.09), in: RoundedRectangle(cornerRadius: 4))
     }
 }
 
@@ -73,8 +116,11 @@ struct AuvGitEmptyState: View {
     let systemImage: String
     var detail: String? = nil
     var body: some View {
-        VStack(spacing: 9) {
-            Image(systemName: systemImage).font(.system(size: 27, weight: .light)).foregroundStyle(.tertiary)
+        VStack(spacing: 12) {
+            Image(systemName: systemImage).font(.system(size: 23, weight: .regular))
+                .foregroundStyle(systemImage == "checkmark.circle" ? Color.green : AuvGitStyle.blue)
+                .frame(width: 44, height: 44)
+                .background((systemImage == "checkmark.circle" ? Color.green : AuvGitStyle.blue).opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
             Text(title).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
             if let detail { Text(detail).font(.system(size: 11)).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 280) }
         }.padding(20).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -87,5 +133,10 @@ extension View {
     func auvGitInputSurface() -> some View {
         background(AuvGitStyle.canvas, in: RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(AuvGitStyle.border, lineWidth: 0.5))
+    }
+    func auvGitSectionChrome() -> some View {
+        auvGitChrome().overlay(alignment: .bottom) {
+            Rectangle().fill(AuvGitStyle.border).frame(height: 0.5)
+        }
     }
 }

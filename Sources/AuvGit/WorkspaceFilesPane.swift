@@ -155,13 +155,12 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
         let controls = fileControls
         return VStack(spacing: 0) {
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 10) { statuses; Spacer(minLength: 4); controls }
-                VStack(spacing: 8) { HStack { statuses; Spacer() }; HStack { controls; Spacer() } }
-            }.controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).padding(.horizontal, 10).padding(.vertical, 3).auvGitChrome()
-            Divider()
+                HStack(spacing: 10) { fileHeading; Divider().frame(height: 14); statuses; Spacer(minLength: 4); controls }
+                VStack(spacing: 4) { HStack { fileHeading; Spacer(); controls }; HStack { statuses; Spacer() } }
+            }.controlSize(.small).buttonBorderShape(.roundedRectangle(radius: 6)).padding(.horizontal, 12).padding(.vertical, 5).auvGitSectionChrome()
             if treeMode && statusFailure == nil { treeContent(treeVisiblePaths).disabled(preparing).background { if let fileFocus { WorkspaceFileFocusRegion(focus: fileFocus).allowsHitTesting(false).accessibilityHidden(true) } } }
             else {
-                fileTable(rows, ready: cached != nil || (!preparing && displayedRepository == repository?.url.path))
+                fileTable(rows, ready: cached != nil || (!preparing && displayedRepository == repository?.url.path && displayedPreparation == preparationRequest))
                     .overlay {
                         if rows.isEmpty && !preparing && displayedRepository == repository?.url.path {
                             AuvGitEmptyState(title: statusFailure ?? text(files.isEmpty ? "clean" : "noFiles"), systemImage: statusFailure != nil ? "exclamationmark.triangle" : files.isEmpty ? "checkmark.circle" : "magnifyingglass")
@@ -170,6 +169,12 @@ struct WorkspaceFilesPane<TreeContent: View>: View {
                     }
             }
         }
+    }
+    private var fileHeading: some View {
+        HStack(spacing: 6) {
+            AuvGitSectionLabel(title: designWorkspaceText("Files"), systemImage: "doc.on.doc")
+            AuvGitBadge(String(files.count), tint: .secondary)
+        }.fixedSize()
     }
     private var filteredContent: some View {
         content

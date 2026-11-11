@@ -35,7 +35,7 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
         table.allowsEmptySelection = true
         table.usesAutomaticRowHeights = false
         table.rowHeight = 22
-        table.usesAlternatingRowBackgroundColors = true
+        table.usesAlternatingRowBackgroundColors = false
         table.intercellSpacing = NSSize(width: 3, height: 0)
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         table.allowsColumnReordering = true
@@ -230,6 +230,7 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
             let languageChanged = columnLanguage != L10n.language
             columnLanguage = L10n.language
             parent = value
+            table.fileToolTipsEnabled = value.isReady
             updating = true
             defer { updating = false }
             if changed {
@@ -261,6 +262,7 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
                 return NSSortDescriptor(key: column.id, ascending: order.ascending)
             }
             if table.sortDescriptors != descriptors { table.sortDescriptors = descriptors }
+            if languageChanged { table.refreshFileToolTips() }
             let indices = IndexSet(value.selection.compactMap { pathIndices[$0] }.sorted())
             // Focus invalidation can reach SwiftUI while AppKit is still tracking the click.
             if (!table.isTrackingMouse || changed), table.selectedRowIndexes != indices { table.selectRowIndexes(indices, byExtendingSelection: false) }
@@ -325,7 +327,7 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
                 }
             default:
                 let code = id.rawValue == "index" ? value.indexKey : value.worktreeKey
-                let key = [" ": "none", "?": "untracked", "M": "modified", "A": "added", "D": "deleted", "R": "renamed", "C": "copied", "U": "conflict", "T": "type"][code]
+                let key = statusKey(code)
                 cell.label.stringValue = key.map { L10n.text($0, table: "Files") } ?? code
                 cell.foregroundColor = color(key ?? "none")
                 if code != " " { cell.label.font = .systemFont(ofSize: 10, weight: .medium); cell.badgeColor = cell.foregroundColor }
@@ -334,15 +336,21 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
         }
         func fileToolTip(row: Int, column: NSTableColumn) -> String? {
             guard parent.isReady, rows.indices.contains(row) else { return nil }
+            let value = rows[row]
             switch column.identifier.rawValue {
-            case "filename": return rows[row].name
-            case "directory": return rows[row].path
-            default:
-                guard let table else { return nil }
-                let index = table.column(withIdentifier: column.identifier)
-                guard index >= 0 else { return nil }
-                return (table.view(atColumn: index, row: row, makeIfNecessary: false) as? Cell)?.label.stringValue
+            case "filename": return value.name
+            case "directory": return value.path
+            case "status":
+                guard let file = value.file else { return L10n.text("Ignored · read-only", table: "CompactWorkspace") }
+                return WorkspaceFileStatus(file).keys.map { L10n.text($0, table: "Files") }.joined(separator: " · ")
+            case "index", "workspace":
+                let code = column.identifier.rawValue == "index" ? value.indexKey : value.worktreeKey
+                return statusKey(code).map { L10n.text($0, table: "Files") } ?? code
+            default: return nil
             }
+        }
+        private func statusKey(_ code: String) -> String? {
+            [" ": "none", "?": "untracked", "M": "modified", "A": "added", "D": "deleted", "R": "renamed", "C": "copied", "U": "conflict", "T": "type"][code]
         }
         private func color(_ key: String) -> NSColor {
             switch key {
