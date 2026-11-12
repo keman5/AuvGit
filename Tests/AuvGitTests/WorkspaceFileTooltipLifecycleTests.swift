@@ -8,6 +8,85 @@ import AuvGitLocalization
 /// Exercise hover lifecycle without showing a window or moving the system pointer.
 @MainActor
 final class WorkspaceFileTooltipLifecycleTests: XCTestCase {
+    private struct RetainedProjects: View {
+        let first: WorkspaceNativeFilesTable
+        let second: WorkspaceNativeFilesTable
+        var firstIsActive: Bool
+        var body: some View {
+            ZStack {
+                first.opacity(firstIsActive ? 1 : 0).allowsHitTesting(firstIsActive).disabled(!firstIsActive)
+                second.opacity(firstIsActive ? 0 : 1).allowsHitTesting(!firstIsActive).disabled(firstIsActive)
+            }.frame(width: 700, height: 250)
+        }
+    }
+
+    func testSwitchingRetainedProjectsRevokesInactiveTooltipsAndRestoresThemOnReturn() async throws {
+        try await checkRetainedProjectSwitch(secondHasChanges: false)
+        try await checkRetainedProjectSwitch(secondHasChanges: true)
+    }
+
+    private func checkRetainedProjectSwitch(secondHasChanges: Bool) async throws {
+        _ = NSApplication.shared
+        let first = model(GitFile(path: "first/pending.swift", indexStatus: "M", worktreeStatus: " "))
+        let secondFile = GitFile(path: "second/current.txt", indexStatus: " ", worktreeStatus: "M")
+        let second = WorkspaceNativeFilesTable(rows: secondHasChanges ? [.init(path: secondFile.path, file: secondFile)] : [],
+            files: secondHasChanges ? [secondFile] : [],
+            repository: GitRepository(url: URL(fileURLWithPath: "/tmp/auvgit-tooltip-second")),
+            selection: .constant([]), isBusy: false, sortOrder: .constant([]), onAction: { _, _ in }, onCompare: { _ in })
+        let host = NSHostingView(rootView: RetainedProjects(first: first, second: second, firstIsActive: true))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 250), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentView = host
+        defer { window.close() }
+        await settle(host)
+        let firstTable = try XCTUnwrap(tables(in: host).first { $0.coordinator?.parent.repository?.url == first.repository?.url })
+        let secondTable = try XCTUnwrap(tables(in: host).first { $0.coordinator?.parent.repository?.url == second.repository?.url })
+        let point = NSPoint(x: 20, y: firstTable.rect(ofRow: 0).midY)
+
+        for _ in 0..<3 {
+            let owner = try XCTUnwrap(firstTable.fileToolTipOwner)
+            let tag = try XCTUnwrap(firstTable.fileToolTipTags.first)
+            XCTAssertEqual(owner.view(firstTable, stringForToolTip: tag, point: point, userData: nil), "pending.swift")
+            host.rootView = RetainedProjects(first: first, second: second, firstIsActive: false)
+            await settle(host)
+
+            // A's rows remain mounted and unchanged, but its hover registrations must not.
+            XCTAssertEqual(firstTable.numberOfRows, 1)
+            XCTAssertTrue(firstTable.fileToolTipTags.isEmpty)
+            XCTAssertNil(firstTable.fileToolTip(at: point))
+            XCTAssertEqual(owner.view(firstTable, stringForToolTip: tag, point: point, userData: nil), "")
+            for id in ["filename", "status", "directory", "index", "workspace"] {
+                XCTAssertNil(firstTable.fileToolTip(row: 0, column: NSTableColumn(identifier: .init(id))))
+            }
+            XCTAssertEqual(secondTable.fileToolTip(row: 0, column: NSTableColumn(identifier: .init("filename"))),
+                secondHasChanges ? "current.txt" : nil)
+            // Activation callbacks must not re-register the background project's tips.
+            NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
+            firstTable.updateTrackingAreas()
+            XCTAssertTrue(firstTable.fileToolTipTags.isEmpty)
+
+            host.rootView = RetainedProjects(first: first, second: second, firstIsActive: true)
+            await settle(host)
+            XCTAssertFalse(firstTable.fileToolTipTags.isEmpty)
+            XCTAssertEqual(firstTable.fileToolTip(at: point), "pending.swift")
+            XCTAssertEqual(firstTable.fileToolTip(row: 0, column: NSTableColumn(identifier: .init("status"))), statusText(first.files[0]))
+            XCTAssertEqual(firstTable.fileToolTip(row: 0, column: NSTableColumn(identifier: .init("directory"))), "first/pending.swift")
+            XCTAssertTrue(secondTable.fileToolTipTags.isEmpty)
+        }
+        XCTAssertFalse(window.isVisible)
+    }
+
+    private func tables(in view: NSView) -> [WorkspaceNativeFilesTable.FileTable] {
+        (view as? WorkspaceNativeFilesTable.FileTable).map { [$0] } ?? view.subviews.flatMap { tables(in: $0) }
+    }
+
+    private func settle(_ host: NSView) async {
+        for _ in 0..<10 {
+            host.layoutSubtreeIfNeeded()
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        tables(in: host).forEach { $0.updateTrackingAreas() }
+    }
+
     func testCommitRevokesStationaryTooltipsBeforePreparedRowsAreCleared() throws {
         _ = NSApplication.shared
         let file = GitFile(path: "src/committed.swift", indexStatus: "M", worktreeStatus: " ")

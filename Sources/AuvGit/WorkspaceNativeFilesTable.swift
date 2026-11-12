@@ -18,6 +18,7 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
     var fileFocus: WorkspaceFileFocus?
     var isReady = true
     var recreatableConflicts: Set<String> = []
+    @Environment(\.isEnabled) private var isEnabled
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSScrollView {
@@ -238,7 +239,9 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
             if sourceFilesChanged {
                 toolTipFilesByPath = Dictionary(value.files.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
             }
-            table.fileToolTipsEnabled = value.isReady && !value.isBusy
+            // Inactive projects retain their tables with opacity zero. AppKit's
+            // tooltip regions must follow SwiftUI's disabled state explicitly.
+            table.fileToolTipsEnabled = value.isEnabled && value.isReady && !value.isBusy
             updating = true
             defer { updating = false }
             if changed {
@@ -343,7 +346,7 @@ struct WorkspaceNativeFilesTable: NSViewRepresentable {
             return cell
         }
         func fileToolTip(row: Int, column: NSTableColumn) -> String? {
-            guard parent.isReady, !parent.isBusy, rows.indices.contains(row) else { return nil }
+            guard parent.isEnabled, parent.isReady, !parent.isBusy, rows.indices.contains(row) else { return nil }
             let value = rows[row]
             // Prepared rows may still be visible after Git publishes a newer status.
             guard value.file == toolTipFilesByPath[value.path] else { return nil }
