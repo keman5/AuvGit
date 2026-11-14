@@ -68,6 +68,40 @@ final class HistorySelectionIntegrationTests: XCTestCase {
         XCTAssertTrue(store.isHistoryDiff)
     }
 
+    func testCheckedScopeLogRejectsVirtualRowsAndRestoresOnlyCommitSelection() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("log-selection-" + UUID().uuidString)
+        let other = FileManager.default.temporaryDirectory.appendingPathComponent("log-other-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root); try? FileManager.default.removeItem(at: other) }
+        for directory in [root, other] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            for args in [["init", "-b", "main"], ["config", "user.name", "Test"], ["config", "user.email", "test@example.invalid"], ["config", "commit.gpgsign", "false"]] {
+                _ = try await GitProcess.run(at: directory, arguments: args)
+            }
+        }
+        let repository = GitRepository(url: root)
+        try "base\n".write(to: root.appendingPathComponent("file"), atomically: true, encoding: .utf8)
+        try await repository.stage(paths: ["file"]); try await repository.commit(message: "base")
+        let hash = try await repository.workflowRevision("HEAD")
+        let store = RepositoryStore(persistsSession: false, usesCheckedHistoryScope: true)
+        defer { store.closeTransientSession() }
+        await store.open(root, promptsIfUnavailable: false)
+        XCTAssertTrue(store.historyVirtualRows.isEmpty)
+        store.selectHistoryRows([hash, HistoryEndpoint.workingTree.id])
+        XCTAssertEqual(store.selectedHistoryIDs, [hash])
+        // Simulate a log cache from the old virtual-row presentation.
+        store.selectedHistoryIDs = [hash, HistoryEndpoint.workingTree.id]
+        store.selectedCommit = HistoryEndpoint.workingTree.id
+        store.historyComparisonRange = HistoryComparisonRange(from: .commit(hash), to: .workingTree)
+        store.diffText = "legacy virtual comparison"
+        await store.open(other, promptsIfUnavailable: false)
+        await store.open(root, promptsIfUnavailable: false)
+        XCTAssertEqual(store.selectedHistoryIDs, [hash])
+        XCTAssertEqual(store.selectedCommit, hash)
+        XCTAssertNil(store.historyComparisonRange)
+        XCTAssertNotEqual(store.diffText, "legacy virtual comparison")
+        XCTAssertTrue(store.historyVirtualRows.isEmpty)
+    }
+
     func testMainJournalSelectionAndRestoredLegacyStatePreserveWorkspacePreview() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("journal-workspace-" + UUID().uuidString)
         let other = FileManager.default.temporaryDirectory.appendingPathComponent("journal-other-" + UUID().uuidString)

@@ -307,7 +307,9 @@ private struct HistoryColumnHeader: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            Text(title).lineLimit(1).truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading)
+            Text(title).lineLimit(1).truncationMode(.tail)
+                .padding(.leading, column == .graph ? HistoryColumnLayout.headerLeadingInset - HistoryColumnLayout.leadingInset : 0)
+                .frame(maxWidth: .infinity, alignment: .leading)
             if column != .hash {
                 HistoryResizeHandle(title: title, column: column, width: $width)
                     .frame(width: 9, height: 13)

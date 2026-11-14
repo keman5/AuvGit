@@ -1,9 +1,56 @@
 import XCTest
 import AppKit
+import SwiftUI
+@testable import GitCore
 @testable import AuvGit
 
 @MainActor
 final class DiffPreviewLayoutTests: XCTestCase {
+    func testArchiveSummaryFitsShortPreviewAndCanScrollWithoutMovingToolbar() async throws {
+        let app = NSApplication.shared
+        let wasActive = app.isActive
+        let missing = FileRevisionContent(data: nil, text: nil, exists: false, isBinary: false, unavailableReason: nil)
+        let archive = FileRevisionContent(data: Data([0x50, 0x4b, 0, 0]), text: nil, exists: true, isBinary: true, unavailableReason: nil, byteCount: 5_000_000)
+        let snapshot = FileComparisonSnapshot(path: "design/PhotoSnap-iOS-界面设计.zip", head: missing, index: missing, worktree: archive, base: nil, ours: nil, theirs: nil,
+                                              previewTarget: .worktree(path: "design/PhotoSnap-iOS-界面设计.zip", untracked: true))
+        let host = NSHostingView(rootView: DiffPane(text: "", title: snapshot.path, isLoading: false, preview: snapshot)
+            .background(PreviewBoundsProbe()))
+        host.sizingOptions = []
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 150), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close() }
+        for _ in 0..<20 {
+            host.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let bounds = try XCTUnwrap(descendants(host, of: PreviewBoundsView.self).first)
+        let previewRect = bounds.convert(bounds.bounds, to: host)
+        XCTAssertGreaterThanOrEqual(previewRect.minY, -0.5, "Preview must not paint over the file list")
+        XCTAssertLessThanOrEqual(previewRect.maxY, host.bounds.maxY + 0.5, "Summary must fit the split pane")
+        let scrolls = descendants(host, of: NSScrollView.self)
+        let scroll = try XCTUnwrap(scrolls.first { ($0.documentView?.bounds.height ?? 0) > $0.contentSize.height + 1 }, "Long binary metadata must remain reachable in a short pane")
+        let document = try XCTUnwrap(scroll.documentView)
+        let originalY = scroll.contentView.bounds.origin.y
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, document.bounds.height - scroll.contentSize.height)))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        XCTAssertGreaterThan(scroll.contentView.bounds.origin.y, originalY)
+        XCTAssertEqual(bounds.convert(bounds.bounds, to: host), previewRect, "Scrolling metadata must leave the comparison toolbar in place")
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: originalY))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        if let path = ProcessInfo.processInfo.environment["AUVGIT_PREVIEW_SNAPSHOT"] {
+            let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: path))
+        }
+        XCTAssertFalse(window.isVisible)
+        XCTAssertEqual(app.isActive, wasActive)
+    }
+
+    private func descendants<T: NSView>(_ view: NSView, of type: T.Type) -> [T] {
+        (view as? T).map { [$0] } ?? view.subviews.flatMap { descendants($0, of: type) }
+    }
+
     func testUnwrappedPreviewDoesNotRewriteParagraphsOrRepeatLayout() {
         _ = NSApplication.shared
         let coordinator = DiffTextSurface.Coordinator()
@@ -42,3 +89,10 @@ final class DiffPreviewLayoutTests: XCTestCase {
         XCTAssertEqual((text.textStorage?.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)?.paragraphSpacing, 0)
     }
 }
+
+private struct PreviewBoundsProbe: NSViewRepresentable {
+    func makeNSView(context: Context) -> PreviewBoundsView { PreviewBoundsView() }
+    func updateNSView(_ nsView: PreviewBoundsView, context: Context) {}
+}
+
+private final class PreviewBoundsView: NSView {}

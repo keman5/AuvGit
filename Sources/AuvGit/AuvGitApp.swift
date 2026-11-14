@@ -290,6 +290,7 @@ final class RepositoryStore: ObservableObject {
         selectedCommit = value.selectedCommit; selectedCommitPath = value.selectedCommitPath; mode = persistsSession ? "workspace" : value.mode; fileFilter = value.fileFilter
         stagedDiff = value.stagedDiff; ignoreWhitespace = value.ignoreWhitespace
         if followsCurrentBranch { normalizeJournalSelection() }
+        else if usesCheckedHistoryScope { normalizeLogSelection() }
     }
     func closeRepositoryTab(_ path: String) {
         guard !isBusy else { return }
@@ -452,7 +453,7 @@ final class RepositoryStore: ObservableObject {
     private var historySelectionVersion = UUID()
     @Published var graphHeadCommitID: String?
     var graphRepositoryIdentity: UUID { repoVersion }
-    var historyVirtualRows: [HistoryVirtualRow] { followsCurrentBranch || repository == nil || historyPath != nil || historyStashHash != nil ? [] : [.workingTree, .index] }
+    var historyVirtualRows: [HistoryVirtualRow] { followsCurrentBranch || usesCheckedHistoryScope || repository == nil || historyPath != nil || historyStashHash != nil ? [] : [.workingTree, .index] }
     @Published var selectedCommit: String? {
         didSet {
             if let selectedCommit, !selectedHistoryIDs.contains(selectedCommit) {
@@ -1543,6 +1544,12 @@ final class RepositoryStore: ObservableObject {
             loadedHistoryScope = snapshot.historyScope
         } else { lastHistoryState = nil; loadedHistoryScope = nil }
         historyRestoreDepth = snapshot.loadedCount
+        let virtualIDs: Set<String> = [HistoryEndpoint.workingTree.id, HistoryEndpoint.index.id]
+        let restoredVirtualSelection = !(snapshot.viewState.selectedHistoryIDs ?? []).isDisjoint(with: virtualIDs)
+            || snapshot.viewState.selectedCommit.map(virtualIDs.contains) == true
+        if usesCheckedHistoryScope && restoredVirtualSelection {
+            commitFiles = []; selectedCommitPath = nil; clearDiff(); setDiffTitle("Select a file to view changes")
+        }
         if followsCurrentBranch {
             normalizeJournalSelection()
             if snapshot.viewState.displaysHistorySelection == true || snapshot.viewState.historyComparisonRange != nil || snapshot.diffTitle == "%@  /  %@" {
@@ -2014,6 +2021,18 @@ extension RepositoryStore {
         selectedCommit = primary
         displaysHistorySelection = false; historyComparisonRange = nil
         selectedCommitPath = nil; commitFiles = []; mode = "workspace"
+    }
+
+    /// Cached log selections may predate the removal of workspace/index rows.
+    private func normalizeLogSelection() {
+        let virtualIDs: Set<String> = [HistoryEndpoint.workingTree.id, HistoryEndpoint.index.id]
+        let realIDs = selectedHistoryIDs.subtracting(virtualIDs)
+        let hasVirtualPrimary = selectedCommit.map(virtualIDs.contains) == true
+        guard realIDs != selectedHistoryIDs || hasVirtualPrimary else { return }
+        selectedHistoryIDs = realIDs
+        if hasVirtualPrimary { selectedCommit = realIDs.sorted().first }
+        historyComparisonRange = nil
+        selectedCommitPath = nil; commitFiles = []
     }
 
     func selectHistoryRows(_ ids: Set<String>) {
