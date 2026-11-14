@@ -299,5 +299,5 @@ SWIFT
   rm -rf -- "$PWD/.artifacts"
   print "Cleaned $PWD/.artifacts (generated app and disk image)"
   swift package clean
-  open -g "$LOCAL_APP"
+  if [[ "${AUVGIT_LAUNCH_AFTER_BUILD:-1}" == 1 ]]; then open -g "$LOCAL_APP"; fi
 fi

@@ -160,7 +160,7 @@ final class GitInteractionTests: XCTestCase {
         let original = try await repo.workflowRevision("HEAD")
         try write("new", "base", at: url); try await repo.stage(paths: ["base"]); try await repo.commit(message: "new")
         let newHash = try await repo.workflowRevision("HEAD")
-        _ = try await GitProcess.run(at: bare, arguments: ["fetch", url.path, "main:refs/heads/topic"])
+        _ = try await GitProcess.run(at: bare, arguments: ["--git-dir=" + bare.path, "fetch", url.path, "main:refs/heads/topic"])
         let tracking = try await repo.workflowRevision("refs/remotes/custom/topic")
         XCTAssertEqual(tracking, original)
         do {
@@ -169,7 +169,7 @@ final class GitInteractionTests: XCTestCase {
         } catch {
             XCTAssertEqual(GitFailureSummary.key(for: error.localizedDescription), "Remote branch changed; fetch updates and confirm deletion again")
         }
-        let head = try await GitProcess.run(at: bare, arguments: ["rev-parse", "refs/heads/topic"]).text.trimmingCharacters(in: .newlines)
+        let head = try await GitProcess.run(at: bare, arguments: ["--git-dir=" + bare.path, "rev-parse", "refs/heads/topic"]).text.trimmingCharacters(in: .newlines)
         XCTAssertEqual(head, newHash)
     }
     func testRemoteDeletionCleansAlreadyDeletedTrackingRefAndPreservesLocalBranch() async throws {
@@ -183,7 +183,7 @@ final class GitInteractionTests: XCTestCase {
         _ = try await repo.workflowRead(["push", "team", "HEAD:refs/heads/topic"])
         _ = try await repo.workflowRead(["fetch", "team"])
         let original = try await repo.workflowRevision("HEAD")
-        _ = try await GitProcess.run(at: bare, arguments: ["update-ref", "-d", "refs/heads/topic"])
+        _ = try await GitProcess.run(at: bare, arguments: ["--git-dir=" + bare.path, "update-ref", "-d", "refs/heads/topic"])
         try await repo.deleteRemoteBranch(reference: "refs/remotes/custom/topic")
         let refs = try await repo.workflowRead(["for-each-ref", "--format=%(refname)", "refs/remotes/custom/topic"])
         XCTAssertTrue(refs.isEmpty)
@@ -201,9 +201,9 @@ final class GitInteractionTests: XCTestCase {
         _ = try await repo.workflowRead(["fetch", "team"])
         _ = try await repo.workflowRead(["push", pushURL.path, "HEAD:refs/heads/topic"])
         _ = try await repo.workflowRead(["config", "remote.team.pushurl", pushURL.path])
-        _ = try await GitProcess.run(at: fetchURL, arguments: ["update-ref", "-d", "refs/heads/topic"])
+        _ = try await GitProcess.run(at: fetchURL, arguments: ["--git-dir=" + fetchURL.path, "update-ref", "-d", "refs/heads/topic"])
         try await repo.deleteRemoteBranch(reference: "refs/remotes/team/topic")
-        let heads = try await GitProcess.run(at: pushURL, arguments: ["for-each-ref", "--format=%(refname)", "refs/heads/topic"]).text
+        let heads = try await GitProcess.run(at: pushURL, arguments: ["--git-dir=" + pushURL.path, "for-each-ref", "--format=%(refname)", "refs/heads/topic"]).text
         XCTAssertTrue(heads.isEmpty)
     }
     func testRemoteDeletionLeaseRejectsCommitArrivingAfterPreflight() async throws {
@@ -218,7 +218,7 @@ final class GitInteractionTests: XCTestCase {
         let original = try await repo.workflowRevision("HEAD")
         try write("next", "base", at: url); try await repo.stage(paths: ["base"]); try await repo.commit(message: "next")
         let next = try await repo.workflowRevision("HEAD")
-        _ = try await GitProcess.run(at: bare, arguments: ["fetch", url.path, "main"])
+        _ = try await GitProcess.run(at: bare, arguments: ["--git-dir=" + bare.path, "fetch", url.path, "main"])
         try write(next, ".git/advance-to", at: url)
         let wrapper = url.appendingPathComponent("git-wrapper")
         try """
@@ -242,7 +242,7 @@ final class GitInteractionTests: XCTestCase {
             XCTAssertTrue(error.localizedDescription.contains("stale info"))
             XCTAssertEqual(GitFailureSummary.key(for: error.localizedDescription), "Remote branch changed; fetch updates and confirm deletion again")
         }
-        let server = try await GitProcess.run(at: bare, arguments: ["rev-parse", "refs/heads/topic"]).text.trimmingCharacters(in: .newlines)
+        let server = try await GitProcess.run(at: bare, arguments: ["--git-dir=" + bare.path, "rev-parse", "refs/heads/topic"]).text.trimmingCharacters(in: .newlines)
         XCTAssertEqual(server, next)
         let tracking = try await repo.workflowRevision("refs/remotes/team/topic")
         XCTAssertEqual(tracking, original)

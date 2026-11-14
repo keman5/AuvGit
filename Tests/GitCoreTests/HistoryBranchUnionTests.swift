@@ -23,6 +23,8 @@ final class HistoryBranchUnionTests: XCTestCase {
         let union = try await repo.log(refs: refs + refs)
         XCTAssertEqual(Set(union.map(\.hash)), [base, local, remote])
         XCTAssertEqual(union.count, 3)
+        XCTAssertTrue(union.first(where: { $0.hash == local })?.refs.contains(refs[0]) == true)
+        XCTAssertTrue(union.first(where: { $0.hash == remote })?.refs.contains(refs[1]) == true)
         let localOnly = try await repo.log(refs: [refs[0]])
         XCTAssertEqual(Set(localOnly.map(\.hash)), [base, local])
         let empty = try await repo.log(refs: [])
@@ -87,6 +89,26 @@ final class HistoryBranchUnionTests: XCTestCase {
         XCTAssertEqual(Set(stashOnly.map(\.hash)), Set(hashes))
         let branchOnly = try await repo.log(refs: ["HEAD"])
         XCTAssertEqual(branchOnly.map(\.hash), [base])
+    }
+
+    func testUnionKeepsChildrenBeforeParentsWithClockSkewAndPagination() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repo = GitRepository(url: root)
+        for args in [["init", "-b", "main"], ["config", "user.name", "Test"], ["config", "user.email", "test@example.invalid"], ["config", "commit.gpgsign", "false"]] {
+            _ = try await GitProcess.run(at: root, arguments: args)
+        }
+        for (message, date) in [("parent", "2030-01-01T00:00:00+0000"), ("child", "2020-01-01T00:00:00+0000")] {
+            _ = try await GitProcess.run(at: root, arguments: ["commit", "--allow-empty", "-m", message],
+                environmentOverrides: ["GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date])
+        }
+        let child = try await repo.workflowRevision("HEAD")
+        let rows = try await repo.log(refs: ["HEAD"], stashHashes: [child])
+        XCTAssertEqual(rows.map(\.subject), ["child", "parent"])
+        let first = try await repo.log(limit: 1, refs: ["HEAD"], stashHashes: [child])
+        let rest = try await repo.log(limit: 1, skip: 1, refs: ["HEAD"], stashHashes: [child])
+        XCTAssertEqual(first + rest, rows)
     }
 
 }

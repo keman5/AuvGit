@@ -84,6 +84,32 @@ final class ComparisonSearchTests: XCTestCase {
         commands.redo()
         XCTAssertEqual(draft, "🙂two two\ntwo\n")
     }
+    func testSingleReplacementContinuesAfterMatchAndPreservesNativeUndo() throws {
+        _ = NSApplication.shared
+        let original = "🙂one one one"
+        let commands = ComparisonEditingCommands()
+        let editor = ComparisonEditor(columns: [.init(id: "worktree", title: "Result", text: original, isEditable: true, message: nil, preservesUndo: true)],
+            wrapLines: false, showLineNumbers: true, synchronizeScroll: true, search: "", navigation: 0,
+            changeNavigation: 0, onEdit: { _, _ in }, editingCommands: commands)
+        let split = ComparisonSplitView(frame: NSRect(x: 0, y: 0, width: 600, height: 300))
+        let coordinator = ComparisonEditor.Coordinator(editor); coordinator.split = split; coordinator.update(editor)
+        let window = NSWindow(contentRect: split.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentView = split
+        defer { window.close(); withExtendedLifetime(coordinator) {} }
+        let text = try XCTUnwrap(split.subviews.compactMap { pane in
+            pane.subviews.compactMap { ($0 as? NSScrollView)?.documentView as? ComparisonTextView }.first
+        }.first)
+        text.setSelectedRange(NSRange(location: 6, length: 3))
+        XCTAssertNil(commands.replaceSearch(options: .init(query: "one"), replacement: "TWO!", all: false))
+        XCTAssertEqual(text.string, "🙂one TWO! one")
+        XCTAssertEqual(text.selectedRange(), NSRange(location: 10, length: 0))
+        XCTAssertNil(commands.replaceSearch(options: .init(query: "one"), replacement: "TWO!", all: false))
+        XCTAssertEqual(text.string, "🙂one TWO! TWO!")
+        text.editingUndoManager.undo()
+        XCTAssertEqual(text.string, "🙂one TWO! one")
+        text.editingUndoManager.undo()
+        XCTAssertEqual(text.string, original)
+    }
     func testCompactProjectionKeepsActualLineNumbersAndInsertionBands() {
         let columns = [ComparisonEditorColumn(id: "head", title: "HEAD", text: "same\nold\ntail\n", isEditable: false, message: nil), ComparisonEditorColumn(id: "worktree", title: "Result", text: "same\nnew\ninserted\ntail\n", isEditable: true, message: nil)]
         let compact = CompactComparisonProjection(columns: columns, conflict: false)

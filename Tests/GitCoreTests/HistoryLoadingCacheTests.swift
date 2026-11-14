@@ -95,10 +95,10 @@ final class HistoryLoadingCacheTests: XCTestCase {
         let original = try await repo.currentBranch()
         _ = try await repo.workflowRead(["branch", "other-branch"])
         let before = try await repo.log(path: "file.txt", ref: "HEAD")
-        XCTAssertTrue(before.first?.refs.contains("HEAD -> " + original) == true)
+        XCTAssertTrue(before.first?.refs.contains("HEAD -> refs/heads/" + original) == true)
         try await repo.checkout(branch: "other-branch")
         let after = try await repo.log(path: "file.txt", ref: "HEAD")
-        XCTAssertTrue(after.first?.refs.contains("HEAD -> other-branch") == true)
+        XCTAssertTrue(after.first?.refs.contains("HEAD -> refs/heads/other-branch") == true)
         let traversals = await repo.fileHistoryTraversalCount
         XCTAssertEqual(traversals, 2)
     }

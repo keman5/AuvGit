@@ -13,6 +13,20 @@ final class HistoryGraphColorsTests: XCTestCase {
                   subject: hash, body: "", refs: refs)
     }
 
+    func testQualifiedLocalRemoteNamesKeepIndependentStylesAndVisibility() {
+        let local = "refs/heads/origin/topic", remote = "refs/remotes/origin/topic"
+        let commits = [commit("local", parents: ["base"], refs: ["HEAD -> " + local]),
+                       commit("remote", parents: ["base"], refs: [remote]), commit("base")]
+        let plan = HistoryGraphStylePlan(commits: commits, remoteBranchNames: ["origin/topic"])
+        XCTAssertFalse(plan.isRemoteReference(local))
+        XCTAssertTrue(plan.isRemoteReference(remote))
+        XCTAssertEqual(plan.referenceStyle(for: local, commitHash: "local").color, .blue)
+        XCTAssertEqual(plan.referenceStyle(for: remote, commitHash: "remote").color, .green)
+        let hidden = HistoryGraphStylePlan(commits: commits, remoteBranchNames: ["origin/topic"], visibleRemoteBranchNames: [])
+        XCTAssertTrue(hidden.isVisibleReference(local))
+        XCTAssertFalse(hidden.isVisibleReference(remote))
+    }
+
     func testLocalSideBranchesAndIncomingBranchesUseRoundedShortDashes() {
         let commits = [
             commit("head", parents: ["local"], refs: ["HEAD -> main"]),

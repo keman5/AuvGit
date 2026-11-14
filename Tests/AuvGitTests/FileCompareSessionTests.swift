@@ -45,6 +45,55 @@ final class FileCompareSessionTests: XCTestCase {
         XCTAssertEqual(session.snapshot?.theirs?.data, original.theirs?.data, file: file, line: line)
     }
 
+    func testResolvingSavesMergeResultInsteadOfActiveSourceCopy() async throws {
+        let (root, repository) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = FileCompareSession(repository: repository, path: path)
+        await session.reload()
+        let result = "reviewed merge result\n"
+        session.edit("worktree", text: result)
+        session.edit("theirs", text: "unfinished source experiment\n")
+        let resolved = await session.stage(resolve: true)
+        XCTAssertTrue(resolved, session.error ?? "resolution failed")
+        let saved = try await repository.fileComparison(path: path)
+        XCTAssertEqual(saved.worktree.text, result)
+        XCTAssertEqual(saved.index.text, result)
+        XCTAssertFalse(session.isDirty("worktree"))
+        XCTAssertTrue(session.isDirty("theirs"), "Resolving must retain unrelated source drafts")
+    }
+
+    func testHistoricalComparisonSurvivesCurrentSymlinkAncestorWithoutEnablingWrites() async throws {
+        let (root, repository) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let folder = root.appendingPathComponent("old-folder")
+        let outside = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: outside) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        try Data("historical text\n".utf8).write(to: folder.appendingPathComponent("file.txt"))
+        // The fixture intentionally has an unresolved merge; stage the existing file first.
+        let conflict = try await repository.fileComparison(path: path)
+        let clean = try await repository.saveWorktree(path: path, text: "resolved\n", expected: conflict.worktree)
+        try await repository.markResolved(path: path, expected: clean)
+        try await repository.stage(paths: ["old-folder/file.txt"])
+        try await repository.commit(message: "Historical folder")
+        let hash = try await repository.workflowRevision("HEAD")
+        try FileManager.default.removeItem(at: folder)
+        try Data("outside content\n".utf8).write(to: outside.appendingPathComponent("file.txt"))
+        try FileManager.default.createSymbolicLink(at: folder, withDestinationURL: outside)
+
+        let session = FileCompareSession(repository: repository, path: "old-folder/file.txt", target: .commit(hash: hash, path: "old-folder/file.txt"))
+        await session.reload()
+        XCTAssertNil(session.error)
+        XCTAssertEqual(session.snapshot?.worktree.text, "historical text\n")
+        XCTAssertFalse(session.canEdit)
+        XCTAssertNil(session.savedWorktree)
+        session.edit("worktree", text: "overwrite\n")
+        let saved = await session.save()
+        XCTAssertFalse(saved)
+        XCTAssertEqual(try String(contentsOf: outside.appendingPathComponent("file.txt"), encoding: .utf8), "outside content\n")
+    }
+
     func testSaveAndResolveKeepOriginalSourcesAndAllowUndoDraftThenRepeatSave() async throws {
         let (root, repository) = try await fixture()
         defer { try? FileManager.default.removeItem(at: root) }

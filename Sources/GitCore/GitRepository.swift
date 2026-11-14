@@ -148,7 +148,7 @@ public actor GitRepository {
     private func readLog(limit: Int, skip: Int, search: String, path: String?, ref: String?, author: String,
                          firstParent: Bool, refs: [String]?, stashHashes: [String], includeRecyclable: Bool, incomingOnly: Bool) async throws -> [GitCommit] {
         if let refs, refs.isEmpty, stashHashes.isEmpty, !includeRecyclable { return [] }
-        var args = ["log", "--topo-order", "-z", "--format=%H%x00%P%x00%an%x00%at%x00%s%x00%B%x00%D%x00%ae%x00%cn%x00%ce%x00%ct"]
+        var args = ["log", "--topo-order", "--decorate=full", "-z", "--format=%H%x00%P%x00%an%x00%at%x00%s%x00%B%x00%D%x00%ae%x00%cn%x00%ce%x00%ct"]
         if firstParent { args.append("--first-parent") }
         if path == nil { args += ["--max-count=\(max(0,limit))", "--skip=\(max(0,skip))"] }
         if path == nil && !author.isEmpty { args += ["--fixed-strings", "--regexp-ignore-case", "--author=" + author] }
@@ -186,7 +186,13 @@ public actor GitRepository {
             let input = FileManager.default.temporaryDirectory.appendingPathComponent("auvgit-history-" + UUID().uuidString)
             try Data((selected.sorted().joined(separator: "\n") + "\n").utf8).write(to: input, options: .atomic)
             revisionInput = input
-            args += ["--no-walk=sorted", "--stdin"]
+            // Date sorting can put a parent before its child when clocks differ.
+            // Order the union before pagination, then retain only requested hashes
+            // so stash index/untracked parents do not leak into the graph.
+            let traversal = try await GitProcess.run(at: url, arguments: ["rev-list", "--topo-order", "--stdin", "--"], inputFile: input)
+            let ordered = traversal.text.split(separator: "\n").filter { selected.contains(String($0)) }
+            try Data((ordered.joined(separator: "\n") + "\n").utf8).write(to: input, options: .atomic)
+            args += ["--no-walk=unsorted", "--stdin"]
         } else if let refs {
             for value in Set(refs).sorted() { args.append(try await validatedCommit(value)) }
         } else if let ref { args.append(try await validatedCommit(ref)) }

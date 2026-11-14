@@ -44,6 +44,7 @@ struct HistoryGraphStylePlan {
         let name: String
         let tip: String
         let remote: Bool
+        var identity: String { (remote ? "refs/remotes/" : "refs/heads/") + name }
     }
 
     private let commitsByHash: [String: GitCommit]
@@ -98,7 +99,7 @@ struct HistoryGraphStylePlan {
         var styles: [String: HistoryGraphLineStyle] = [:]
         for branch in local + remote {
             let isCurrent = branch.remote ? branch.name == upstream : branch.name == currentName
-            styles[branch.name] = Self.style(current: isCurrent, unpushed: !branch.remote && unpushed.contains(branch.tip), remoteOnly: remoteOnly.contains(branch.tip))
+            styles[branch.identity] = Self.style(current: isCurrent, unpushed: !branch.remote && unpushed.contains(branch.tip), remoteOnly: remoteOnly.contains(branch.tip))
         }
         branchStyles = styles
 
@@ -116,7 +117,7 @@ struct HistoryGraphStylePlan {
             return $0.name < $1.name
         }
         for branch in ordered {
-            Self.assignFirstParentLineage(from: branch.tip, style: styles[branch.name]!, parents: parents, to: &hashes)
+            Self.assignFirstParentLineage(from: branch.tip, style: styles[branch.identity]!, parents: parents, to: &hashes)
         }
         for commit in commits where hashes[commit.hash] == nil {
             let fallback = Self.style(current: false, unpushed: false)
@@ -158,7 +159,7 @@ struct HistoryGraphStylePlan {
     func referenceStyle(for reference: String, commitHash: String) -> HistoryGraphLineStyle {
         if isTagReference(reference) { return .init(color: .amber, stroke: .solid, lineWidth: 1.2, variant: 0) }
         if let branch = Self.branch(reference, tip: commitHash, remoteBranchNames: remoteBranchNames, remoteNames: remoteNames) {
-            if let style = branchStyles[branch.name] { return branch.remote ? style : unpushedTint(style, hash: commitHash) }
+            if let style = branchStyles[branch.identity] { return branch.remote ? style : unpushedTint(style, hash: commitHash) }
             return Self.style(current: branch.remote ? branch.name == currentRemoteBranchName : branch.name == currentBranchName, unpushed: !branch.remote && lineStyle(for: commitHash).stroke == .dashed)
         }
         return lineStyle(for: commitHash)
@@ -187,7 +188,7 @@ struct HistoryGraphStylePlan {
 
     private static func uniqueBranches(_ branches: [Branch]) -> [Branch] {
         var seen = Set<String>()
-        return branches.filter { seen.insert($0.name).inserted }
+        return branches.filter { seen.insert($0.identity).inserted }
     }
 
     private static func branch(_ reference: String, tip: String, remoteBranchNames: Set<String>, remoteNames: Set<String>) -> Branch? {
@@ -195,11 +196,12 @@ struct HistoryGraphStylePlan {
         guard raw != "HEAD", !isTagReference(raw) else { return nil }
         let current = raw.hasPrefix("HEAD -> ")
         var name = current ? String(raw.dropFirst(8)) : raw
+        let explicitLocal = name.hasPrefix("refs/heads/")
         let explicitRemote = name.hasPrefix("refs/remotes/")
         if name.hasPrefix("refs/heads/") { name = String(name.dropFirst(11)) }
         if name.hasPrefix("refs/remotes/") { name = String(name.dropFirst(13)) }
         guard !name.isEmpty else { return nil }
-        let remote = !current && (explicitRemote || remoteBranchNames.contains(name) || remoteNames.contains { name.hasPrefix($0 + "/") })
+        let remote = !current && !explicitLocal && (explicitRemote || remoteBranchNames.contains(name) || remoteNames.contains { name.hasPrefix($0 + "/") })
         return Branch(name: name, tip: tip, remote: remote)
     }
 

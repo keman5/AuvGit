@@ -197,12 +197,21 @@ final class FileCompareSession: ObservableObject {
         isBusy = true; error = nil
         defer { isBusy = false }
         do {
-            let current = try await repository.fileComparison(path: path)
+            let current: FileComparisonSnapshot?
             let snapshot: FileComparisonSnapshot
-            if isHistorical, let target { snapshot = try await repository.comparisonPreview(target: target) } else { snapshot = current }
+            if isHistorical, let target {
+                snapshot = try await repository.comparisonPreview(target: target)
+                // Historical blobs remain viewable when the current path is inaccessible
+                // or traverses a symlink. Without a safe live snapshot, disable editing.
+                do { current = try await repository.fileComparison(path: path) }
+                catch { try Task.checkCancellation(); current = nil }
+            } else {
+                let live = try await repository.fileComparison(path: path)
+                current = live; snapshot = live
+            }
             self.snapshot = snapshot
             latestSnapshot = current
-            let working = preferredEncoding.map { current.worktree.reinterpreting(as: $0) } ?? current.worktree
+            let working = current.map { live in preferredEncoding.map { live.worktree.reinterpreting(as: $0) } ?? live.worktree }
             let indexed = preferredEncoding.map { snapshot.index.reinterpreting(as: $0) } ?? snapshot.index
             savedWorktree = working
             historicalWorktree = isHistorical ? working : nil
@@ -217,6 +226,7 @@ final class FileCompareSession: ObservableObject {
     }
     func reloadPatch() async {
         patchGeneration += 1
+        guard !isHistorical else { partial = nil; patch = ""; return }
         let generation = patchGeneration, unstage = unstagePartial
         let comparison = latestSnapshot, ignore = ignoreWhitespace, repository = repository, path = path
         let untracked = comparison?.index.exists == false && comparison?.isConflict == false
@@ -267,15 +277,18 @@ final class FileCompareSession: ObservableObject {
     }
     @discardableResult
     func save() async -> Bool {
+        await save(paneID: savingPaneID)
+    }
+    private func save(paneID: String) async -> Bool {
         guard !isBusy, let expected = savedWorktree else { return false }
-        if !isDirty { return true }
+        if !isDirty(paneID) { return true }
         guard canEdit else {
             error = expected.unavailableReason.map { compareText($0) } ?? compareText("File does not exist in this version")
             return false
         }
         isBusy = true; error = nil
         defer { isBusy = false }
-        let paneID = savingPaneID, value = text(in: savingPaneID), hadWorktreeDraft = isDirty("worktree"), hadCurrentDraft = isDirty("current")
+        let value = text(in: paneID), hadWorktreeDraft = isDirty("worktree"), hadCurrentDraft = isDirty("current")
         do {
             let before = try await repository.fileComparison(path: path)
             guard sameRevision(before.worktree, expected), latestSnapshot.map({ sameIndexAndSources(before, $0) }) ?? true else {
@@ -337,7 +350,9 @@ final class FileCompareSession: ObservableObject {
     @discardableResult
     func stage(resolve: Bool) async -> Bool {
         guard !isBusy else { return false }
-        if isDirty { guard await save() else { return false } }
+        // Stage the working-tree result, never an unrelated active source copy.
+        let resultPaneID = isHistorical ? "current" : "worktree"
+        if isDirty(resultPaneID) { guard await save(paneID: resultPaneID) else { return false } }
         guard let expected = savedWorktree, let latestSnapshot else { return false }
         isBusy = true; error = nil
         defer { isBusy = false }

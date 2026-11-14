@@ -61,7 +61,7 @@ final class GitRepositoryTests: XCTestCase {
         try await repo.pushFirstBranch(request, remote: "chosen", remoteBranch: "review/new")
         let branches = try await repo.branches()
         XCTAssertEqual(branches.first { $0.isCurrent }?.upstream, "chosen/review/new")
-        let advertised = try await GitProcess.run(at: remote, arguments: ["rev-parse", "refs/heads/review/new"])
+        let advertised = try await GitProcess.run(at: remote, arguments: ["--git-dir=" + remote.path, "rev-parse", "refs/heads/review/new"])
         XCTAssertEqual(advertised.text.trimmingCharacters(in: .newlines), request.commit)
         let next = try await repo.firstPushRequest()
         XCTAssertNil(next)

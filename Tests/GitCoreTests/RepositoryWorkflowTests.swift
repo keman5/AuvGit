@@ -171,13 +171,13 @@ extension RepositoryWorkflowTests {
         try await repo.createManagedTag(name: "v1", revision: "HEAD", message: "release", signed: false)
         let tags = try await repo.managedTags(); XCTAssertEqual(tags.map(\.name), ["v1"]); XCTAssertEqual(tags[0].message, "release")
         _ = try await repo.synchronizeTag(name: "v1", remote: "origin", delete: false, preview: true)
-        let absent = try await GitProcess.run(at: bare, arguments: ["show-ref", "--verify", "refs/tags/v1"], allowedCodes: [0, 128]); XCTAssertNotEqual(absent.code, 0)
+        let absent = try await GitProcess.run(at: bare, arguments: ["--git-dir=" + bare.path, "show-ref", "--verify", "refs/tags/v1"], allowedCodes: [0, 128]); XCTAssertNotEqual(absent.code, 0)
         _ = try await repo.synchronizeTag(name: "v1", remote: "origin", delete: false, preview: false)
-        _ = try await GitProcess.run(at: bare, arguments: ["show-ref", "--verify", "refs/tags/v1"])
+        _ = try await GitProcess.run(at: bare, arguments: ["--git-dir=" + bare.path, "show-ref", "--verify", "refs/tags/v1"])
         _ = try await repo.synchronizeTag(name: "v1", remote: "origin", delete: true, preview: true)
-        _ = try await GitProcess.run(at: bare, arguments: ["show-ref", "--verify", "refs/tags/v1"])
+        _ = try await GitProcess.run(at: bare, arguments: ["--git-dir=" + bare.path, "show-ref", "--verify", "refs/tags/v1"])
         _ = try await repo.synchronizeTag(name: "v1", remote: "origin", delete: true, preview: false)
-        let deleted = try await GitProcess.run(at: bare, arguments: ["show-ref", "--verify", "refs/tags/v1"], allowedCodes: [0, 128]); XCTAssertNotEqual(deleted.code, 0)
+        let deleted = try await GitProcess.run(at: bare, arguments: ["--git-dir=" + bare.path, "show-ref", "--verify", "refs/tags/v1"], allowedCodes: [0, 128]); XCTAssertNotEqual(deleted.code, 0)
     }
 }
 

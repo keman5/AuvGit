@@ -10,6 +10,10 @@ struct ComparisonSearchOptions: Equatable {
 func comparisonSearchText(_ key: String) -> String { L10n.text(key, table: "ComparisonSearch") }
 
 enum ComparisonSearch {
+    struct ReplacementEdit {
+        let range: NSRange
+        let text: String
+    }
     private static let expressions: NSCache<NSString, NSRegularExpression> = {
         let cache = NSCache<NSString, NSRegularExpression>(); cache.countLimit = 32; return cache
     }()
@@ -57,18 +61,28 @@ enum ComparisonSearch {
         return lines
     }
     static func replacing(in text: String, options: ComparisonSearchOptions, replacement: String, all: Bool, selected: NSRange? = nil) -> Result<String, Error> {
+        replacementEdit(in: text, options: options, replacement: replacement, all: all, selected: selected).map { edit in
+            guard let edit else { return text }
+            return (text as NSString).replacingCharacters(in: edit.range, with: edit.text)
+        }
+    }
+    static func replacementEdit(in text: String, options: ComparisonSearchOptions, replacement: String, all: Bool, selected: NSRange? = nil) -> Result<ReplacementEdit?, Error> {
         do {
-            guard !options.query.isEmpty else { return .success(text) }
+            guard !options.query.isEmpty else { return .success(nil) }
             let expression = try expression(for: options)
             let matches = expression.matches(in: text, range: NSRange(location: 0, length: text.utf16.count))
-            guard !matches.isEmpty else { return .success(text) }
-            let targets = all ? matches : [matches.first(where: { $0.range == selected }) ?? matches.first(where: { $0.range.location >= (selected?.location ?? 0) }) ?? matches[0]]
+            guard let first = matches.first else { return .success(nil) }
+            if !all {
+                let match = matches.first(where: { $0.range == selected }) ?? matches.first(where: { $0.range.location >= (selected?.location ?? 0) }) ?? first
+                let insertion = options.regularExpression ? expression.replacementString(for: match, in: text, offset: 0, template: replacement) : replacement
+                return .success(ReplacementEdit(range: match.range, text: insertion))
+            }
             let value = NSMutableString(string: text)
-            for match in targets.reversed() {
+            for match in matches.reversed() {
                 let insertion = options.regularExpression ? expression.replacementString(for: match, in: text, offset: 0, template: replacement) : replacement
                 value.replaceCharacters(in: match.range, with: insertion)
             }
-            return .success(value as String)
+            return .success(ReplacementEdit(range: NSRange(location: 0, length: text.utf16.count), text: value as String))
         } catch { return .failure(error) }
     }
 }

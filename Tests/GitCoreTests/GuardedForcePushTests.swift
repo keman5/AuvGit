@@ -35,7 +35,7 @@ final class GuardedForcePushTests: XCTestCase {
         return Fixture(root: root, bare: bare, local: local, other: other)
     }
     private func remoteHead(_ fixture: Fixture) async throws -> String {
-        try await GitRepository(url: fixture.bare).workflowRevision("refs/heads/main")
+        try await GitProcess.run(at: fixture.root, arguments: ["--git-dir=" + fixture.bare.path, "rev-parse", "refs/heads/main"]).text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
     func testPreparationIsReadOnlyAndConfirmedPushPinsLeaseAndUpdatesTracking() async throws {
         let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
@@ -102,7 +102,7 @@ final class GuardedForcePushTests: XCTestCase {
     func testMultipleForcedTargetsAndDetachedBranchStopInsteadOfOrdinaryFallback() async throws {
         let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
         let before = try await remoteHead(f)
-        _ = try await GitProcess.run(at: f.bare, arguments: ["update-ref", "refs/heads/extra", before])
+        _ = try await GitProcess.run(at: f.bare, arguments: ["--git-dir=" + f.bare.path, "update-ref", "refs/heads/extra", before])
         for ref in ["main", "extra"] {
             _ = try await GitProcess.run(at: f.local.url, arguments: ["config", "--add", "remote.origin.push", "+refs/heads/main:refs/heads/" + ref])
         }
@@ -148,7 +148,7 @@ final class GuardedForcePushTests: XCTestCase {
     }
     func testRefspecDestinationAndNonFastForwardClassification() async throws {
         let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
-        _ = try await GitProcess.run(at: f.bare, arguments: ["update-ref", "refs/heads/delivery", try await remoteHead(f)])
+        _ = try await GitProcess.run(at: f.bare, arguments: ["--git-dir=" + f.bare.path, "update-ref", "refs/heads/delivery", try await remoteHead(f)])
         _ = try await GitProcess.run(at: f.local.url, arguments: ["config", "remote.origin.push", "refs/heads/main:refs/heads/delivery"])
         let cached = try await f.local.cachedForcePushPreview()
         XCTAssertNil(cached)
@@ -162,7 +162,7 @@ final class GuardedForcePushTests: XCTestCase {
         XCTAssertTrue(capture.commands.contains { $0.contains("'ls-remote'") })
         XCTAssertEqual(preview.remoteBranch, "refs/heads/delivery")
         _ = try await f.local.forcePush(preview, progress: { _ in })
-        let delivery = try await GitRepository(url: f.bare).workflowRevision("refs/heads/delivery")
+        let delivery = try await GitProcess.run(at: f.root, arguments: ["--git-dir=" + f.bare.path, "rev-parse", "refs/heads/delivery"]).text.trimmingCharacters(in: .whitespacesAndNewlines)
         let main = try await remoteHead(f)
         XCTAssertEqual(delivery, preview.localCommit); XCTAssertEqual(main, preview.remoteCommit)
         XCTAssertTrue(ForcePushRejection.isNonFastForward(GitError("[rejected] main -> main (fetch first)")))

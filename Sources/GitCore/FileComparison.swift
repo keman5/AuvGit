@@ -79,9 +79,13 @@ private func decodeContent(_ data: Data, reason: String? = nil) -> FileRevisionC
 }
 
 extension GitRepository {
-    private func comparisonURL(_ path: String) throws -> URL {
+    private func validateComparisonPath(_ path: String) throws {
         let parts = path.split(separator: "/", omittingEmptySubsequences: false)
         guard !path.isEmpty, !path.hasPrefix("/"), !parts.contains(".."), !parts.contains("."), !parts.contains(""), !parts.contains(where: { $0.lowercased() == ".git" }), !path.contains("\0") else { throw GitError("Invalid repository file path.") }
+    }
+    private func comparisonURL(_ path: String) throws -> URL {
+        try validateComparisonPath(path)
+        let parts = path.split(separator: "/")
         var current = url
         for part in parts.dropLast() {
             current.appendPathComponent(String(part))
@@ -217,7 +221,8 @@ extension GitRepository {
             let right = try await indexComparisonContent(path: path)
             return FileComparisonSnapshot(path: path, head: left, index: left, worktree: right, base: nil, ours: nil, theirs: nil, previewTarget: target)
         case let .commit(hash, path):
-            _ = try comparisonURL(path)
+            // Git object reads do not traverse the current filesystem path.
+            try validateComparisonPath(path)
             let revision = try await workflowRevision(hash)
             let parent = try await GitProcess.run(at: url, arguments: ["rev-parse", "--verify", revision + "^"], allowedCodes: [0, 128])
             let original = try await commitFiles(hash: revision).first(where: { $0.path == path })?.originalPath ?? path
