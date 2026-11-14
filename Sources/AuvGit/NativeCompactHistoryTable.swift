@@ -69,7 +69,7 @@ struct NativeCompactHistoryTable: NSViewRepresentable {
             let branch = branches.first { !$0.isRemote && "refs/heads/" + $0.name == canonical } ?? currentBranch.flatMap { canonical == "refs/heads/" + $0.name || canonical == $0.name ? $0 : nil }
             let state: String
             if let branch, branch.upstream != nil, let ahead = branch.ahead, let behind = branch.behind {
-                state = ahead == 0 && behind == 0 ? " =" : " ↑\(ahead) ↓\(behind)"
+                state = (ahead > 0 ? " ↑\(ahead)" : "") + (behind > 0 ? " ↓\(behind)" : "")
             } else { state = "" }
             let label = styles.referenceLabel(ref)
             return HistoryNativeReferenceBadge(reference: ref, label: label, state: state,
@@ -418,12 +418,7 @@ final class CompactHistoryCell: NSView {
         let collapsed = parent.mergeCount(commit)
         let fold = commit.parents.count > 1 ? (collapsed.map { "▸\($0) " } ?? "▾ ") : ""
         let signature = commit.signatureStatus == "N" || commit.signatureStatus.isEmpty ? "" : commit.signatureStatus == "signed" ? "◇ " : (commit.signatureStatus == "G" || commit.signatureStatus == "U" ? "✓ " : "⚠ ")
-        let upstream: String
-        if parent.styles.isCurrentCommit(commit.hash), let branch = parent.currentBranch, branch.upstream != nil {
-            if let ahead = branch.ahead, let behind = branch.behind { upstream = ahead == 0 && behind == 0 ? " = " : " ↑\(ahead) ↓\(behind) " }
-            else { upstream = " ↔ " }
-        } else { upstream = "" }
-        drawText(fold + signature + upstream + commit.subject, x: x, width: max(0, messageEnd - x), font: .systemFont(ofSize: 12), color: primary)
+        drawText(fold + signature + commit.subject, x: x, width: max(0, messageEnd - x), font: .systemFont(ofSize: 12), color: primary)
         NSGraphicsContext.restoreGraphicsState()
         x = messageEnd + 4
         let hasText = parent.showNames || parent.showEmails

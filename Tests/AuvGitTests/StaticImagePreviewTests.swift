@@ -4,6 +4,19 @@ import AppKit
 
 @MainActor
 final class StaticImagePreviewTests: XCTestCase {
+    func testPreviewFileSizesUseScaledUnitsForAllAppLanguages() {
+        for language in ["en", "zh-Hans", "zh-Hant", "ja"] {
+            let locale = Locale(identifier: language)
+            for (size, unit) in [(1_000, "KB"), (5_000_000, "MB"), (3_000_000_000, "GB"), (2_000_000_000_000, "TB")] {
+                let label = ComparisonFileSize.text(size, locale: locale)
+                XCTAssertTrue(label.uppercased().contains(unit), "\(language): \(label)")
+                XCTAssertLessThan(label.count, 12, "File sizes should not expose a long raw byte count")
+            }
+            XCTAssertTrue(ComparisonFileSize.text(0, locale: locale).contains("0"))
+            XCTAssertFalse(ComparisonFileSize.text(999, locale: locale).uppercased().contains("KB"))
+        }
+    }
+
     func testPNGPreviewAndSourceDimensions() throws {
         let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 3, pixelsHigh: 2, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
         let data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))

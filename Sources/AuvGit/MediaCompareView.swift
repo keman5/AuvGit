@@ -95,19 +95,34 @@ actor StaticPreviewWorker {
     }
 }
 
+enum ComparisonFileSize {
+    static func text(_ byteCount: Int, locale: Locale = L10n.locale) -> String {
+        Int64(byteCount).formatted(.byteCount(style: .file, allowedUnits: byteCount < 1_000 ? .bytes : .all,
+                                            spellsOutZero: false, includesActualByteCount: false).locale(locale))
+    }
+}
+
 struct FileContentSummary: View {
     let content: FileRevisionContent
     private func text(_ key: String) -> String { L10n.text(key, table: "StaticPreview") }
     var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: content.exists ? "doc.zipper" : "doc").font(.system(size: 30)).foregroundStyle(.secondary)
-            Text(text(!content.exists ? "Revision has no file" : content.exceedsPreviewLimit ? "File exceeds preview limit" : "No supported static preview"))
-            if let size = content.byteCount ?? content.data?.count { Text("\(size.formatted()) " + text("bytes")).monospacedDigit() }
-            if let count = content.characterCount { Text("\(count.formatted()) " + text("characters")).monospacedDigit() }
-            else if content.exists { Text(text("Character count unavailable for binary or unread content")).font(.caption).foregroundStyle(.secondary) }
-            if content.exceedsPreviewLimit { Text(text("Comparison skipped above 32 MiB; file content was not loaded")).font(.caption).foregroundStyle(.secondary) }
-            else if content.exists { Text(text("Supported: PNG, JPEG, GIF, TIFF, BMP, WebP, HEIC, PDF first page and safe SVG")).font(.caption).foregroundStyle(.secondary) }
-        }.padding(20).frame(maxWidth: .infinity, maxHeight: .infinity).textSelection(.enabled)
+        // The workspace preview can be only 150pt tall. Metadata must scroll inside
+        // that allocation instead of increasing the hosting view's minimum height.
+        ScrollView {
+            VStack(spacing: 10) {
+                HStack(spacing: 12) {
+                    Image(systemName: content.exists ? "doc.zipper" : "doc").font(.system(size: 30)).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(text(!content.exists ? "Revision has no file" : content.exceedsPreviewLimit ? "File exceeds preview limit" : "No supported static preview"))
+                        if let size = content.byteCount ?? content.data?.count { Text(ComparisonFileSize.text(size)).monospacedDigit().foregroundStyle(.secondary) }
+                        if let count = content.characterCount { Text("\(count.formatted()) " + text("characters")).monospacedDigit() }
+                    }
+                }
+                if content.characterCount == nil, content.exists { Text(text("Character count unavailable for binary or unread content")).font(.caption).foregroundStyle(.secondary) }
+                if content.exceedsPreviewLimit { Text(text("Comparison skipped above 32 MiB; file content was not loaded")).font(.caption).foregroundStyle(.secondary) }
+                else if content.exists { Text(text("Supported: PNG, JPEG, GIF, TIFF, BMP, WebP, HEIC, PDF first page and safe SVG")).font(.caption).foregroundStyle(.secondary) }
+            }.fixedSize(horizontal: false, vertical: true).padding(16).frame(maxWidth: .infinity)
+        }.frame(maxWidth: .infinity, maxHeight: .infinity).textSelection(.enabled)
     }
 }
 
@@ -134,7 +149,10 @@ struct StaticComparisonView: View {
             else {
                 HStack(spacing: 1) {
                     ForEach(Array(summaries.enumerated()), id: \.offset) { _, revision in
-                        VStack { Text(revision.0).font(.caption); FileContentSummary(content: revision.1) }
+                        VStack(spacing: 0) {
+                            Text(revision.0).font(.caption).lineLimit(1).padding(.vertical, 6)
+                            FileContentSummary(content: revision.1)
+                        }.frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -202,7 +220,7 @@ struct MediaCompareView: View {
                             Text(revision.1).font(.system(size: 12, weight: .semibold))
                             if let data = revision.2.data, let image = previews[revision.0]?.image {
                                 let dimensions = previews[revision.0]?.dimensions
-                                Text("\(dimensions?.0 ?? Int(image.size.width)) × \(dimensions?.1 ?? Int(image.size.height)) · \(data.count) B").font(.caption).foregroundStyle(.secondary)
+                                Text("\(dimensions?.0 ?? Int(image.size.width)) × \(dimensions?.1 ?? Int(image.size.height)) · \(ComparisonFileSize.text(revision.2.byteCount ?? data.count))").font(.caption).foregroundStyle(.secondary)
                                 if let pages = previews[revision.0]?.pages { Text(L10n.text("PDF page 1 of %@", table: "StaticPreview", arguments: [String(pages)])).font(.caption).foregroundStyle(.secondary) }
                                 Image(nsImage: image).resizable().scaledToFit()
                             } else { FileContentSummary(content: revision.2) }
