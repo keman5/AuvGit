@@ -19,7 +19,9 @@ public struct GitBranch: Identifiable, Hashable, Sendable, Codable {
     public let isRemote: Bool
     public let upstream: String?
     public let worktreePath: String?
-    public init(name: String, isCurrent: Bool, isRemote: Bool, upstream: String? = nil, worktreePath: String? = nil) { self.name = name; self.isCurrent = isCurrent; self.isRemote = isRemote; self.upstream = upstream; self.worktreePath = worktreePath }
+    public let ahead: Int?
+    public let behind: Int?
+    public init(name: String, isCurrent: Bool, isRemote: Bool, upstream: String? = nil, worktreePath: String? = nil, ahead: Int? = nil, behind: Int? = nil) { self.ahead = ahead; self.behind = behind; self.name = name; self.isCurrent = isCurrent; self.isRemote = isRemote; self.upstream = upstream; self.worktreePath = worktreePath }
 }
 public struct GitWorktree: Equatable, Sendable {
     public let path: String
@@ -70,12 +72,31 @@ public struct GitCommit: Identifiable, Hashable, Sendable, Codable {
     public let subject: String
     public let body: String
     public let refs: [String]
+    /// Actual parents stay intact; filtered graphs use these visible ancestors.
+    public let graphParents: [String]?
+    public let signatureStatus: String
     public var shortHash: String { String(hash.prefix(8)) }
-    public init(hash: String, parents: [String], author: String, date: Date, subject: String, body: String, refs: [String], authorEmail: String = "", committer: String? = nil, committerEmail: String? = nil, committedDate: Date? = nil) {
+    public init(hash: String, parents: [String], author: String, date: Date, subject: String, body: String, refs: [String], authorEmail: String = "", committer: String? = nil, committerEmail: String? = nil, committedDate: Date? = nil, signatureStatus: String = "N", graphParents: [String]? = nil) {
         self.hash = hash; self.parents = parents; self.author = author; self.authorEmail = authorEmail
         self.committer = committer ?? author; self.committerEmail = committerEmail ?? authorEmail
         self.date = date; self.committedDate = committedDate ?? date
         self.subject = subject; self.body = body; self.refs = refs
+        self.signatureStatus = signatureStatus; self.graphParents = graphParents
+    }
+}
+extension GitCommit {
+    private enum CodingKeys: String, CodingKey {
+        case hash, parents, author, authorEmail, committer, committerEmail, committedDate, date, subject, body, refs, graphParents, signatureStatus
+    }
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(hash: try c.decode(String.self, forKey: .hash), parents: try c.decode([String].self, forKey: .parents),
+                  author: try c.decode(String.self, forKey: .author), date: try c.decode(Date.self, forKey: .date),
+                  subject: try c.decode(String.self, forKey: .subject), body: try c.decode(String.self, forKey: .body),
+                  refs: try c.decode([String].self, forKey: .refs), authorEmail: try c.decodeIfPresent(String.self, forKey: .authorEmail) ?? "",
+                  committer: try c.decodeIfPresent(String.self, forKey: .committer), committerEmail: try c.decodeIfPresent(String.self, forKey: .committerEmail),
+                  committedDate: try c.decodeIfPresent(Date.self, forKey: .committedDate), signatureStatus: try c.decodeIfPresent(String.self, forKey: .signatureStatus) ?? "N",
+                  graphParents: try c.decodeIfPresent([String].self, forKey: .graphParents))
     }
 }
 public struct GitCommitFile: Identifiable, Hashable, Sendable, Codable {
@@ -97,4 +118,15 @@ public enum DiffTarget: Equatable, Sendable {
     case worktree(path: String, untracked: Bool)
     case staged(path: String)
     case commit(hash: String, path: String)
+    case between(from: HistoryEndpoint, to: HistoryEndpoint, path: String, originalPath: String? = nil)
+}
+
+public extension GitCommit {
+    func historyPresentation(parents: [String]? = nil, graphParents: [String]? = nil,
+                             refs: [String]? = nil, signatureStatus: String? = nil) -> GitCommit {
+        GitCommit(hash: hash, parents: parents ?? self.parents, author: author, date: date,
+                  subject: subject, body: body, refs: refs ?? self.refs, authorEmail: authorEmail,
+                  committer: committer, committerEmail: committerEmail, committedDate: committedDate,
+                  signatureStatus: signatureStatus ?? self.signatureStatus, graphParents: graphParents ?? self.graphParents)
+    }
 }

@@ -33,6 +33,13 @@ final class ComparisonBandNavigationTests: XCTestCase {
         for _ in 0..<5 { split.layoutSubtreeIfNeeded(); coordinator.alignDisplay(); try? await Task.sleep(nanoseconds: 1_000_000) }
         let scrolls = split.subviews.compactMap { $0.subviews.compactMap { $0 as? NSScrollView }.first }
         XCTAssertEqual(scrolls.count, 3)
+        // The fixture has no initial auto-jump; establish its caret before the
+        // first change and let any pending analysis publish bounded targets.
+        commands.revealLine(paneID: "worktree", number: 1)
+        for _ in 0..<200 where !commands.canNavigateNextChange {
+            coordinator.alignDisplay(); try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertTrue(commands.canNavigateNextChange)
         let alignmentBuilds = coordinator.alignmentBuildCount
         var ys: [CGFloat] = []
         for _ in 0..<4 {
@@ -76,6 +83,10 @@ final class ComparisonBandNavigationTests: XCTestCase {
             XCTAssertTrue((145...155).contains(row), "Rail must select the pointed unchanged line, not change30")
         }
         coordinator.navigateChange(forward: true)
+        try? await Task.sleep(nanoseconds: 1_000_000)
+        XCTAssertTrue((145...155).contains(cursor?.line ?? 0), "Next must stay at the caret after the only change")
+        XCTAssertEqual(cursor?.selectedCharacters, 0)
+        coordinator.navigateChange(forward: false)
         try? await Task.sleep(nanoseconds: 1_000_000)
         XCTAssertEqual(cursor?.line, 30)
         XCTAssertEqual(cursor?.column, 1)

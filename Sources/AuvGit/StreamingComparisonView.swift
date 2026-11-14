@@ -12,6 +12,9 @@ struct StreamingComparisonView: View {
     var onSearchClosed: (() -> Void)? = nil
     var changeNavigation = 0
     var searchNavigation = 0
+    var rules = ComparisonRules()
+    var languagePath = ""
+    var onChangeTargets: ((ComparisonChangeTargets) -> Void)? = nil
     var onCursorChange: ((ComparisonCursorStatus) -> Void)? = nil
     @State private var reader: StreamingTextFile?
     @State private var page: StreamingTextPage?
@@ -45,6 +48,8 @@ struct StreamingComparisonView: View {
     @State private var overviewLines: [Int] = []
     @State private var overviewTask: Task<Void, Never>?
     @State private var selectedChange = -1
+    @State private var cursorLine = 0
+    @State private var overviewRanges: [Range<Int>] = []
     @State private var revealRequest: ComparisonRevealRequest?
     @State private var overviewToken = UUID()
     @State private var overviewBusy = false
@@ -78,9 +83,9 @@ struct StreamingComparisonView: View {
             if compactDisplay {
                 if (busy || overviewBusy) && patch.isEmpty { ProgressView() }
                 else { DiffPane(text: patch, title: path, isLoading: busy || overviewBusy, leftRevisionTitle: sourceTitle, rightRevisionTitle: targetTitle,
-                                forceCompact: true, initialSearchOptions: searchOptions, initialReplacement: replacement) }
+                                forceCompact: true, initialSearchOptions: searchOptions, initialReplacement: replacement, onChangeTargets: onChangeTargets, externalChangeNavigation: changeNavigation) }
             } else if let page {
-                ComparisonEditor(columns: [ComparisonEditorColumn(id: "stream", title: path + " - " + label(revision.rawValue), text: page.text, isEditable: false, message: nil, firstLine: page.cursor.line)], wrapLines: false, showLineNumbers: true, synchronizeScroll: true, search: searchOptions.query, navigation: 0, changeNavigation: 0, onEdit: { _, _ in }, languagePath: path, onCursorChange: onCursorChange, editingCommands: commands, revealRequest: revealRequest, overviewMarkers: overviewMarkers, onOverviewJump: { index in Task { await jumpToChange(index) } }, onOverviewNavigate: navigateOverview, searchOptions: searchOptions)
+                ComparisonEditor(columns: [ComparisonEditorColumn(id: "stream", title: path + " - " + label(revision.rawValue), text: page.text, isEditable: false, message: nil, firstLine: page.cursor.line)], wrapLines: false, showLineNumbers: true, synchronizeScroll: true, search: searchOptions.query, navigation: 0, changeNavigation: 0, onEdit: { _, _ in }, languagePath: languagePath.isEmpty ? path : languagePath, comparisonRules: rules, onCursorChange: cursorChanged, editingCommands: commands, revealRequest: revealRequest, overviewMarkers: overviewMarkers, onOverviewJump: { index in Task { await jumpToChange(index) } }, onOverviewNavigate: navigateOverview, searchOptions: searchOptions)
                 HStack {
                     Text(L10n.text("position", table: "Streaming", arguments: [page.cursor.line, Int64(page.cursor.offset), Int64(page.totalBytes)]))
                     Spacer(); Text(label("readonly"))
@@ -89,14 +94,14 @@ struct StreamingComparisonView: View {
                 if !page.text.hasSuffix("\n"), page.next != nil { Text(largeText("The source line continues on the next page.")).font(.caption).foregroundStyle(.secondary).padding(6) }
             } else { Spacer() }
         }.onAppear { searchOptions = initialSearchOptions; replacement = initialReplacement; compactDisplay = compact; showSearch = searchRequested; start() }
+        .onChange(of: rules) { _, _ in patch = ""; loadOverview() }
         .onChange(of: searchNavigation) { old, new in Task { await locate(new > old) } }
         .onChange(of: changeNavigation) { old, new in
-            guard !overviewLines.isEmpty else { return }
-            let index = selectedChange < 0 ? (new > old ? 0 : overviewLines.count - 1) : (selectedChange + (new > old ? 1 : overviewLines.count - 1)) % overviewLines.count
+            guard !compactDisplay, let index = changeTargets.target(forward: new > old) else { return }
             Task { await jumpToChange(index) }
         }
         .onChange(of: revision) { _, _ in start() }
-        .onChange(of: compactDisplay) { _, value in if value && reader != nil { loadPatch() } }
+        .onChange(of: compactDisplay) { _, value in if value && reader != nil { loadPatch() } else { publishChangeTargets() } }
         .onChange(of: compact) { _, value in compactDisplay = value }
         .onChange(of: searchRequested) { _, value in if value { showSearch = true } }
         .onChange(of: initialSearchOptions) { _, value in searchOptions = value }
@@ -110,7 +115,7 @@ struct StreamingComparisonView: View {
     private func start() {
         operation?.cancel(); searchTask?.cancel(); overviewTask?.cancel(); results = []; resultIndex = -1
         overviewDragTask?.cancel(); overviewDragTask = nil; pendingOverviewFraction = nil; overviewDragToken = UUID()
-        patch = ""; overviewMarkers = []; overviewLines = []; selectedChange = -1; overviewToken = UUID(); overviewBusy = false; overviewTask = nil
+        patch = ""; overviewMarkers = []; overviewLines = []; selectedChange = -1; overviewRanges = []; publishChangeTargets(); overviewToken = UUID(); overviewBusy = false; overviewTask = nil
         let token = UUID(); generation = token
         operation = Task { await reopen(token) }
     }
@@ -138,6 +143,7 @@ struct StreamingComparisonView: View {
         pageFirstColumn = cursorColumns[cursor.offset] ?? 1
         do {
             page = try await reader.page(at: cursor); displayedHistory = history
+            cursorLine = max(0, cursor.line - 1); selectedChange = -1; publishChangeTargets()
             revealRequest = ComparisonRevealRequest(paneID: "stream", firstLine: cursor.line, number: cursor.line)
         }
         catch is CancellationError { self.error = label("cancelled"); history = displayedHistory }
@@ -147,19 +153,20 @@ struct StreamingComparisonView: View {
     private func loadOverview() {
         guard let reader else { return }
         overviewTask?.cancel(); let token = UUID(), selected = revision; overviewToken = token; overviewBusy = true
+        overviewRanges = []; selectedChange = -1; publishChangeTargets()
         overviewTask = Task {
             do {
                 async let count = reader.lineCount()
                 async let changes = repository.streamingDiff(path: path, revision: selected)
                 let values = try await (count, changes)
-                let parsed = DiffParser.parse(values.1)
+                let parsed = DiffParser.parse(rules.filteringPatch(values.1))
                 let total = Double(max(1, values.0))
                 let patchChanges = ComparisonPatchOverview.changes(in: parsed)
                 let markers = patchChanges.enumerated().map { index, change in
                     ComparisonOverviewMarker(lower: min(1, Double(max(0, change.firstLine - 1)) / total), upper: min(1, Double(change.lastLine) / total), kind: change.kind, index: index)
                 }
                 try Task.checkCancellation(); guard token == overviewToken else { return }
-                overviewLineCount = values.0; patch = values.1; overviewLines = patchChanges.map(\.firstLine); overviewMarkers = markers
+                overviewLineCount = values.0; patch = rules.filteringPatch(values.1); overviewLines = patchChanges.map(\.firstLine); overviewMarkers = markers; overviewRanges = patchChanges.map { max(0, $0.firstLine - 1)..<max($0.firstLine, $0.lastLine) }; selectedChange = -1; publishChangeTargets()
             } catch is CancellationError { }
             catch { if token == overviewToken { self.error = OperationFailure.message(error, repository: repository.url) } }
             if token == overviewToken { overviewBusy = false; overviewTask = nil }
@@ -191,18 +198,26 @@ struct StreamingComparisonView: View {
     }
     private func jumpToChange(_ index: Int) async {
         guard overviewLines.indices.contains(index), let reader else { return }
-        selectedChange = index; compactDisplay = false
+        selectedChange = index; cursorLine = max(0, overviewLines[index] - 1); compactDisplay = false; publishChangeTargets()
         do {
             let cursor = try await reader.cursor(atLine: overviewLines[index])
             history = [cursor]; await load(cursor)
             revealRequest = ComparisonRevealRequest(paneID: "stream", firstLine: cursor.line, number: cursor.line)
         } catch { self.error = OperationFailure.message(error, repository: repository.url) }
     }
+    private var changeTargets: ComparisonChangeTargets {
+        ComparisonChangeTargets(ranges: overviewRanges, position: cursorLine, selected: selectedChange >= 0 ? selectedChange : nil)
+    }
+    private func publishChangeTargets() { if !compactDisplay { onChangeTargets?(changeTargets) } }
+    private func cursorChanged(_ cursor: ComparisonCursorStatus) {
+        cursorLine = max(0, cursor.line - 1); selectedChange = -1
+        publishChangeTargets(); onCursorChange?(cursor)
+    }
     private func loadPatch() {
         guard patch.isEmpty, overviewTask == nil else { return }
         operation?.cancel(); let token = UUID(); generation = token; busy = true; patch = ""
         operation = Task {
-            do { let value = try await repository.streamingDiff(path: path, revision: revision); try Task.checkCancellation(); if generation == token { patch = value } }
+            do { let value = try await repository.streamingDiff(path: path, revision: revision); try Task.checkCancellation(); if generation == token { patch = rules.filteringPatch(value) } }
             catch is CancellationError {}
             catch { if generation == token { self.error = OperationFailure.message(error, repository: repository.url) } }
             if generation == token { busy = false; operation = nil }

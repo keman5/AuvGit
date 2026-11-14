@@ -15,6 +15,9 @@ struct PagedComparisonView: View {
     var onSearchClosed: (() -> Void)? = nil
     var changeNavigation = 0
     var searchNavigation = 0
+    var rules = ComparisonRules()
+    var languagePath = ""
+    var onChangeTargets: ((ComparisonChangeTargets) -> Void)? = nil
     var onCursorChange: ((ComparisonCursorStatus) -> Void)? = nil
     @State private var page = 0
     @State private var pendingOverviewFraction: Double?
@@ -25,6 +28,8 @@ struct PagedComparisonView: View {
     @State private var overviewTask: Task<Void, Never>?
     @State private var overviewToken = UUID()
     @State private var selectedChange = -1
+    @State private var cursorLine = 0
+    @State private var cursorPaneID = ""
     @State private var revealRequest: ComparisonRevealRequest?
     @State private var pageAnchors: [String: PagedTextAnchor] = [:]
     @State private var anchorHistory: [[String: PagedTextAnchor]] = []
@@ -71,9 +76,9 @@ struct PagedComparisonView: View {
             toolbar
             Divider()
             if compactDisplay {
-                DiffPane(text: patch, title: snapshot.path, isLoading: patchBusy, leftRevisionTitle: snapshot.path + " - " + (selectedSource?.1 ?? ""), rightRevisionTitle: snapshot.path + " - " + pagedText("worktree"), forceCompact: true, initialSearchOptions: searchOptions, initialReplacement: replacement)
+                DiffPane(text: patch, title: snapshot.path, isLoading: patchBusy, leftRevisionTitle: snapshot.path + " - " + (selectedSource?.1 ?? ""), rightRevisionTitle: snapshot.path + " - " + pagedText("worktree"), forceCompact: true, initialSearchOptions: searchOptions, initialReplacement: replacement, onChangeTargets: onChangeTargets, externalChangeNavigation: changeNavigation)
             } else {
-                ComparisonEditor(columns: columns, wrapLines: false, showLineNumbers: true, synchronizeScroll: true, search: searchOptions.query, navigation: 0, changeNavigation: 0, onEdit: { _, _ in }, languagePath: snapshot.path, onCursorChange: onCursorChange, editingCommands: commands, revealRequest: revealRequest, overviewMarkers: globalOverview, onOverviewJump: jumpToChange, onOverviewNavigate: navigateOverview, searchOptions: searchOptions)
+                ComparisonEditor(columns: columns, wrapLines: false, showLineNumbers: true, synchronizeScroll: true, search: searchOptions.query, navigation: 0, changeNavigation: 0, onEdit: { _, _ in }, languagePath: languagePath.isEmpty ? snapshot.path : languagePath, comparisonRules: rules, onCursorChange: cursorChanged, onActivePaneChange: { cursorPaneID = $0 }, editingCommands: commands, revealRequest: revealRequest, overviewMarkers: globalOverview, onOverviewJump: jumpToChange, onOverviewNavigate: navigateOverview, searchOptions: searchOptions)
                 ForEach(columns.filter { (firstColumns[$0.id] ?? 1) > 1 }, id: \.id) { column in
                     Text(column.title + ": " + L10n.text("Page starts at column %@; this is a continuation of source line %@.", table: "LargeComparison", arguments: [String(firstColumns[column.id] ?? 1), String(column.firstLine)])).font(.caption).foregroundStyle(.secondary).padding(6)
                 }
@@ -82,14 +87,17 @@ struct PagedComparisonView: View {
             searchOptions = initialSearchOptions; replacement = initialReplacement; compactDisplay = compact; showSearch = searchRequested
             compactSource = revisions.first?.0 ?? ""; loadPages(); loadOverview(); search(); if compactDisplay { loadPatch() }
         }
+        .onChange(of: snapshot.head.data) { _, _ in reloadPresentation() }
+        .onChange(of: snapshot.index.data) { _, _ in reloadPresentation() }
+        .onChange(of: snapshot.worktree.data) { _, _ in reloadPresentation() }
+        .onChange(of: rules) { _, _ in loadOverview(); if compactDisplay { loadPatch() } }
         .onChange(of: searchNavigation) { old, new in locate(new > old) }
         .onChange(of: changeNavigation) { old, new in
-            guard !overviewBands.isEmpty else { return }
-            let index = selectedChange < 0 ? (new > old ? 0 : overviewBands.count - 1) : (selectedChange + (new > old ? 1 : overviewBands.count - 1)) % overviewBands.count
+            guard !compactDisplay, let index = changeTargets.target(forward: new > old) else { return }
             jumpToChange(index)
         }
         .onChange(of: compact) { _, value in compactDisplay = value }
-        .onChange(of: compactDisplay) { _, value in if value { loadPatch() } }
+        .onChange(of: compactDisplay) { _, value in if value { loadPatch() } else { publishChangeTargets() } }
         .onChange(of: compactSource) { _, _ in if compactDisplay { loadPatch() } }
         .onChange(of: baseline) { _, _ in reloadPresentation() }
         .onChange(of: layout) { _, _ in reloadPresentation() }
@@ -99,6 +107,15 @@ struct PagedComparisonView: View {
         .onChange(of: initialReplacement) { _, value in replacement = value }
         .onChange(of: searchOptions) { _, _ in search() }
         .onDisappear { pageTask?.cancel(); searchTask?.cancel(); patchTask?.cancel(); overviewTask?.cancel(); overviewDragTask?.cancel(); onSearchClosed?() }
+    }
+    private var changeTargets: ComparisonChangeTargets {
+        let pane = texts.firstIndex(where: { $0.0 == cursorPaneID }) ?? 0
+        return ComparisonChangeTargets(ranges: overviewBands.compactMap { $0.indices.contains(pane) ? $0[pane] : nil }, position: cursorLine, selected: selectedChange >= 0 ? selectedChange : nil)
+    }
+    private func publishChangeTargets() { if !compactDisplay { onChangeTargets?(changeTargets) } }
+    private func cursorChanged(_ cursor: ComparisonCursorStatus) {
+        cursorLine = max(0, cursor.line - 1); selectedChange = -1
+        publishChangeTargets(); onCursorChange?(cursor)
     }
     private var toolbar: some View {
         HStack {
@@ -136,20 +153,20 @@ struct PagedComparisonView: View {
     }
     private func loadOverview() {
         overviewTask?.cancel(); let token = UUID(); overviewToken = token
-        let values = texts; overviewBands = []; selectedChange = -1
+        let values = texts, rules = rules, endings = revisions.map { $0.2.data.map { ComparisonTextDecoder.format(of: $0).lineEnding } ?? .lf }; overviewBands = []; selectedChange = -1; publishChangeTargets()
         overviewTask = Task {
             let task = Task.detached { () throws -> ([[Range<Int>]], [Int], ComparisonOverviewLineMap) in
                 try Task.checkCancellation()
                 let source = values.map { $0.2 }
-                let alignment = ComparisonAlignment(texts: source)
-                let bands = ComparisonChangeNavigation(texts: source, cachedAlignment: alignment).bands
+                let alignment = ComparisonAlignment(texts: source, rules: rules, endings: endings)
+                let bands = ComparisonChangeNavigation(texts: source, cachedAlignment: alignment, rules: rules, endings: endings).bands
                 try Task.checkCancellation()
                 return (bands, source.map { $0.reduce(1) { $1 == "\n" ? $0 + 1 : $0 } }, ComparisonOverviewLineMap(bands: alignment.bands))
             }
             do {
                 let value = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
                 guard overviewToken == token else { return }
-                overviewBands = value.0; overviewCounts = value.1; overviewMap = value.2
+                overviewBands = value.0; overviewCounts = value.1; overviewMap = value.2; publishChangeTargets()
             } catch { }
         }
     }
@@ -163,7 +180,7 @@ struct PagedComparisonView: View {
                 pendingOverviewFraction = nil
                 let lines = overviewMap.lines(at: fraction)
                 guard lines.count == texts.count else { continue }
-                selectedChange = -1; compactDisplay = false
+                selectedChange = -1; cursorLine = lines.first ?? 0; compactDisplay = false; publishChangeTargets()
                 pageAnchors = Dictionary(uniqueKeysWithValues: texts.enumerated().map { ($0.element.0, PagedTextAnchor(line: lines[$0.offset] + 1, column: 1)) })
                 anchorHistory = []; page = max(0, lines[0] / 500); loadPages()
             }
@@ -172,7 +189,7 @@ struct PagedComparisonView: View {
     }
     private func jumpToChange(_ index: Int) {
         guard overviewBands.indices.contains(index), overviewBands[index].count == texts.count else { return }
-        selectedChange = index; compactDisplay = false
+        selectedChange = index; cursorLine = overviewBands[index].first?.lowerBound ?? 0; compactDisplay = false; publishChangeTargets()
         pageAnchors = Dictionary(uniqueKeysWithValues: texts.enumerated().map { pane, value in
             (value.0, PagedTextAnchor(line: overviewBands[index][pane].lowerBound + 1, column: 1))
         })
@@ -202,7 +219,7 @@ struct PagedComparisonView: View {
                         let requested = hit.1.cursor.line - 1
                         let mapped: Int
                         if id == hit.0 { mapped = requested }
-                        else { let mapping = TextLineDiff(source: source, target: text).sourceToTarget; mapped = mapping.indices.contains(requested) ? mapping[requested] : 0 }
+                        else { let mapping = TextLineDiff(source: source, target: text, rules: rules).sourceToTarget; mapped = mapping.indices.contains(requested) ? mapping[requested] : 0 }
                         let location = hit.1.pageLocation(maximumUTF16: 100_000)
                         let startColumn = id == hit.0 ? location.firstColumn : 1
                         return (id, title, TextPager.pageFromLine(text, firstLine: mapped + 1, columnOffset: startColumn - 1), startColumn)
@@ -214,7 +231,9 @@ struct PagedComparisonView: View {
             do {
                 let pages = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
                 guard pageToken == token else { return }
-                columns = pages.map { ComparisonEditorColumn(id: $0.0, title: $0.1, text: $0.2.text, isEditable: false, message: nil, firstLine: $0.2.firstLine) }
+                if let shown = pages.first(where: { $0.0 == cursorPaneID }) ?? pages.first { cursorLine = max(0, (hit?.1.cursor.line ?? shown.2.firstLine) - 1) }
+                publishChangeTargets()
+                columns = pages.map { item in ComparisonEditorColumn(id: item.0, title: item.1, text: item.2.text, isEditable: false, message: nil, firstLine: item.2.firstLine, lineEnding: revisions.first(where: { $0.0 == item.0 })?.2.data.map { ComparisonTextDecoder.format(of: $0).lineEnding } ?? .lf) }
                 firstColumns = Dictionary(uniqueKeysWithValues: pages.map { ($0.0, $0.3) })
                 hasNext = pages.contains { $0.2.hasNext }
                 pageAnchors = Dictionary(uniqueKeysWithValues: pages.map { ($0.0, PagedTextAnchor(line: $0.2.firstLine, column: $0.3)) })
@@ -258,7 +277,7 @@ struct PagedComparisonView: View {
         patchTask?.cancel(); let token = UUID(); patchToken = token; patchBusy = true; patch = ""
         let source = selectedSource?.2.text ?? "", target = snapshot.worktree.text ?? ""
         patchTask = Task {
-            do { let value = try await LargeTextComparison.patch(source: source, target: target); try Task.checkCancellation(); if patchToken == token { patch = value } }
+            do { let value = try await LargeTextComparison.patch(source: source, target: target, rules: rules); try Task.checkCancellation(); if patchToken == token { patch = value } }
             catch is CancellationError {}
             catch { if patchToken == token { searchError = largeText(error.localizedDescription) } }
             if patchToken == token { patchBusy = false }

@@ -14,7 +14,7 @@ public enum SyntaxHighlighter {
         return try? NSRegularExpression(pattern: pattern)
     }
     public static func tokens(in text: String, path: String) -> [SyntaxToken] {
-        guard text.utf16.count <= 2_000_000 else { return [] }
+        guard !path.hasPrefix("__plain__"), text.utf16.count <= 2_000_000 else { return [] }
         let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
         let hashComments = ["py", "sh", "bash", "zsh", "rb", "pl", "r", "yaml", "yml", "toml"].contains(ext)
         let slashComments = ["swift", "js", "jsx", "ts", "tsx", "go", "json", "c", "h", "cpp", "hpp", "cc", "cxx", "rs", "java", "kt", "kts", "cs", "m", "mm", "scala", "dart", "php"].contains(ext)

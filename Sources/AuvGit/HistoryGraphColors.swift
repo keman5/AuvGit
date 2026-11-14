@@ -67,13 +67,13 @@ struct HistoryGraphStylePlan {
         let remoteNames = Set(remoteBranchNames.compactMap { $0.split(separator: "/", maxSplits: 1).first.map(String.init) })
         self.remoteNames = remoteNames
         commitsByHash = Dictionary(uniqueKeysWithValues: commits.map { ($0.hash, $0) })
-        let parents = Dictionary(uniqueKeysWithValues: commits.map { ($0.hash, $0.parents) })
+        let parents = Dictionary(uniqueKeysWithValues: commits.map { ($0.hash, $0.graphParents ?? $0.parents) })
 
         var local: [Branch] = [], remote: [Branch] = []
         var current = Set<String>()
         for commit in commits {
             for reference in commit.refs {
-                if Self.isCurrentReference(reference) { current.insert(commit.hash) }
+                if Self.isCurrentReference(reference), !reference.hasSuffix("~") { current.insert(commit.hash) }
                 guard let branch = Self.branch(reference, tip: commit.hash, remoteBranchNames: remoteBranchNames, remoteNames: remoteNames) else { continue }
                 if branch.remote {
                     if visibleRemoteBranchNames?.contains(branch.name) != false { remote.append(branch) }
@@ -136,7 +136,8 @@ struct HistoryGraphStylePlan {
         let source = lineStyles[segment.sourceHash] ?? Self.style(current: false, unpushed: false)
         // First-parent edges belong to the child lane all the way to a shared
         // ancestor. Merge edges use the incoming side branch's lane instead.
-        let lane = commitsByHash[segment.sourceHash]?.parents.first == segment.lineageHash
+        let firstParent = commitsByHash[segment.sourceHash].flatMap { ($0.graphParents ?? $0.parents).first }
+        let lane = firstParent == segment.lineageHash
             ? source : (lineStyles[segment.lineageHash] ?? Self.style(current: false, unpushed: false))
         let style = lane.color == .green || lane.color == .gray
             ? lane : Self.style(current: true, unpushed: unpushedHashes.contains(segment.sourceHash))
@@ -166,13 +167,16 @@ struct HistoryGraphStylePlan {
     }
 
     func referenceLabel(_ reference: String) -> String {
+        let projected = reference.hasSuffix("~")
+        let reference = Self.canonicalReference(reference)
+        let suffix = projected ? "~" : ""
         if isTagReference(reference) {
-            return "tag " + reference.replacingOccurrences(of: "tag: ", with: "").replacingOccurrences(of: "refs/tags/", with: "")
+            return "tag " + reference.replacingOccurrences(of: "tag: ", with: "").replacingOccurrences(of: "refs/tags/", with: "") + suffix
         }
         if let branch = Self.branch(reference, tip: "", remoteBranchNames: remoteBranchNames, remoteNames: remoteNames) {
-            return (isCurrentReference(reference) ? "→ " : branch.remote ? "○ " : "● ") + branch.name
+            return (isCurrentReference(reference) ? "→ " : branch.remote ? "○ " : "● ") + branch.name + suffix
         }
-        return reference
+        return reference + suffix
     }
 
     func isCurrentCommit(_ hash: String) -> Bool { currentCommitHashes.contains(hash) }
@@ -186,13 +190,18 @@ struct HistoryGraphStylePlan {
         return visibleRemoteBranchNames?.contains(branch.name) != false
     }
 
+    static func canonicalReference(_ reference: String) -> String {
+        let value = reference.trimmingCharacters(in: .whitespaces)
+        return value.hasSuffix("~") ? String(value.dropLast()) : value
+    }
+
     private static func uniqueBranches(_ branches: [Branch]) -> [Branch] {
         var seen = Set<String>()
         return branches.filter { seen.insert($0.identity).inserted }
     }
 
     private static func branch(_ reference: String, tip: String, remoteBranchNames: Set<String>, remoteNames: Set<String>) -> Branch? {
-        let raw = reference.trimmingCharacters(in: .whitespaces)
+        let raw = Self.canonicalReference(reference)
         guard raw != "HEAD", !isTagReference(raw) else { return nil }
         let current = raw.hasPrefix("HEAD -> ")
         var name = current ? String(raw.dropFirst(8)) : raw
@@ -206,12 +215,12 @@ struct HistoryGraphStylePlan {
     }
 
     private static func isCurrentReference(_ reference: String) -> Bool {
-        let value = reference.trimmingCharacters(in: .whitespaces)
+        let value = canonicalReference(reference)
         return value == "HEAD" || value.hasPrefix("HEAD -> ")
     }
 
     private static func isTagReference(_ reference: String) -> Bool {
-        let value = reference.trimmingCharacters(in: .whitespaces)
+        let value = canonicalReference(reference)
         return value.hasPrefix("tag: ") || value.hasPrefix("refs/tags/")
     }
 

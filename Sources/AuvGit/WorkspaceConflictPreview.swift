@@ -44,7 +44,9 @@ struct WorkspaceConflictPreview: View {
         case .compareFindNext, .compareFindPrevious:
             compact = false; navigation += command == .compareFindNext ? 1 : -1
         case .compareNextChange, .comparePreviousChange:
-            guard !compact else { return false }; changeNavigation += command == .compareNextChange ? 1 : -1
+            let forward = command == .compareNextChange
+            guard navigationCommands.changeTargets.target(forward: forward) != nil else { return false }
+            compact = false; changeNavigation += forward ? 1 : -1
         case .compareNextConflict, .comparePreviousConflict:
             guard !compact else { return false }; selectConflict(resolver.selectedBlock + (command == .compareNextConflict ? 1 : -1))
         case .compareCompact: compact.toggle()

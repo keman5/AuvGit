@@ -8,10 +8,11 @@ public struct TextLineDiff: Equatable, Sendable {
     public let targetToSource: [Int]
     public let usedConservativeFallback: Bool
 
-    public init(source: String, target: String, maximumDetailedLines: Int = 4_000, maximumDetailedProduct: Int = 4_000_000) {
-        let a = source.components(separatedBy: "\n")
-        let b = target.components(separatedBy: "\n")
+    public init(source: String, target: String, maximumDetailedLines: Int = 4_000, maximumDetailedProduct: Int = 4_000_000, rules: ComparisonRules = .init()) {
+        let a = source.components(separatedBy: "\n").map { rules.key(for: $0) }
+        let b = target.components(separatedBy: "\n").map { rules.key(for: $0) }
         var removed = Set<Int>(), inserted = Set<Int>()
+        var conservative = false
         var regions = [(a.startIndex..<a.endIndex, b.startIndex..<b.endIndex)]
         while let (sourceRegion, targetRegion) = regions.popLast() {
             var aStart = sourceRegion.lowerBound, bStart = targetRegion.lowerBound
@@ -39,8 +40,12 @@ public struct TextLineDiff: Equatable, Sendable {
                     removed.formUnion(aStart..<aEnd); inserted.formUnion(bStart..<bEnd); continue
                 }
             }
-            // Repeated lines may offer no patience anchors. Use the exact edit path;
-            // budget limits never turn unchanged context into a fabricated modification.
+            if large && rules.boundedComparison {
+                conservative = true
+                removed.formUnion(aStart..<aEnd); inserted.formUnion(bStart..<bEnd); continue
+            }
+            // Normal comparisons keep the exact edit path for repeated lines. Explicit
+            // bounded comparisons may conservatively group an unanchored region.
             let difference = b[bStart..<bEnd].difference(from: a[aStart..<aEnd])
             for change in difference {
                 switch change {
@@ -51,7 +56,7 @@ public struct TextLineDiff: Equatable, Sendable {
         }
         sourceChangedLines = removed
         targetChangedLines = inserted
-        usedConservativeFallback = false
+        usedConservativeFallback = conservative
         let unchangedA = a.indices.filter { !removed.contains($0) }
         let unchangedB = b.indices.filter { !inserted.contains($0) }
         let anchors = Array(zip(unchangedA, unchangedB))

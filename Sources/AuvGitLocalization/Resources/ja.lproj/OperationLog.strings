@@ -91,3 +91,5 @@
 "Branch or upstream changed. Fetch again before setting a tracking branch." = "ブランチまたは上流が変更されました。再度フェッチしてから追跡ブランチを設定してください。";
 
 "Remote branch changed; fetch updates and confirm deletion again" = "リモートブランチが更新されています。フェッチしてから削除を再確認してください";
+
+"External Git helper did not close its output stream" = "Git は終了しましたが、外部ヘルパーが出力ストリームを閉じていません。";

@@ -100,9 +100,9 @@ extension GitRepository {
         try Data(patch.utf8).write(to: temp); defer { try? FileManager.default.removeItem(at: temp) }
         _ = try await GitProcess.run(at: url, arguments: ["apply", "--cached", "--recount", "--whitespace=nowarn", temp.path])
     }
-    public func saveIndex(path: String, text: String, expected: FileRevisionContent, format: ComparisonTextFormat? = nil) async throws {
+    public func saveIndex(path: String, text: String, expected: FileRevisionContent, format: ComparisonTextFormat? = nil, newFileMode: String? = nil) async throws {
         let current = try await fileComparison(path: path)
-        guard !current.isConflict, (current.index.isEditable || (format != nil && current.index.reinterpreting(as: format!.encoding).isEditable)), current.index.data == expected.data, current.index.gitMode == expected.gitMode else { throw GitError("The index changed. Reload before saving to the index.") }
+        guard !current.isConflict, (!current.index.exists || current.index.isEditable || (format != nil && current.index.reinterpreting(as: format!.encoding).isEditable)), current.index.exists == expected.exists, current.index.objectID == expected.objectID, current.index.data == expected.data, current.index.gitMode == expected.gitMode else { throw GitError("The index changed. Reload before saving to the index.") }
         guard !text.contains("\0") else { throw GitError("Only UTF-8 text up to 2 MB can be saved to the index.") }
         let data = try ComparisonTextDecoder.encode(text, format: format ?? ComparisonTextDecoder.format(of: expected.data ?? Data()))
         guard data.count <= 2 * 1024 * 1024 else { throw GitError("Files larger than 2 MB cannot be saved by the text editor.") }
@@ -110,10 +110,11 @@ extension GitRepository {
         try data.write(to: temp); defer { try? FileManager.default.removeItem(at: temp) }
         let oid = try await GitProcess.run(at: url, arguments: ["hash-object", "-w", "--", temp.path]).text.trimmingCharacters(in: .whitespacesAndNewlines)
         let listing = try await GitProcess.run(at: url, arguments: ["ls-files", "--stage", "--", path]).text
-        guard let mode = listing.split(separator: " ").first else { throw GitError("Index entry is missing.") }
+        let mode = listing.split(separator: " ").first.map(String.init) ?? newFileMode ?? "100644"
+        guard ["100644", "100755"].contains(mode) else { throw GitError("Only regular files can be saved to the index.") }
         let verified = try await fileComparison(path: path)
-        guard verified.index.data == expected.data, verified.index.gitMode == expected.gitMode, verified.index.objectID == expected.objectID, !verified.isConflict else { throw GitError("The index changed. Reload before saving to the index.") }
-        _ = try await GitProcess.run(at: url, arguments: ["update-index", "--cacheinfo", String(mode), oid, path])
+        guard verified.index.exists == expected.exists, verified.index.data == expected.data, verified.index.gitMode == expected.gitMode, verified.index.objectID == expected.objectID, !verified.isConflict else { throw GitError("The index changed. Reload before saving to the index.") }
+        _ = try await GitProcess.run(at: url, arguments: ["update-index", "--add", "--cacheinfo", mode, oid, path])
     }
 }
 

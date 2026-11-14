@@ -9,6 +9,10 @@ public struct RepositoryViewState: Codable, Equatable, Sendable {
     public var historyRef: String?
     public var selectedPaths: Set<String> = []
     public var selectedCommit: String?
+    public var displaysHistorySelection: Bool?
+    public var selectedHistoryIDs: Set<String>?
+    public var historyComparisonRange: HistoryComparisonRange?
+    public var auxiliaryHistoryBranch: String?
     public var selectedCommitPath: String?
     public var mode = "workspace"
     public var fileFilter = ""

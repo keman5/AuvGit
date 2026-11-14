@@ -179,9 +179,10 @@ extension GitRepository {
     public func displayDiff(target: DiffTarget, ignoreWhitespace: Bool = false) async throws -> (text: String, preview: FileComparisonSnapshot?) {
         let path: String
         switch target {
-        case let .worktree(value, _), let .staged(value), let .commit(_, value): path = value
+        case let .worktree(value, _), let .staged(value), let .commit(_, value), let .between(_, _, value, _): path = value
         }
-        let file = try comparisonURL(path)
+        try validateComparisonPath(path)
+        let file = url.appendingPathComponent(path)
         var raw: String?
         if case .worktree = target,
            !["svg", "pdf"].contains(file.pathExtension.lowercased()),
@@ -198,6 +199,10 @@ extension GitRepository {
         }
         let snapshot = try await comparisonPreview(target: target)
         if snapshot.requiresStaticPreview { return ("", snapshot) }
+        if case .between = target, !snapshot.head.isBinary, !snapshot.worktree.isBinary,
+           !snapshot.head.exists || snapshot.head.text != nil, !snapshot.worktree.exists || snapshot.worktree.text != nil {
+            return (try await LargeTextComparison.patch(source: snapshot.head.text ?? "", target: snapshot.worktree.text ?? "", ignoreWhitespace: ignoreWhitespace), nil)
+        }
         let patch: String
         if let raw { patch = raw }
         else {
@@ -220,6 +225,12 @@ extension GitRepository {
             let left = headCheck.code == 0 ? try await treeComparisonContent(revision: "HEAD", path: original) : missingContent()
             let right = try await indexComparisonContent(path: path)
             return FileComparisonSnapshot(path: path, head: left, index: left, worktree: right, base: nil, ours: nil, theirs: nil, previewTarget: target)
+        case let .between(from, to, path, originalPath):
+            try validateComparisonPath(path)
+            if let originalPath { try validateComparisonPath(originalPath) }
+            let left = try await historyComparisonContent(endpoint: from, path: originalPath ?? path)
+            let right = try await historyComparisonContent(endpoint: to, path: path)
+            return FileComparisonSnapshot(path: path, head: left, index: left, worktree: right, base: nil, ours: nil, theirs: nil, previewTarget: target)
         case let .commit(hash, path):
             // Git object reads do not traverse the current filesystem path.
             try validateComparisonPath(path)
@@ -229,6 +240,14 @@ extension GitRepository {
             let left = parent.code == 0 ? try await treeComparisonContent(revision: parent.text.trimmingCharacters(in: .whitespacesAndNewlines), path: original) : missingContent()
             let right = try await treeComparisonContent(revision: revision, path: path)
             return FileComparisonSnapshot(path: path, head: left, index: left, worktree: right, base: nil, ours: nil, theirs: nil, previewTarget: target)
+        }
+    }
+    public func historyComparisonContent(endpoint: HistoryEndpoint, path: String) async throws -> FileRevisionContent {
+        try validateComparisonPath(path)
+        switch endpoint {
+        case let .commit(hash): return try await treeComparisonContent(revision: try await workflowRevision(hash), path: path)
+        case .index: return try await indexComparisonContent(path: path)
+        case .workingTree: return try diskContent(comparisonURL(path))
         }
     }
     private func indexComparisonContent(path: String) async throws -> FileRevisionContent {

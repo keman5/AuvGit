@@ -28,7 +28,8 @@ public struct CommitGraph: Sendable {
         var result: [Row] = []
         var maximum = 1
         for commit in commits {
-            let parents = firstParent ? Array(commit.parents.prefix(1)) : commit.parents
+            let topology = commit.graphParents ?? commit.parents
+            let parents = firstParent ? Array(topology.prefix(1)) : topology
             let wasKnown = lanes.contains(commit.hash)
             if !wasKnown { lanes.append(commit.hash) }
             let before = lanes

@@ -25,6 +25,8 @@ struct DiffPane: View {
     var standaloneShortcuts = false
     var initialSearchOptions = ComparisonSearchOptions()
     var initialReplacement = ""
+    var onChangeTargets: ((ComparisonChangeTargets) -> Void)? = nil
+    var externalChangeNavigation = 0
     @State private var hunk = 0
     @AppStorage("editor.wrapLines") private var wraps = false
     @AppStorage("editor.showLineNumbers") private var lineNumbers = true
@@ -40,6 +42,7 @@ struct DiffPane: View {
     @State private var openedDocumentIdentity = ""
     @State private var showSearch = false
     @Environment(\.colorScheme) private var colorScheme
+    @StateObject private var changeCommands = ComparisonEditingCommands()
     @StateObject private var parseCache = ComparisonPatchCache()
     private var parsed: ParsedDiff { parseCache.value(for: text) }
     var body: some View {
@@ -72,12 +75,17 @@ struct DiffPane: View {
             else {
                 if diff.isBinary { Label(diffText("diff.binary"), systemImage: "doc.zipper").font(.caption).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(Color.orange.opacity(0.1)) }
                 if diff.isTruncated { Text(diffText("diff.truncated", 20000)).font(.caption).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(Color.orange.opacity(0.15)) }
-                DiffTextSurface(diff: diff, sourceText: text, languagePath: title, documentIdentity: documentIdentity, sideBySide: sideBySide, selectedHunk: hunk, dark: colorScheme == .dark, wraps: wraps, lineNumbers: lineNumbers, synchronized: synchronized, fontSize: CGFloat(fontSize), compact: forceCompact || compact, searchOptions: searchOptions, searchStep: searchStep, matchCount: $matchCount, matchIndex: $matchIndex, searchError: $searchError, scrollsToFirstChange: openedDocumentIdentity != documentIdentity, onFirstScroll: { openedDocumentIdentity = documentIdentity })
+                DiffTextSurface(diff: diff, sourceText: text, languagePath: title, documentIdentity: documentIdentity, sideBySide: sideBySide, selectedHunk: hunk, dark: colorScheme == .dark, wraps: wraps, lineNumbers: lineNumbers, synchronized: synchronized, fontSize: CGFloat(fontSize), compact: forceCompact || compact, searchOptions: searchOptions, searchStep: searchStep, matchCount: $matchCount, matchIndex: $matchIndex, searchError: $searchError, scrollsToFirstChange: openedDocumentIdentity != documentIdentity, onFirstScroll: { openedDocumentIdentity = documentIdentity }, changeCommands: changeCommands)
             }
         }.background(ComparisonKeyboardRegion(standalone: standaloneShortcuts, action: performShortcut))
-            .background(AuvGitStyle.canvas).onChange(of: documentIdentity) { _, _ in hunk = 0 }
+            .background(AuvGitStyle.canvas).onChange(of: documentIdentity) { _, _ in hunk = 0; clearChangeNavigation() }
+            .onChange(of: externalChangeNavigation) { old, new in if supportsChangeNavigation { changeCommands.navigateChange(forward: new > old) } }
+            .onChange(of: changeCommands.changeTargets) { _, value in onChangeTargets?(supportsChangeNavigation ? value : .empty) }
+            .onChange(of: text) { _, _ in if !supportsChangeNavigation { clearChangeNavigation() } }
+            .onChange(of: isLoading) { _, loading in if loading { clearChangeNavigation() } }
+            .onChange(of: preview != nil) { _, value in if value { clearChangeNavigation() } }
             .onExitCommand { closeSearch() }
-            .onAppear { searchOptions = initialSearchOptions; replacement = initialReplacement }
+            .onAppear { onChangeTargets?(.empty); searchOptions = initialSearchOptions; replacement = initialReplacement }
             .onChange(of: initialSearchOptions) { _, value in searchOptions = value }
             .onChange(of: initialReplacement) { _, value in replacement = value }
     }
@@ -89,9 +97,9 @@ struct DiffPane: View {
             guard !searchOptions.query.isEmpty else { return false }
             searchStep += command == .compareFindNext ? 1 : -1
         case .comparePreviousChange:
-            guard !parsed.hunks.isEmpty else { return false }; hunk = max(0, hunk - 1)
+            guard supportsChangeNavigation, changeCommands.canNavigatePreviousChange else { return false }; changeCommands.navigateChange(forward: false)
         case .compareNextChange:
-            guard !parsed.hunks.isEmpty else { return false }; hunk = min(parsed.hunks.count - 1, hunk + 1)
+            guard supportsChangeNavigation, changeCommands.canNavigateNextChange else { return false }; changeCommands.navigateChange(forward: true)
         case .compareWrap: wraps.toggle()
         case .compareCompact: compact.toggle()
         case .compareLines: lineNumbers.toggle()
@@ -100,6 +108,8 @@ struct DiffPane: View {
         }
         return true
     }
+    private var supportsChangeNavigation: Bool { !isLoading && preview == nil && !text.isEmpty && !parsed.isBinary && !parsed.hunks.isEmpty }
+    private func clearChangeNavigation() { changeCommands.updateChangeTargets(.empty); onChangeTargets?(.empty) }
     private var documentIdentity: String { title + "|" + (leftRevisionTitle ?? "") + "|" + (rightRevisionTitle ?? "") }
     private var titleLabel: some View {
         AuvGitSectionLabel(title: title.isEmpty ? diffText("diff.title") : title, systemImage: "doc.text")
@@ -108,10 +118,10 @@ struct DiffPane: View {
     private func hunkControls(_ diff: ParsedDiff) -> some View {
         HStack(spacing: 2) {
             AuvGitBadge(diffText("diff.hunkCount", diff.hunks.count), tint: .secondary).fixedSize().padding(.trailing, 6)
-            Button { hunk = max(0, hunk - 1) } label: { ComparisonToolbarIcon(name: "chevron.up") }.buttonStyle(ComparisonToolbarButtonStyle())
-                .disabled(diff.hunks.isEmpty).help(diffText("diff.previousHunk")).accessibilityLabel(diffText("diff.previousHunk"))
-            Button { hunk = min(diff.hunks.count - 1, hunk + 1) } label: { ComparisonToolbarIcon(name: "chevron.down") }.buttonStyle(ComparisonToolbarButtonStyle())
-                .disabled(diff.hunks.isEmpty).help(diffText("diff.nextHunk")).accessibilityLabel(diffText("diff.nextHunk"))
+            Button { changeCommands.navigateChange(forward: false) } label: { ComparisonToolbarIcon(name: "chevron.up") }.buttonStyle(ComparisonToolbarButtonStyle())
+                .disabled(!supportsChangeNavigation || !changeCommands.canNavigatePreviousChange).help(diffText("diff.previousHunk")).accessibilityLabel(diffText("diff.previousHunk"))
+            Button { changeCommands.navigateChange(forward: true) } label: { ComparisonToolbarIcon(name: "chevron.down") }.buttonStyle(ComparisonToolbarButtonStyle())
+                .disabled(!supportsChangeNavigation || !changeCommands.canNavigateNextChange).help(diffText("diff.nextHunk")).accessibilityLabel(diffText("diff.nextHunk"))
         }.buttonStyle(ToolbarRowButtonStyle(minimumWidth: 22))
     }
     private var displayControls: some View {
@@ -174,6 +184,7 @@ struct DiffTextSurface: NSViewRepresentable {
     @Binding var searchError: String?
     let scrollsToFirstChange: Bool
     let onFirstScroll: () -> Void
+    var changeCommands: ComparisonEditingCommands? = nil
     func makeCoordinator() -> Coordinator { Coordinator() }
     func makeNSView(context: Context) -> NSStackView {
         let stack = AlignedDiffStackView(); stack.onResize = { [weak coordinator = context.coordinator] in coordinator?.alignWrappedRows() }; stack.orientation = .horizontal; stack.spacing = 1; stack.distribution = .fillEqually
@@ -205,6 +216,8 @@ struct DiffTextSurface: NSViewRepresentable {
     }
     func updateNSView(_ stack: NSStackView, context: Context) {
         let coordinator = context.coordinator
+        coordinator.changeCommands = changeCommands
+        changeCommands?.navigateChangeAction = { [weak coordinator] forward in coordinator?.navigateChange(forward: forward) }
         let changedIdentity = coordinator.documentIdentity != documentIdentity
         if changedIdentity {
             coordinator.documentIdentity = documentIdentity
@@ -214,6 +227,7 @@ struct DiffTextSurface: NSViewRepresentable {
         let signature = sourceText
         coordinator.synchronized = synchronized
         let changedDocument = changedIdentity || coordinator.signature != signature
+        if changedDocument { coordinator.changeActiveText = nil; coordinator.changeSelectedHunk = nil }
         let style = "\(compact)|\(additionColor)|\(deletionColor)|\(modificationColor)|\(fontName)|\(syntaxHighlight)|\(characterDiff)|\(tabWidth)|\(showWhitespace)"
         let changedStyle = coordinator.style != style
         coordinator.style = style
@@ -289,7 +303,8 @@ struct DiffTextSurface: NSViewRepresentable {
                 coordinator.lastHunk = firstIndex; self.onFirstScroll()
             }
         }
-        if !scrollsToFirstChange, selectedHunk >= 0, selectedHunk < coordinator.hunkRanges.count, selectedHunk != coordinator.lastHunk {
+        coordinator.scheduleChangeTargets()
+        if changeCommands == nil, !scrollsToFirstChange, selectedHunk >= 0, selectedHunk < coordinator.hunkRanges.count, selectedHunk != coordinator.lastHunk {
             coordinator.lastHunk = selectedHunk
             coordinator.navigate(column: 0, range: coordinator.hunkRanges[selectedHunk][0])
         }
@@ -547,7 +562,35 @@ struct DiffTextSurface: NSViewRepresentable {
                 target.reflectScrolledClipView(target.contentView)
             }
         }
+        weak var changeCommands: ComparisonEditingCommands?
+        weak var changeActiveText: NSTextView?
+        var changeSelectedHunk: Int?
+        private var selectingChange = false
+        private var changeUpdateScheduled = false
+        func currentChangeTargets() -> ComparisonChangeTargets {
+            let view = changeActiveText ?? (scrolls.first?.documentView as? NSTextView)
+            let column = scrolls.firstIndex(where: { $0.documentView === view }) ?? 0
+            let ranges = hunkRanges.compactMap { $0.indices.contains(column) ? $0[column].location..<NSMaxRange($0[column]) : nil }
+            return ComparisonChangeTargets(ranges: ranges, position: view?.selectedRange().location ?? 0, selected: changeSelectedHunk)
+        }
+        func scheduleChangeTargets() {
+            guard !changeUpdateScheduled else { return }; changeUpdateScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }; self.changeUpdateScheduled = false
+                self.changeCommands?.updateChangeTargets(self.currentChangeTargets())
+            }
+        }
+        func navigateChange(forward: Bool) {
+            guard let index = currentChangeTargets().target(forward: forward), hunkRanges.indices.contains(index) else { scheduleChangeTargets(); return }
+            let column = scrolls.firstIndex(where: { $0.documentView === changeActiveText }) ?? 0
+            selectingChange = true; changeSelectedHunk = index
+            lastHunk = index; navigate(column: column, range: hunkRanges[index][column])
+            selectingChange = false; scheduleChangeTargets()
+        }
         func highlightCurrentRow(in active: NSTextView) {
+            changeActiveText = active
+            if !selectingChange { changeSelectedHunk = nil }
+            scheduleChangeTargets()
             guard let sourceIndex = scrolls.firstIndex(where: { $0.documentView === active }) else { return }
             let string = active.string as NSString
             let location = min(active.selectedRange().location, max(0, string.length - 1))

@@ -8,6 +8,8 @@ struct ComparisonEditRequest: Equatable, Sendable {
     let syntax: Bool
     let characters: Bool
     let conflict: Bool
+    var rules = ComparisonRules()
+    var endings: [ComparisonLineEnding] = []
     var baseline: Int { conflict ? (ids.firstIndex(of: "worktree") ?? 0) : 0 }
 }
 
@@ -25,15 +27,16 @@ actor ComparisonEditWorker {
     private var previous: (ComparisonEditRequest, ComparisonEditAnalysis)?
     func prepare(_ request: ComparisonEditRequest) throws -> ComparisonEditAnalysis {
         try Task.checkCancellation()
+        let comparisonTexts = request.texts.indices.map { request.rules.textKey(request.texts[$0], ending: request.endings.indices.contains($0) ? request.endings[$0] : .lf) }
         var diffs: [String: TextLineDiff] = [:]
         for source in request.ids.indices {
             for target in request.ids.indices where source != target {
                 try Task.checkCancellation()
                 let key = request.ids[source] + "→" + request.ids[target]
-                if let (old, result) = previous, old.ids == request.ids,
+                if let (old, result) = previous, old.ids == request.ids, old.rules == request.rules, old.endings == request.endings,
                    old.texts[source] == request.texts[source], old.texts[target] == request.texts[target], let diff = result.diffs[key] {
                     diffs[key] = diff
-                } else { diffs[key] = TextLineDiff(source: request.texts[source], target: request.texts[target]) }
+                } else { diffs[key] = TextLineDiff(source: comparisonTexts[source], target: comparisonTexts[target], rules: request.rules) }
             }
         }
         let tokens = try request.ids.indices.map { index -> [SyntaxToken] in
@@ -59,9 +62,9 @@ actor ComparisonEditWorker {
         try Task.checkCancellation()
         let conflicts = request.conflict ? ConflictDraft.blocks(in: request.texts[request.baseline]) : []
         let alignmentDiffs = request.ids.indices.map { target in
-            diffs[request.ids[request.baseline] + "→" + request.ids[target]] ?? TextLineDiff(source: request.texts[request.baseline], target: request.texts[target])
+            diffs[request.ids[request.baseline] + "→" + request.ids[target]] ?? TextLineDiff(source: comparisonTexts[request.baseline], target: comparisonTexts[target], rules: request.rules)
         }
-        let alignment = ComparisonAlignment(texts: request.texts, baseline: request.baseline, conflictBlocks: conflicts, diffs: alignmentDiffs)
+        let alignment = ComparisonAlignment(texts: request.texts, baseline: request.baseline, conflictBlocks: conflicts, diffs: alignmentDiffs, rules: request.rules)
         let navigation = ComparisonChangeNavigation(texts: request.texts, baseline: request.baseline, conflicts: conflicts,
             cachedAlignment: alignment, diffs: Dictionary(uniqueKeysWithValues: alignmentDiffs.enumerated().map { ($0.offset, $0.element) })).bands
         try Task.checkCancellation()

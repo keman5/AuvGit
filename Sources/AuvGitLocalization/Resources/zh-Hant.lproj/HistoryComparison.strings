@@ -1,0 +1,7 @@
+"index" = "索引";
+"worktree" = "工作區";
+"reverse" = "反轉比較方向";
+"none" = "不顯示輔助分支";
+"auxiliary" = "輔助分支";
+"stalePreview" = "圖譜預覽後儲存庫已發生變化，請重新檢查操作。";
+"backToWorkspace" = "返回工作區";

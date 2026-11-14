@@ -36,7 +36,9 @@ struct HistoryPaginationGate {
 struct HistoryPane: View {
     let commits: [GitCommit]
     @Binding var selection: String?
-    @State private var rangeSelection = ListSelectionState<String>()
+    @State private var collapsedMerges = Set<String>()
+    @State private var pendingGraphDrop: HistoryGraphDropRequest?
+    @StateObject private var overlapCache = HistoryOverlapCache()
     @Binding var search: String
     let isLoading: Bool
     let hasMore: Bool
@@ -59,197 +61,150 @@ struct HistoryPane: View {
     @State private var searchFocusRequest: UUID?
 
     @Binding var authorFilter: String
+    var selectedCommitIDs: Set<String> = []
+    var onSelectCommits: ((Set<String>) -> Void)? = nil
+    var virtualRows: [HistoryVirtualRow] = []
+    var onGraphDrop: ((HistoryGraphDropRequest) -> Void)? = nil
+    var overlapLoader: ((String, [String]) async throws -> [String: Int])? = nil
+    var graphRepositoryIdentity: UUID? = nil
+    var branches: [GitBranch] = []
+    var graphHeadCommitID: String? = nil
+    var requiresSelectionActivation: Bool = false
     @AppStorage("history.showAuthorAvatars") private var showAvatars = true
     @AppStorage("history.showAuthorNames") private var showNames = true
     @AppStorage("history.showRemoteLabels") private var showRemoteLabels = true
     @AppStorage("history.showTagLabels") private var showTagLabels = true
-    @ObservedObject private var shortcuts = KeyboardShortcuts.shared
+    @AppStorage("history.identityMode") private var identityModeValue = HistoryIdentityMode.author.rawValue
+    @AppStorage("history.showIdentityEmails") private var showEmails = false
+    @AppStorage("history.showDateColumn") private var showDate = true
+    @AppStorage("history.showHashColumn") private var showHash = true
+    @AppStorage("history.showOverlapColumn") private var showOverlap = false
+    private var identityMode: HistoryIdentityMode { HistoryIdentityMode(rawValue: identityModeValue) ?? .author }
     @StateObject private var graphCache = HistoryGraphCache()
-    @State private var pendingNavigationScroll = true
     @State private var jumpHash = ""
     @State private var authorWidth: CGFloat = 110
     @State private var graphColumnWidth: CGFloat = HistoryColumn.graph.minimumWidth
     @State private var messageWidth: CGFloat = 360
     @State private var hashWidth: CGFloat = 75
     @State private var dateWidth: CGFloat = 150
-    @State private var paginationGate = HistoryPaginationGate(prefetchDistance: 10)
 
     var body: some View {
         GeometryReader { geometry in
-        let visible = commits
-        let selectedHashes = rangeSelection.selected(primary: selection, orderedIDs: visible.map(\.hash))
-        let graph = graphCache.graph(commits: visible, firstParent: firstParentGraph)
-        let graphStyles = graphCache.styles(commits: visible, remoteBranchNames: remoteBranchNames, localUnpushedHashes: localUnpushedCommitHashes, currentBranch: currentBranch, visibleRemoteBranchNames: visibleRemoteBranchNames)
-        let showColumns = !compact && (showAvatars || showNames)
-        let compactNameWidth = compact && showNames ? graphCache.compactNameWidth(commits: visible, showsAvatar: showAvatars) : 0
-        let compactDateWidth = compact ? graphCache.compactDateWidth(commits: visible) : 0
-        let compactIdentityWidth = (showAvatars ? 18 : 0) + (showNames ? compactNameWidth : 0) + (showAvatars && showNames ? 4 : 0)
-        let displayedAuthorWidth: CGFloat = showNames ? authorWidth : 18
-        VStack(spacing: 0) {
-            if showsSearch {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
-                    if compact { Label(designWorkspaceText("Commit history"), systemImage: "clock.arrow.circlepath").font(.system(size: 12, weight: .semibold)) }
-                    searchControl
-                    if !compact { filterControls }; HistoryDisplayMenu()
-                }
-                VStack(spacing: 8) {
-                    searchControl
-                    if !compact { filterControls.frame(maxWidth: .infinity, alignment: .leading) }
-                }
-            }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8).auvGitChrome()
-            Divider()
-            }
-            ScrollView(.horizontal) {
+            let preserved = selectedCommitIDs.union(selection.map { [$0] } ?? [])
+            let projection = HistoryMergeCollapse.project(commits, collapsed: collapsedMerges, preserving: preserved)
+            let visible = projection.commits
+            let graph = graphCache.graph(commits: visible, firstParent: firstParentGraph)
+            let styles = graphCache.styles(commits: visible, remoteBranchNames: remoteBranchNames, localUnpushedHashes: localUnpushedCommitHashes, currentBranch: currentBranch, visibleRemoteBranchNames: visibleRemoteBranchNames)
+            let nameWidth = compact ? graphCache.compactNameWidth(commits: visible, showsAvatar: showAvatars, mode: identityMode, names: showNames, emails: showEmails) : authorWidth
+            let calendarWidth = compact ? graphCache.compactDateWidth(commits: visible) : dateWidth
+            let identityWidth = (showAvatars || showNames || showEmails) ? (compact ? min(100, (showAvatars ? 18 : 0) + nameWidth + (showAvatars ? 4 : 0)) : authorWidth) : 0
+            let contentWidth = graphWidth(graph) + (compact ? 220 : messageWidth) + identityWidth + (showDate ? calendarWidth + 4 : 0) + (showHash ? hashWidth + 4 : 0) + (showOverlap ? 69 : 0) + 24
             VStack(spacing: 0) {
-            if !compact {
-            HStack(spacing: 8) {
-                columnHeader(historyText("history.graph"), column: .graph, width: $graphColumnWidth,
-                             minimumWidth: HistoryColumnLayout.graphWidth(laneCount: graph.laneCount))
-                    .help(historyText("history.graphLegend"))
-                columnHeader(historyText("history.message"), column: .message, width: $messageWidth)
-                if showColumns {
-                    if showNames { columnHeader(historyText("history.author"), column: .author, width: $authorWidth) }
-                    else { Color.clear.frame(width: 18) }
-                }
-                columnHeader(historyText("history.date"), column: .date, width: $dateWidth)
-                columnHeader(historyText("history.hash"), column: .hash, width: $hashWidth)
-            }.frame(maxWidth: .infinity, alignment: .leading).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).padding(.leading, HistoryColumnLayout.headerLeadingInset).padding(.trailing, HistoryColumnLayout.trailingInset).frame(height: 28).fixedSize(horizontal: false, vertical: true).auvGitChrome()
-            Divider()
-            }
-            if compact {
-                NativeCompactHistoryTable(commits: visible, graph: graph, styles: graphStyles,
-                    selection: $selection, navigationGeneration: navigationGeneration,
-                    graphWidth: graphWidth(graph), nameWidth: compactNameWidth, dateWidth: compactDateWidth,
-                    showAvatars: showAvatars, showNames: showNames,
-                    showRemoteLabels: showRemoteLabels, showTagLabels: showTagLabels,
-                    isBusy: isBusy, hasMore: hasMore, isLoading: isLoading,
-                    onLoadMore: onLoadMore, onAction: onAction)
-                    .overlay {
-                        if visible.isEmpty { emptyHistory.allowsHitTesting(false) }
-                    }
-            } else if visible.isEmpty {
-                emptyHistory
-            } else {
-                ScrollViewReader { proxy in
-                List(selection: ListSelectionState.binding($rangeSelection, primary: $selection, orderedIDs: visible.map(\.hash))) {
-                    ForEach(Array(visible.enumerated()), id: \.element.hash) { index, commit in
-                        let row = graph.rows[index]
-                        let rowWidths = HistoryColumnLayout.graphMessageWidths(
-                            activeLaneCount: row.laneCount,
-                            maximumLaneCount: graph.laneCount,
-                            maximumGraphWidth: graphWidth(graph),
-                            baseMessageWidth: compact ? 220 : messageWidth
-                        )
-                        HStack(spacing: compact ? 4 : 8) {
-                            CommitGraphCell(row: row, rowIndex: index, styles: graphStyles, selected: selectedHashes.contains(commit.hash))
-                                .frame(width: rowWidths.graph, height: HistoryColumnLayout.rowHeight(compact: compact)).clipped()
-                            HStack(spacing: 4) {
-                                ForEach(visibleRefs(commit, compact: compact, styles: graphStyles), id: \.self) { ref in
-                                    let tint = graphStyles.referenceStyle(for: ref, commitHash: commit.hash).color.color
-                                    HistoryReferenceBadge(label: graphStyles.referenceLabel(ref), tint: NSColor(tint), selected: selectedHashes.contains(commit.hash))
-                                        .frame(width: min(120, (graphStyles.referenceLabel(ref) as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 10, weight: .medium)]).width + 8), height: 16)
-                                        .help(ref)
-                                }
-                                Text(commit.subject).lineLimit(1).help(commit.subject)
-                            }.frame(width: rowWidths.message, alignment: .leading).clipped()
-                            if showColumns {
-                                HStack(spacing: 5) {
-                                    if showAvatars { CommitAvatar(email: commit.authorEmail, size: 18).frame(width: 18, height: 18).clipped() }
-                                    if showNames { Text(commit.author).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading) }
-                                }.frame(width: displayedAuthorWidth, alignment: .leading).clipped().help(commit.author + (commit.authorEmail.isEmpty ? "" : " <" + commit.authorEmail + ">"))
-                            }
-                            if !compact {
-                            Text(HistoryCalendarDate.text(commit.committedDate))
-                                .font(.system(size: 11)).foregroundStyle(.secondary)
-                                .lineLimit(1).frame(width: dateWidth, alignment: .leading).clipped().help(HistoryCalendarDate.text(commit.committedDate))
-                            }
-                            if compact, showAvatars || showNames {
-                                HStack(spacing: 4) {
-                                    if showAvatars { CommitAvatar(email: commit.authorEmail, size: 18).frame(width: 18, height: 18).clipped() }
-                                    if showNames { Text(commit.author).font(.system(size: 10)).lineLimit(1).frame(width: compactNameWidth, alignment: .leading).help(commit.author) }
-                                }.frame(width: min(100, compactIdentityWidth), alignment: .leading).clipped()
-                            }
-                            if compact { Text(HistoryCalendarDate.text(commit.committedDate)).font(.system(size: 10)).lineLimit(1).foregroundStyle(.secondary).frame(width: compactDateWidth, alignment: .leading).clipped().help(HistoryCalendarDate.text(commit.committedDate)) }
-                            Text(commit.shortHash).font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.secondary).lineLimit(1).frame(width: compact ? 75 : hashWidth, alignment: .leading).clipped()
-                        }.font(.system(size: 12))
-                            .foregroundStyle(.primary)
-                            .padding(.leading, HistoryColumnLayout.leadingInset)
-                            .padding(.trailing, HistoryColumnLayout.trailingInset)
-                            .listRowBackground(Color.clear)
-                            .tag(commit.hash).id(commit.hash)
-                            .listRowInsets(EdgeInsets())
-                            .accessibilityElement(children: .combine)
-                            .accessibilityLabel(historyText("history.commitAccessibility", commit.subject, commit.author, commit.shortHash))
-                            .onAppear {
-                                if paginationGate.shouldRequestMore(visibleIndex: index, commitCount: visible.count, hasMore: hasMore, isLoading: isLoading) {
-                                    onLoadMore()
-                                }
-                            }
-                    }
-                }.listStyle(.plain).contentMargins(.horizontal, 0).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, HistoryColumnLayout.rowHeight(compact: compact))
-                    .contextMenu(forSelectionType: String.self) { hashes in
-                        if hashes.count == 1, let hash = hashes.first, let commit = commits.first(where: { $0.hash == hash }) {
-                            Button(sidebarRefinementText("viewLog")) { onAction(.viewLog, commit) }.configuredShortcut(.viewLog, using: shortcuts)
-                            Button(sidebarRefinementText("commitDetails")) { onAction(.show, commit) }.configuredShortcut(.show, using: shortcuts)
-                            Divider()
-                            Button(historyActionText("reset")) { onAction(.reset, commit) }.configuredShortcut(.reset, using: shortcuts).disabled(isBusy)
-                            Button(historyActionText("resetAdvanced")) { onAction(.resetAdvanced, commit) }.configuredShortcut(.resetAdvanced, using: shortcuts).disabled(isBusy)
-                            Button(historyActionText("createBranch")) { onAction(.createBranch, commit) }.configuredShortcut(.createBranch, using: shortcuts).disabled(isBusy)
-                            Button(historyActionText("createTag")) { onAction(.createTag, commit) }.configuredShortcut(.createTag, using: shortcuts).disabled(isBusy)
-                            Button(historyActionText("checkout")) { onAction(.checkout, commit) }.configuredShortcut(.checkout, using: shortcuts).disabled(isBusy)
-                            Button(designText("Interactive Rebase")) { onAction(.rebase, commit) }.configuredShortcut(.rebase, using: shortcuts).disabled(isBusy)
-                            ForEach([HistoryAction.cherryPick, .revert], id: \.self) { action in
-                                Button(historyActionText(action.rawValue)) { onAction(action, commit) }.disabled(isBusy)
-                            }
-                            Divider()
-                            Button(historyActionText("copyHash")) { onAction(.copyHash, commit) }.configuredShortcut(.copyHash, using: shortcuts)
-                            Button(historyActionText("copyMessage")) { onAction(.copyMessage, commit) }.configuredShortcut(.copyMessage, using: shortcuts)
-                            Button(shortcutText("Use Message for Commit")) { onAction(.useCommitMessage, commit) }.configuredShortcut(.useCommitMessage, using: shortcuts)
-                        } else if !hashes.isEmpty {
-                            Button(historyActionText("copyHash")) { copyCommits(hashes, messages: false) }
-                            Button(historyActionText("copyMessage")) { copyCommits(hashes, messages: true) }
+                if showsSearch {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            if compact { Label(designWorkspaceText("Commit history"), systemImage: "clock.arrow.circlepath").font(.system(size: 12, weight: .semibold)) }
+                            searchControl
+                            if !compact { filterControls }
+                            HistoryDisplayMenu()
                         }
-                    } primaryAction: { hashes in
-                        if let hash = hashes.first, let commit = commits.first(where: { $0.hash == hash }) { onAction(.show, commit) }
-                    }
-                    .onChange(of: navigationGeneration) { _, _ in rangeSelection = .init(); pendingNavigationScroll = true; scrollAfterNavigation(proxy) }
-                    .onChange(of: visible.first?.hash) { _, _ in paginationGate.reset() }
-                    .onChange(of: selection) { _, _ in scrollAfterNavigation(proxy) }
-                    .onChange(of: commits) { _, _ in scrollAfterNavigation(proxy) }
-                    .onAppear { scrollAfterNavigation(proxy) }
+                        VStack(spacing: 8) { HStack { searchControl; HistoryDisplayMenu() }; if !compact { filterControls } }
+                    }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8).auvGitChrome()
+                    Divider()
                 }
-            }
-            }.frame(width: max(geometry.size.width, compact
-                ? graphWidth(graph) + 220 + compactIdentityWidth + compactDateWidth + 75 + HistoryColumnLayout.leadingInset + HistoryColumnLayout.trailingInset + CGFloat(3 + (showAvatars || showNames ? 1 : 0)) * 4
-                : graphWidth(graph) + messageWidth + (showColumns ? displayedAuthorWidth : 0) + dateWidth + hashWidth + HistoryColumnLayout.leadingInset + HistoryColumnLayout.trailingInset + CGFloat(showColumns ? 4 : 3) * 8), alignment: .leading)
-            }
-            if !compact, showsDetails, let commit = commits.first(where: { $0.hash == selection }) {
-                Divider()
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(commit.hash).font(.system(size: 11, design: .monospaced)).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
-                    CommitIdentityDetails(commit: commit)
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(commit.body.isEmpty ? commit.subject : commit.body).font(.system(size: 12))
-                        }.frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
-                    }.frame(minHeight: 45, maxHeight: 115)
-                }.padding(.horizontal, 12).padding(.vertical, 10).auvGitChrome()
-                    .accessibilityLabel(historyText("history.details"))
-            }
-        }.background(AuvGitStyle.canvas)
-            .background(HistoryKeyboardRegion(paneScoped: compact, action: { action in
-                guard let commit = commits.first(where: { $0.hash == selection }), !action.isMutation || !isBusy else { return }
-                onAction(action, commit)
-            }, find: {
-                if showsSearch { searchFocusRequest = UUID() } else { onFind() }
-            }, navigate: { child in
-                guard let target = HistoryCommitNavigation.target(commits: commits, selection: selection, child: child) else { return }
-                pendingNavigationScroll = true
-                selection = target
-            }, showChanges: onShowChanges))
+                ScrollView(.horizontal) {
+                    VStack(spacing: 0) {
+                        if !compact {
+                            HStack(spacing: 4) {
+                                columnHeader(historyText("history.graph"), column: .graph, width: $graphColumnWidth, minimumWidth: HistoryColumnLayout.graphWidth(laneCount: graph.laneCount))
+                                columnHeader(historyText("history.message"), column: .message, width: $messageWidth)
+                                if identityWidth > 0 { columnHeader(graphFeatureText(identityMode == .author ? "Author" : "Committer"), column: .author, width: $authorWidth) }
+                                if showDate { columnHeader(historyText("history.date"), column: .date, width: $dateWidth) }
+                                if showHash { columnHeader(historyText("history.hash"), column: .hash, width: $hashWidth) }
+                                if showOverlap { Text(graphFeatureText("Overlap")).frame(width: 65, alignment: .leading) }
+                            }.font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).padding(.leading, HistoryColumnLayout.leadingInset).frame(height: 28).frame(maxWidth: .infinity, alignment: .leading).auvGitChrome()
+                            Divider()
+                        }
+                        NativeCompactHistoryTable(commits: visible, graph: graph, styles: styles,
+                            selection: $selection, navigationGeneration: navigationGeneration,
+                            graphWidth: graphWidth(graph), nameWidth: nameWidth, dateWidth: calendarWidth,
+                            showAvatars: showAvatars, showNames: showNames,
+                            showRemoteLabels: showRemoteLabels, showTagLabels: showTagLabels,
+                            isBusy: isBusy, hasMore: hasMore, isLoading: isLoading, onLoadMore: onLoadMore, onAction: onAction,
+                            virtualRows: virtualRows, selectedCommitIDs: selectedCommitIDs, onSelectCommits: onSelectCommits,
+                            identityMode: identityMode, showEmails: showEmails, showDate: showDate, showHash: showHash,
+                            showOverlap: showOverlap, overlapValues: overlapCache.values, overlapIsLoading: overlapCache.isLoading,
+                            collapsedCounts: projection.hiddenCounts, collapsedMerges: collapsedMerges,
+                            onToggleMerge: { hash in if !collapsedMerges.insert(hash).inserted { collapsedMerges.remove(hash) } },
+                            onGraphDrop: onGraphDrop == nil ? nil : { pendingGraphDrop = preparedDrop($0) }, currentBranch: currentBranch, branches: branches,
+                            compact: compact, messageWidth: messageWidth, identityWidth: authorWidth, hashWidth: hashWidth,
+                            requiresSelectionActivation: requiresSelectionActivation)
+                            .overlay { if visible.isEmpty && virtualRows.isEmpty { emptyHistory.allowsHitTesting(false) } }
+                    }.frame(width: max(geometry.size.width, contentWidth), alignment: .leading)
+                }
+                if showOverlap {
+                    HStack(spacing: 6) {
+                        if overlapCache.isLoading { ProgressView().controlSize(.mini) }
+                        Text(overlapCache.error ?? graphFeatureText("Overlap explanation")).font(.system(size: 10)).foregroundStyle(.secondary)
+                        Spacer()
+                    }.padding(.horizontal, 12).padding(.vertical, 4)
+                }
+                if !compact, showsDetails, let commit = commits.first(where: { $0.hash == selection }) {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(commit.hash).font(.system(size: 11, design: .monospaced)).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                        CommitIdentityDetails(commit: commit)
+                        ScrollView { Text(commit.body.isEmpty ? commit.subject : commit.body).font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }.frame(minHeight: 45, maxHeight: 115)
+                    }.padding(.horizontal, 12).padding(.vertical, 10).auvGitChrome().accessibilityLabel(historyText("history.details"))
+                }
+            }.background(AuvGitStyle.canvas)
+                .background(HistoryKeyboardRegion(paneScoped: compact, action: { action in
+                    guard let commit = commits.first(where: { $0.hash == selection }), !action.isMutation || !isBusy else { return }
+                    onAction(action, commit)
+                }, find: { if showsSearch { searchFocusRequest = UUID() } else { onFind() } }, navigate: { child in
+                    guard let target = HistoryCommitNavigation.target(commits: commits, selection: selection, child: child) else { return }
+                    selection = target
+                    onSelectCommits?([target])
+                }, showChanges: onShowChanges))
+                .task(id: overlapTaskKey) {
+                    await overlapCache.load(selected: selection, commits: commits, generation: navigationGeneration, enabled: showOverlap, loader: overlapLoader)
+                }
+                .onChange(of: navigationGeneration) { _, _ in collapsedMerges.removeAll(); pendingGraphDrop = nil }
+                .sheet(isPresented: Binding(get: { pendingGraphDrop != nil }, set: { if !$0 { pendingGraphDrop = nil } })) {
+                    if let request = pendingGraphDrop {
+                        HistoryGraphDropPreview(request: request, confirm: { confirmed in
+                            pendingGraphDrop = nil
+                            guard !isBusy, commits.contains(where: { $0.hash == confirmed.targetCommitID }) else { return }
+                            onGraphDrop?(confirmed)
+                        }, cancel: { pendingGraphDrop = nil })
+                    }
+                }
         }
+    }
+    private func preparedDrop(_ request: HistoryGraphDropRequest) -> HistoryGraphDropRequest {
+        var request = request
+        request.repositoryIdentity = graphRepositoryIdentity
+        request.expectedHeadCommitID = graphHeadCommitID ?? commits.first { commit in commit.refs.contains { HistoryGraphStylePlan.canonicalReference($0) == "HEAD" || $0.hasPrefix("HEAD -> ") && !$0.hasSuffix("~") } }?.hash
+        switch request.source {
+        case .head: request.expectedSourceCommitID = request.expectedHeadCommitID
+        case .localBranch(let name):
+            request.sourceIsCurrentBranch = currentBranch.map { "refs/heads/" + $0.name == name } ?? false
+            request.expectedSourceCommitID = commits.first { commit in commit.refs.contains { HistoryGraphStylePlan.canonicalReference($0).replacingOccurrences(of: "HEAD -> ", with: "") == name && !$0.hasSuffix("~") } }?.hash
+        case .commits(let ids):
+            request.expectedSourceCommitID = ids.first
+            let selected = Set(ids)
+            let byHash = Dictionary(uniqueKeysWithValues: commits.map { ($0.hash, $0) })
+            var cursor = request.expectedHeadCommitID
+            var chain: [String] = []
+            while let hash = cursor, chain.count < ids.count, let commit = byHash[hash], commit.parents.count == 1 {
+                chain.append(hash); cursor = commit.parents.first
+            }
+            request.isContiguousHeadRange = chain.count == ids.count && Set(chain) == selected
+        }
+        return request
+    }
+    private var overlapTaskKey: String {
+        (navigationGeneration?.uuidString ?? "") + "|" + (selection ?? "") + "|" + String(showOverlap) + "|" + commits.map(\.hash).joined(separator: ",")
     }
     private var emptyHistory: some View {
         ContentUnavailableView {
@@ -257,19 +212,6 @@ struct HistoryPane: View {
         } description: {
             Text(search.isEmpty ? historyText("history.emptyDescription") : historyText("history.noResults"))
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-    private func scrollAfterNavigation(_ proxy: ScrollViewProxy) {
-        guard pendingNavigationScroll, let selection, commits.contains(where: { $0.hash == selection }) else { return }
-        pendingNavigationScroll = false
-        DispatchQueue.main.async { proxy.scrollTo(selection, anchor: .top) }
-    }
-    private func copyCommits(_ hashes: Set<String>, messages: Bool) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(commits.filter { hashes.contains($0.hash) }.map { messages ? $0.subject : $0.hash }.joined(separator: "\n"), forType: .string)
-    }
-    private func visibleRefs(_ commit: GitCommit, compact: Bool, styles: HistoryGraphStylePlan) -> [String] {
-        let values = commit.refs.filter { styles.isVisibleReference($0) && (showRemoteLabels || !styles.isRemoteReference($0)) && (showTagLabels || !styles.isTagReference($0)) }
-        return compact ? Array(values.prefix(1)) : values
     }
     private var searchControl: some View { HistorySearchControl(search: $search, focusRequest: searchFocusRequest) }
     private var filterControls: some View {
@@ -326,8 +268,8 @@ private final class HistoryGraphCache: ObservableObject {
         return HistoryColumnLayout.compactDateWidth(measuredWidth: measuredDateWidth)
     }
 
-    func compactNameWidth(commits: [GitCommit], showsAvatar: Bool) -> CGFloat {
-        let authors = commits.map(\.author)
+    func compactNameWidth(commits: [GitCommit], showsAvatar: Bool, mode: HistoryIdentityMode = .author, names: Bool = true, emails: Bool = false) -> CGFloat {
+        let authors = commits.map { mode.text($0, names: names, emails: emails) }
         if authors != measuredAuthors {
             measuredAuthors = authors
             measuredNameWidth = authors.map { ($0 as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 10)]).width }.max() ?? 0

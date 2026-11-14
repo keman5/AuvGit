@@ -91,3 +91,5 @@
 "Branch or upstream changed. Fetch again before setting a tracking branch." = "目前分支或上游關聯已變更，請重新擷取後再設定追蹤分支。";
 
 "Remote branch changed; fetch updates and confirm deletion again" = "遠端分支已更新，請擷取更新後重新確認刪除";
+
+"External Git helper did not close its output stream" = "Git 已結束，但外部輔助程式尚未關閉輸出串流。";

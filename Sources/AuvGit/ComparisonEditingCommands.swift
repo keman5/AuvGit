@@ -6,6 +6,12 @@ final class ComparisonEditingCommands: ObservableObject {
     @Published private(set) var canRedo = false
     @Published private(set) var searchCurrent = 0
     @Published private(set) var searchTotal = 0
+    @Published private(set) var changeTargets = ComparisonChangeTargets.empty
+    var canNavigatePreviousChange: Bool { changeTargets.previous != nil }
+    var canNavigateNextChange: Bool { changeTargets.next != nil }
+    var navigateChangeAction: ((Bool) -> Void)?
+    func navigateChange(forward: Bool) { navigateChangeAction?(forward) }
+    func updateChangeTargets(_ value: ComparisonChangeTargets) { if changeTargets != value { changeTargets = value } }
     var takeBlockAction: ((Bool) -> Bool)?
     func takeBlock(fromLeft: Bool) -> Bool { takeBlockAction?(fromLeft) ?? false }
     var focusEditorAction: (() -> Void)?

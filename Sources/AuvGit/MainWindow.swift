@@ -408,7 +408,7 @@ struct MainWindow: View {
             }
             Task { await store.loadDiff() }
         }
-        .onChange(of: store.selectedCommit) { _, _ in guard handlesStoreEvents, !store.isRestoringViewState else { return }; Task { await store.loadCommitFiles() } }
+        .onChange(of: store.selectedCommit) { _, _ in guard handlesStoreEvents, !store.isRestoringViewState else { return }; store.historyPrimarySelectionChanged() }
         .onChange(of: store.selectedCommitPath) { _, _ in guard handlesStoreEvents, !store.isRestoringViewState else { return }; Task { await store.loadDiff() } }
         .onChange(of: store.historySearch) { _, _ in guard handlesStoreEvents, !store.isRestoringViewState else { return }; store.scheduleSearch() }
         .onChange(of: store.historyAuthor) { _, _ in guard handlesStoreEvents, !store.isRestoringViewState else { return }; store.scheduleSearch() }
@@ -873,7 +873,7 @@ struct MainWindow: View {
         Picker(mainText("diffScope"), selection: Binding(get: { store.effectiveStagedDiff }, set: { store.stagedDiff = $0 })) {
             Text(mainText("workspace")).tag(false)
             Text(mainText("staged")).tag(true)
-        }
+        }.disabled(store.displaysHistorySelection)
         if store.selectedPaths.count == 1 {
             Button(compareText("Edit / Three-way Compare")) {
                 guard !store.isBusy, store.canMutateDisplayedDiff else { return }
@@ -980,13 +980,14 @@ extension MainWindow {
                 HStack(spacing: 8) {
                     AuvGitSectionLabel(title: interactionText("Log"), systemImage: "clock.arrow.circlepath")
                     HistorySearchControl(search: $store.historySearch, focusRequest: historySearchFocusRequest).frame(maxWidth: .infinity)
+                    HistoryAuxiliaryBranchMenu(store: store)
                     HistoryDisplayMenu(showMergedCommits: Binding(get: { store.showMergedCommits }, set: { store.setShowMergedCommits($0) }))
                     Button { if let repo = store.repository { LogPresenter.show(repository: repo) } } label: {
                         Image(systemName: "arrow.up.left.and.arrow.down.right").frame(width: 24, height: 24).contentShape(Rectangle())
                     }.buttonStyle(ToolbarRowButtonStyle()).help(interactionText("Expand History")).accessibilityLabel(interactionText("Expand History"))
                 }.padding(.horizontal, 12).frame(height: AuvGitStyle.sectionHeight).auvGitSectionChrome()
             }
-            HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch, isLoading: store.loadingHistory, hasMore: store.hasMore, onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy, onAction: historyAction, onShowChanges: { if let path = store.selectedCommitPath { compareCommitFile(path) } }, compact: compact, showsSearch: !compact, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), visibleRemoteBranchNames: store.visibleHistoryRemoteBranchNames, currentBranch: store.branches.first { $0.isCurrent && !$0.isRemote }, localUnpushedCommitHashes: store.localUnpushedCommitHashes, navigationGeneration: store.historyNavigationGeneration, onJump: jumpToCommit, firstParentGraph: store.followsCurrentBranch && !store.showMergedCommits, onFind: { historySearchFocusRequest = UUID() }, authorFilter: $store.historyAuthor)
+            HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch, isLoading: store.loadingHistory, hasMore: store.hasMore, onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy, onAction: historyAction, onShowChanges: showSelectedJournalLog, compact: compact, showsSearch: !compact, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), visibleRemoteBranchNames: store.visibleHistoryRemoteBranchNames, currentBranch: store.branches.first { $0.isCurrent && !$0.isRemote }, localUnpushedCommitHashes: store.localUnpushedCommitHashes, navigationGeneration: store.historyNavigationGeneration, onJump: jumpToCommit, firstParentGraph: store.followsCurrentBranch && !store.showMergedCommits, onFind: { historySearchFocusRequest = UUID() }, authorFilter: $store.historyAuthor, selectedCommitIDs: store.selectedHistoryIDs, onSelectCommits: store.selectJournalRows, virtualRows: [], onGraphDrop: store.performHistoryGraphDrop, overlapLoader: store.loadHistoryOverlap, graphRepositoryIdentity: store.graphRepositoryIdentity, branches: store.branches, graphHeadCommitID: store.graphHeadCommitID)
                 .background(WorkspaceFileFocusRegion(focus: historyFocus).allowsHitTesting(false).accessibilityHidden(true))
         }
     }
@@ -1085,9 +1086,10 @@ extension MainWindow {
         let root = store.repositoryURL
         namePrompt = NamePrompt(title: title, initial: initial) { value in guard store.repositoryURL == root, !store.isBusy else { return }; action(value) }
     }
-    private func compareCommitFile(_ path: String) {
-        guard let repository = store.repository, let hash = store.selectedCommit else { return }
-        ComparePresenter.show(title: "\(String(hash.prefix(8))) / \(path)", repository: repository, target: .commit(hash: hash, path: path))
+    private func showSelectedJournalLog() {
+        guard let repository = store.repository, let hash = store.selectedCommit,
+              store.commits.contains(where: { $0.hash == hash }) else { return }
+        LogPresenter.show(repository: repository, selectedCommit: hash, applyFilter: true)
     }
     private func fileAction(_ action: FileAction, _ paths: Set<String>) {
         guard store.pendingRepositoryPath == nil else { return }

@@ -81,6 +81,7 @@ private final class CompareController: NSWindowController, NSWindowDelegate {
         let path: String?
         switch target {
         case .worktree(let value, _), .staged(let value), .commit(_, let value): path = value
+        case .between(_, _, let value, _): path = value
         default: path = nil
         }
         session = path.map { FileCompareSession(repository: repository, path: $0, target: target) }
@@ -149,12 +150,20 @@ final class FileCompareSession: ObservableObject {
     @Published var status = ""
     @Published var patch = ""
     @Published var ignoreWhitespace = false
+    @Published var ignoreCase = false
+    @Published var ignoreLineEndings = false
+    @Published var languageOverride = "automatic" { didSet { UserDefaults.standard.set(languageOverride, forKey: "comparison.language." + repository.url.path + "/" + path) } }
+    @Published private(set) var forceCompare = false
+    @Published private(set) var preparingForceCompare = false
+    private var forceTask: Task<Void, Never>?
+    var comparisonRules: ComparisonRules { .init(ignoreWhitespace: ignoreWhitespace, ignoreCase: ignoreCase, ignoreLineEndings: ignoreLineEndings, boundedComparison: forceCompare) }
+    var languagePath: String { languageOverride == "automatic" ? path : languageOverride == "plain" ? "__plain__.txt" : "override." + languageOverride }
     @Published var preferredEncoding: ComparisonEncoding?
     @Published var pendingExternalResult: String?
     var displayIndex: FileRevisionContent? { snapshot.map { value in preferredEncoding.map { value.index.reinterpreting(as: $0) } ?? value.index } }
     var isDirty: Bool { !dirtyPaneIDs.isEmpty }
     var canEdit: Bool { savedWorktree?.isEditable == true || (savedWorktree?.exists == false && revisions.values.contains(where: { $0.isEditable })) }
-    var isHistorical: Bool { if case .commit = target { return true }; return false }
+    var isHistorical: Bool { switch target { case .commit, .between: return true; default: return false } }
     private var revisions: [String: FileRevisionContent] {
         guard let snapshot else { return [:] }
         var result = ["head": snapshot.head, "index": snapshot.index, "worktree": snapshot.worktree]
@@ -186,14 +195,17 @@ final class FileCompareSession: ObservableObject {
         default: return isHistorical ? historyRevisionTitle : compareText("Working Tree")
         }
     }
-    var historyRevisionTitle: String { if case .commit(let hash, _) = target { return String(hash.prefix(8)) }; return "" }
+    var historyRevisionTitle: String { switch target { case .commit(let hash, _): return String(hash.prefix(8)); case .between(_, let to, _, _): return to.revisionTitle; default: return "" } }
+    var historySourceTitle: String { if case .between(let from, _, _, _) = target { return from.revisionTitle }; return historyRevisionTitle + "~1" }
+    var saveMessage: String { savingPaneID == "index" && !isHistorical && snapshot?.isConflict != true ? comparisonParityText("saveIndex") : compareText("Save Copy To Worktree Message", savingPaneTitle) }
     var closeMessage: String {
-        path + "\n\n" + compareText("Save Copy To Worktree Message", savingPaneTitle)
+        path + "\n\n" + saveMessage
             + (dirtyPaneIDs.count > 1 ? "\n" + compareText("Other Drafts Discarded On Close") : "")
     }
-    init(repository: GitRepository, path: String, target: DiffTarget? = nil) { self.repository = repository; self.path = path; self.target = target }
+    init(repository: GitRepository, path: String, target: DiffTarget? = nil) { self.repository = repository; self.path = path; self.target = target; self.languageOverride = UserDefaults.standard.string(forKey: "comparison.language." + repository.url.path + "/" + path) ?? "automatic" }
     func reload() async {
         guard !isBusy else { return }
+        cancelForceCompare()
         isBusy = true; error = nil
         defer { isBusy = false }
         do {
@@ -228,7 +240,7 @@ final class FileCompareSession: ObservableObject {
         patchGeneration += 1
         guard !isHistorical else { partial = nil; patch = ""; return }
         let generation = patchGeneration, unstage = unstagePartial
-        let comparison = latestSnapshot, ignore = ignoreWhitespace, repository = repository, path = path
+        let comparison = latestSnapshot, ignore = ignoreWhitespace, rules = comparisonRules, repository = repository, path = path
         let untracked = comparison?.index.exists == false && comparison?.isConflict == false
         do {
             async let partial = repository.partialStaging(path: path, unstage: unstage, snapshot: comparison)
@@ -237,7 +249,7 @@ final class FileCompareSession: ObservableObject {
             guard generation == patchGeneration else { return }
             let displayed = try await comparison?.worktreeDisplayPatch(fallingBackFrom: values.1, ignoreWhitespace: ignore) ?? values.1
             guard generation == patchGeneration else { return }
-            self.partial = values.0; self.patch = displayed
+            self.partial = values.0; self.patch = rules.filteringPatch(displayed)
         } catch { if generation == patchGeneration { self.error = compareText(OperationFailure.message(error, repository: repository.url)) } }
     }
     private func sameRevision(_ a: FileRevisionContent?, _ b: FileRevisionContent?) -> Bool {
@@ -267,6 +279,7 @@ final class FileCompareSession: ObservableObject {
     }
     func reinterpret(as encoding: ComparisonEncoding) {
         guard !isBusy, !isDirty, let savedWorktree else { return }
+        cancelForceCompare()
         preferredEncoding = encoding
         let working = savedWorktree.reinterpreting(as: encoding)
         self.savedWorktree = working
@@ -277,8 +290,73 @@ final class FileCompareSession: ObservableObject {
     }
     @discardableResult
     func save() async -> Bool {
-        await save(paneID: savingPaneID)
+        savingPaneID == "index" && !isHistorical && snapshot?.isConflict != true ? await saveIndexDraft() : await save(paneID: savingPaneID)
     }
+    @discardableResult
+    func saveToWorktree() async -> Bool { await save(paneID: savingPaneID) }
+    @discardableResult
+    func saveIndexDraft() async -> Bool {
+        guard !isBusy, !isHistorical, let expected = latestSnapshot?.index, snapshot?.isConflict != true, isDirty("index") else { return false }
+        isBusy = true; error = nil
+        defer { isBusy = false }
+        do {
+            let current = try await repository.fileComparison(path: path)
+            guard sameIndexAndSources(current, latestSnapshot!), sameRevision(current.worktree, savedWorktree) else { throw GitError("The index changed. Reload before saving to the index.") }
+            let value = text(in: "index")
+            try await repository.saveIndex(path: path, text: value, expected: expected, format: ComparisonTextDecoder.format(of: expected.data ?? Data(), encoding: preferredEncoding))
+            let saved = try await repository.fileComparison(path: path)
+            latestSnapshot = saved
+            versionBaselines["index"] = value; indexDraft = value
+            await reloadPatch(); status = comparisonParityText("savedIndex")
+            NotificationCenter.default.post(name: .auvGitWorktreeChanged, object: repository.url)
+            return true
+        } catch { self.error = compareText(OperationFailure.message(error, repository: repository.url)); return false }
+    }
+    func stageEditorSelection(paneID: String, selection: NSRange, granularity: ComparisonTransfer.Granularity, unstage: Bool) async {
+        guard !isBusy, !isDirty, !isHistorical, let expected = latestSnapshot, !expected.isConflict else { return }
+        isBusy = true; error = nil
+        defer { isBusy = false }
+        do {
+            let current = try await repository.fileComparison(path: path)
+            guard sameIndexAndSources(current, expected), sameRevision(current.worktree, savedWorktree) else { throw GitError("The index or working tree changed. Reload before partial staging.") }
+            let source = (unstage ? current.head : current.worktree).text ?? "", index = current.index.text ?? ""
+            let edit = unstage ? ComparisonTransfer.edit(source: source, target: index, selection: selection, granularity: granularity) : ComparisonTransfer.editFromSourceSelection(source: source, target: index, selection: selection, granularity: granularity)
+            guard let edit else { throw GitError(comparisonParityText("noSelectedChange")) }
+            let value = edit.applying(to: index)
+            if value.isEmpty, unstage, !current.head.exists { try await repository.unstage(paths: [path]) }
+            else if value.isEmpty, !unstage, !current.worktree.exists { try await repository.stage(paths: [path]) }
+            else { try await repository.saveIndex(path: path, text: value, expected: current.index, newFileMode: unstage ? current.head.gitMode : current.worktree.gitMode) }
+            let saved = try await repository.fileComparison(path: path)
+            latestSnapshot = saved
+            versionDrafts["index"] = saved.index.text ?? ""; versionBaselines["index"] = versionDrafts["index"]
+            await reloadPatch()
+            NotificationCenter.default.post(name: .auvGitWorktreeChanged, object: repository.url)
+        } catch { self.error = compareText(OperationFailure.message(error, repository: repository.url)) }
+    }
+    func requestForceCompare() {
+        guard !isBusy, !preparingForceCompare, let snapshot else { return }
+        preparingForceCompare = true; error = nil
+        forceTask = Task { @MainActor [weak self] in
+            let preparation = Task.detached(priority: .userInitiated) {
+                let revisions = [snapshot.head, snapshot.index, snapshot.worktree, snapshot.base, snapshot.ours, snapshot.theirs].compactMap { $0 }
+                var total = 0
+                for revision in revisions where revision.exists {
+                    guard !Task.isCancelled, let text = revision.text, !revision.isBinary else { return false }
+                    total += text.utf8.count
+                    guard total <= 16 * 1024 * 1024 else { return false }
+                    let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+                    guard lines.count <= 100_000, lines.allSatisfy({ $0.utf8.count <= 262_144 }) else { return false }
+                }
+                return true
+            }
+            let valid = await withTaskCancellationHandler { await preparation.value } onCancel: { preparation.cancel() }
+            guard !Task.isCancelled, let self else { return }
+            self.preparingForceCompare = false; self.forceCompare = valid
+            if !valid { self.error = comparisonParityText("forceLimit") }
+            self.forceTask = nil
+        }
+    }
+    func cancelForceCompare() { forceTask?.cancel(); forceTask = nil; preparingForceCompare = false; forceCompare = false }
     private func save(paneID: String) async -> Bool {
         guard !isBusy, let expected = savedWorktree else { return false }
         if !isDirty(paneID) { return true }
@@ -434,26 +512,26 @@ private struct FileCompareContent: View {
                     if let snapshot = session.snapshot, !session.isHistorical, !isStaticDocument,
                        [snapshot.head, snapshot.index, snapshot.worktree, snapshot.base, snapshot.ours, snapshot.theirs].compactMap({ $0 }).contains(where: \.exceedsPreviewLimit),
                        [snapshot.head, snapshot.index, snapshot.worktree, snapshot.base, snapshot.ours, snapshot.theirs].compactMap({ $0 }).allSatisfy({ !$0.exists || (!$0.isBinary && (!$0.exceedsPreviewLimit || $0.canStreamText)) }) {
-                StreamingComparisonView(repository: session.repository, path: session.path, initialSearchOptions: searchOptions, initialReplacement: replacement, compact: compact, searchRequested: showSearch, onSearchClosed: { showSearch = false }, changeNavigation: changeNavigation, searchNavigation: navigation, onCursorChange: { cursor = $0 })
+                StreamingComparisonView(repository: session.repository, path: session.path, initialSearchOptions: searchOptions, initialReplacement: replacement, compact: compact, searchRequested: showSearch, onSearchClosed: { showSearch = false }, changeNavigation: changeNavigation, searchNavigation: navigation, rules: session.comparisonRules, languagePath: session.languagePath, onChangeTargets: { primaryEditingCommands.updateChangeTargets($0) }, onCursorChange: { cursor = $0 })
             } else if let snapshot = session.snapshot, snapshot.requiresStaticPreview {
                 StaticComparisonView(snapshot: snapshot)
-            } else if let snapshot = session.snapshot, [snapshot.head.data?.count ?? 0, snapshot.index.data?.count ?? 0, snapshot.worktree.data?.count ?? 0, snapshot.base?.data?.count ?? 0, snapshot.ours?.data?.count ?? 0, snapshot.theirs?.data?.count ?? 0].max()! > 2 * 1024 * 1024 {
-                PagedComparisonView(snapshot: snapshot, layout: layout, baseline: baseline, showBase: showBase, initialSearchOptions: searchOptions, initialReplacement: replacement, compact: compact, searchRequested: showSearch, onSearchClosed: { showSearch = false }, changeNavigation: changeNavigation, searchNavigation: navigation, onCursorChange: { cursor = $0 })
+            } else if let snapshot = session.snapshot, !session.forceCompare, [snapshot.head.data?.count ?? 0, snapshot.index.data?.count ?? 0, snapshot.worktree.data?.count ?? 0, snapshot.base?.data?.count ?? 0, snapshot.ours?.data?.count ?? 0, snapshot.theirs?.data?.count ?? 0].max()! > 2 * 1024 * 1024 {
+                PagedComparisonView(snapshot: snapshot, layout: layout, baseline: baseline, showBase: showBase, initialSearchOptions: searchOptions, initialReplacement: replacement, compact: compact, searchRequested: showSearch, onSearchClosed: { showSearch = false }, changeNavigation: changeNavigation, searchNavigation: navigation, rules: session.comparisonRules, languagePath: session.languagePath, onChangeTargets: { primaryEditingCommands.updateChangeTargets($0) }, onCursorChange: { cursor = $0 })
             } else if session.snapshot != nil {
-                ComparisonEditor(columns: columns, wrapLines: wrapLines, showLineNumbers: showNumbers, synchronizeScroll: synchronize, search: searchOptions.query, navigation: navigation, changeNavigation: changeNavigation, onEdit: session.edit, languagePath: session.path, resolver: session.snapshot?.isConflict == true ? resolver : nil, onCursorChange: { cursor = $0 }, onActivePaneChange: { session.activePaneID = $0 }, editingCommands: primaryEditingCommands, scrollsToFirstChangeOnOpen: true, searchOptions: searchOptions)
+                ComparisonEditor(columns: columns, wrapLines: wrapLines, showLineNumbers: showNumbers, synchronizeScroll: synchronize, search: searchOptions.query, navigation: navigation, changeNavigation: changeNavigation, onEdit: session.edit, languagePath: session.languagePath, comparisonRules: session.comparisonRules, mergeResultBelow: conflictLayout == "below", publishesChangeNavigation: layout != "patch", onStageEdit: { id, range, kind, unstage in Task { await session.stageEditorSelection(paneID: id, selection: range, granularity: kind, unstage: unstage) } }, resolver: session.snapshot?.isConflict == true ? resolver : nil, onCursorChange: { cursor = $0 }, onActivePaneChange: { session.activePaneID = $0 }, editingCommands: primaryEditingCommands, scrollsToFirstChangeOnOpen: true, searchOptions: searchOptions)
             } else { Spacer(); if session.isBusy { ProgressView() } else { Text(compareText("No file loaded")).foregroundStyle(.secondary) }; Spacer() }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
                     .opacity(layout == "patch" || showsCompact ? 0 : 1)
                     .allowsHitTesting(layout != "patch" && !showsCompact).accessibilityHidden(layout == "patch" || showsCompact)
                 if showsCompact {
-                    CompactComparisonView(columns: columns, conflict: session.snapshot?.isConflict == true, wraps: wrapLines, numbers: showNumbers, onReturnToEditor: { compact = false }, onRevealLine: { id, line in
+                    CompactComparisonView(columns: columns, conflict: session.snapshot?.isConflict == true, wraps: wrapLines, numbers: showNumbers, rules: session.comparisonRules, onReturnToEditor: { compact = false }, onRevealLine: { id, line in
                         compact = false
                         DispatchQueue.main.async { editingCommands.revealLine(paneID: id, number: line) }
                     })
                 }
                 if layout == "patch" {
                     VStack(spacing: 0) {
-                        PartialStagingPane(session: session)
+                        PartialStagingPane(session: session, changeNavigation: changeNavigation)
                     }
                 }
             }.frame(maxWidth: .infinity, minHeight: 180, maxHeight: .infinity)
@@ -465,7 +543,7 @@ private struct FileCompareContent: View {
             Divider()
             HStack {
                 if session.isBusy { ProgressView().controlSize(.mini) }
-                Text(session.isDirty ? compareText("Save Copy To Worktree Message", session.savingPaneTitle) : session.savedWorktree?.unavailableReason.map { compareText($0) } ?? session.status)
+                Text(session.isDirty ? session.saveMessage : session.savedWorktree?.unavailableReason.map { compareText($0) } ?? session.status)
                 Spacer()
                 Text(session.preferredEncoding?.rawValue ?? session.savedWorktree?.data.map { ComparisonTextDecoder.format(of: $0).encoding.rawValue } ?? "").foregroundStyle(.secondary)
                 if let data = session.savedWorktree?.data { Text(ComparisonTextDecoder.format(of: data).lineEnding.rawValue.uppercased()).foregroundStyle(.secondary) }
@@ -482,6 +560,7 @@ private struct FileCompareContent: View {
             }.font(.caption).padding(.horizontal, 14).frame(height: session.snapshot?.isConflict == true ? 52 : 34).auvGitChrome()
         }.background(ComparisonKeyboardRegion(standalone: true, action: performShortcut))
             .buttonBorderShape(.roundedRectangle(radius: 6)).environment(\.locale, L10n.locale)
+            .onChange(of: supportsTextComparison) { _, supported in if !supported { primaryEditingCommands.updateChangeTargets(.empty) } }
             .onChange(of: supportsNativeComparison) { _, supported in
                 if supported, let line = pendingInitialLine {
                     pendingInitialLine = nil
@@ -490,12 +569,14 @@ private struct FileCompareContent: View {
             }
             .onChange(of: compact) { _, value in if value { NSApp.keyWindow?.makeFirstResponder(nil) } }
             .onChange(of: searchOptions) { _, _ in replacementError = nil }
+            .onChange(of: session.comparisonRules) { _, _ in Task { await session.reloadPatch() } }
             .onChange(of: layout) { old, new in
                 session.usesPatchLayout = new == "patch"
                 if new == "patch" { previousEditorLayout = old == "patch" ? previousEditorLayout : old }
                 else { previousEditorLayout = new }
             }
             .task { await session.reload() }
+            .onDisappear { session.cancelForceCompare() }
             .auvGitAlert(compareText("Replace working tree draft with auto merge?"), isPresented: $confirmMerge) {
                 AuvGitAlertButton(compareText("Auto Merge"), role: .destructive) { Task { await session.autoMerge() } }
                 AuvGitAlertButton(compareText("Cancel"), role: .cancel) {}
@@ -541,8 +622,8 @@ private struct FileCompareContent: View {
             if session.activePaneID == "base" { baseNavigation += command == .compareFindNext ? 1 : -1 }
             else { navigation += command == .compareFindNext ? 1 : -1 }
         case .comparePreviousChange, .compareNextChange:
-            guard supportsTextComparison, layout != "patch", !compact else { return false }
-            changeNavigation += command == .compareNextChange ? 1 : -1
+            guard supportsTextComparison else { return false }
+            return requestChange(forward: command == .compareNextChange)
         case .compareCompact:
             guard supportsTextComparison, layout != "patch" else { return false }; compact.toggle()
         case .compareWrap: wrapLines.toggle()
@@ -550,6 +631,12 @@ private struct FileCompareContent: View {
         case .compareSync: synchronize.toggle()
         default: return false
         }
+        return true
+    }
+    private func requestChange(forward: Bool) -> Bool {
+        guard !session.isBusy, supportsTextComparison, primaryEditingCommands.changeTargets.target(forward: forward) != nil else { return false }
+        if showsCompact { compact = false }
+        changeNavigation += forward ? 1 : -1
         return true
     }
     private var isStaticDocument: Bool {
@@ -562,7 +649,7 @@ private struct FileCompareContent: View {
     private var supportsNativeComparison: Bool {
         guard let snapshot = session.snapshot, !snapshot.requiresStaticPreview else { return false }
         let revisions = [snapshot.head, snapshot.index, snapshot.worktree, snapshot.base, snapshot.ours, snapshot.theirs].compactMap { $0 }
-        return revisions.allSatisfy { ($0.data?.count ?? 0) <= 2 * 1024 * 1024 }
+        return revisions.allSatisfy { session.forceCompare || ($0.data?.count ?? 0) <= 2 * 1024 * 1024 }
     }
     private var showsCompact: Bool { compact && layout != "patch" && supportsNativeComparison }
     private var searchError: String? {
@@ -605,7 +692,7 @@ private struct FileCompareContent: View {
                     .disabled(session.isBusy || layout == "patch" || !editingCommands.canRedo)
                 Menu {
                     if let snapshot = session.snapshot {
-                        if session.isHistorical { versionButton(session.historyRevisionTitle + "~1", snapshot.head); versionButton(session.historyRevisionTitle, snapshot.worktree) }
+                        if session.isHistorical { versionButton(session.historySourceTitle, snapshot.head); versionButton(session.historyRevisionTitle, snapshot.worktree) }
                         else if snapshot.isConflict { versionButton("Ours", snapshot.ours); versionButton("Theirs", snapshot.theirs); versionButton("Base", snapshot.base) }
                         else { versionButton("HEAD", snapshot.head); versionButton("Index", snapshot.index) }
                     }
@@ -617,6 +704,8 @@ private struct FileCompareContent: View {
                         .font(.system(size: 11)).fixedSize()
                 }
                 ComparisonExtrasMenu(session: session).frame(height: 24)
+                ComparisonParityMenu(session: session)
+                if session.preparingForceCompare { Button(comparisonParityText("cancelForce")) { session.cancelForceCompare() } }
                 Button { Task { await session.save() } } label: { ComparisonToolbarIcon(name: "square.and.arrow.down") }.buttonStyle(ComparisonToolbarButtonStyle())
                     .configuredShortcut(.compareSave, using: shortcuts).help(compareText("Save")).accessibilityLabel(compareText("Save"))
                     .fixedSize().layoutPriority(1).disabled(!session.isDirty || session.isBusy)
@@ -661,10 +750,10 @@ private struct FileCompareContent: View {
                 .foregroundStyle(compact ? Color.accentColor : Color.primary)
                 .disabled(layout == "patch" || !supportsTextComparison)
             HStack(spacing: 2) {
-                Button { changeNavigation -= 1 } label: { ComparisonToolbarIcon(name: "arrow.up") }.buttonStyle(ComparisonToolbarButtonStyle())
-                    .help(compareText("Previous change")).accessibilityLabel(compareText("Previous change")).disabled(layout == "patch" || compact)
-                Button { changeNavigation += 1 } label: { ComparisonToolbarIcon(name: "arrow.down") }.buttonStyle(ComparisonToolbarButtonStyle())
-                    .help(compareText("Next change")).accessibilityLabel(compareText("Next change")).disabled(layout == "patch" || compact)
+                Button { _ = requestChange(forward: false) } label: { ComparisonToolbarIcon(name: "arrow.up") }.buttonStyle(ComparisonToolbarButtonStyle())
+                    .help(compareText("Previous change")).accessibilityLabel(compareText("Previous change")).disabled(!supportsTextComparison || session.isBusy || !primaryEditingCommands.canNavigatePreviousChange)
+                Button { _ = requestChange(forward: true) } label: { ComparisonToolbarIcon(name: "arrow.down") }.buttonStyle(ComparisonToolbarButtonStyle())
+                    .help(compareText("Next change")).accessibilityLabel(compareText("Next change")).disabled(!supportsTextComparison || session.isBusy || !primaryEditingCommands.canNavigateNextChange)
             }
             CompareDisplayButton(title: designCompareText("Sync"), symbol: "link", enabled: $synchronize)
             CompareDisplayButton(title: designCompareText("Wrap"), symbol: "text.alignleft", enabled: $wrapLines)
@@ -684,7 +773,9 @@ private struct FileCompareContent: View {
                 Text(resolverText("Ours + Result")).tag("left")
                 Text(resolverText("All three")).tag("all")
                 Text(resolverText("Result + Theirs")).tag("right")
+                Text(comparisonParityText("mergeBelow")).tag("below")
             }.pickerStyle(.menu).labelsHidden().frame(width: 145, height: 24).accessibilityLabel(resolverText("Resolver layout"))
+            Button(comparisonParityText("compareBase")) { if let snapshot = session.snapshot { BaseComparisonPresenter.show(snapshot: snapshot, path: session.path) } }
             Button(compareText("Auto Merge")) { if session.isDirty { confirmMerge = true } else { Task { await session.autoMerge() } } }
                 .fixedSize().disabled(session.isBusy)
             Button { showConflictHelp.toggle() } label: { ComparisonToolbarIcon(name: "info.circle") }.buttonStyle(ComparisonToolbarButtonStyle())
@@ -712,12 +803,12 @@ private struct FileCompareContent: View {
         let keepsTextSurface = editable && session.canEdit(id)
         let message = revision?.text != nil || keepsTextSurface ? nil : (revision?.unavailableReason.map { compareText($0) } ?? (revision?.exists == true ? nil : compareText("File does not exist in this version")))
         let canEdit = editable && session.canEdit(id)
-        return ComparisonEditorColumn(id: id, title: URL(fileURLWithPath: session.path).lastPathComponent + " — " + compareText(name), text: editable ? session.text(in: id) : (revision?.text ?? ""), isEditable: canEdit && !session.isBusy, message: message, detail: session.isDirty(id) ? compareText("Unsaved changes") : canEdit ? compareText("Editable Copy") : revision?.objectID.map { String($0.prefix(8)) } ?? designCompareText("Read-only"), preservesUndo: canEdit)
+        return ComparisonEditorColumn(id: id, title: URL(fileURLWithPath: session.path).lastPathComponent + " — " + compareText(name), text: editable ? session.text(in: id) : (revision?.text ?? ""), isEditable: canEdit && !session.isBusy, message: message, detail: session.isDirty(id) ? compareText("Unsaved changes") : canEdit ? compareText("Editable Copy") : revision?.objectID.map { String($0.prefix(8)) } ?? designCompareText("Read-only"), preservesUndo: canEdit, lineEnding: revision?.data.map { ComparisonTextDecoder.format(of: $0, encoding: session.preferredEncoding).lineEnding } ?? .lf)
     }
     private var columns: [ComparisonEditorColumn] {
         guard let snapshot = session.snapshot else { return [] }
         if session.isHistorical {
-            let sources = [column("head", session.historyRevisionTitle + "~1", snapshot.head), column("worktree", session.historyRevisionTitle, snapshot.worktree)]
+            let sources = [column("head", session.historySourceTitle, snapshot.head), column("worktree", session.historyRevisionTitle, snapshot.worktree)]
             return resolvedLayout == "three" ? sources + [column("current", "Working Tree", session.historicalWorktree)] : sources
         }
         if snapshot.isConflict {
@@ -762,6 +853,7 @@ private struct CompareWindowContent: View {
         case .worktree(let path, _):
             let name = URL(fileURLWithPath: path).lastPathComponent
             return (name + " — " + compareText("Index"), name + " — " + compareText("Working Tree"))
+        case .between(let from, let to, _, _): return (from.revisionTitle, to.revisionTitle)
         case nil: return (nil, nil)
         }
     }

@@ -6,6 +6,8 @@ public actor GitRepository {
     private var fileHistoryCosts: [String: Int] = [:]
     private var fileHistoryIdentity: String?
     private var fileHistoryOrder: [String] = []
+    private var signatureCache: [String: String] = [:]
+    private var historyProjectionCache: (identity: String, parents: [String: [String]], refs: [String: [String]])?
     private var publicationCache: (identity: String, hashes: Set<String>)?
     private var shallowFile: URL?
     private(set) var fileHistoryTraversalCount = 0
@@ -60,13 +62,13 @@ public actor GitRepository {
         return result
     }
     public func branches() async throws -> [GitBranch] {
-        let output = try await run(["for-each-ref", "--format=%(HEAD)%00%(refname)%00%(symref)%00%(upstream:short)%00%(worktreepath)", "refs/heads", "refs/remotes"])
+        let output = try await run(["for-each-ref", "--format=%(HEAD)%00%(refname)%00%(symref)%00%(upstream:short)%00%(worktreepath)%00%(upstream:track)", "refs/heads", "refs/remotes"])
         return output.text.split(separator: "\n").compactMap { line in
             let parts = line.split(separator: "\0", omittingEmptySubsequences: false).map(String.init)
-            guard parts.count == 5, parts[2].isEmpty else { return nil }
+            guard parts.count == 6, parts[2].isEmpty else { return nil }
             let remote = parts[1].hasPrefix("refs/remotes/")
             return GitBranch(name: String(parts[1].dropFirst(remote ? 13 : 11)), isCurrent: parts[0] == "*", isRemote: remote,
-                             upstream: remote || parts[3].isEmpty ? nil : parts[3], worktreePath: parts[4].isEmpty ? nil : parts[4])
+                             upstream: remote || parts[3].isEmpty ? nil : parts[3], worktreePath: parts[4].isEmpty ? nil : parts[4], ahead: Self.trackingCount(parts[5], direction: "ahead"), behind: Self.trackingCount(parts[5], direction: "behind"))
         }
     }
     public func currentBranch() async throws -> String {
@@ -105,8 +107,9 @@ public actor GitRepository {
     }
     public func log(limit: Int = 200, skip: Int = 0, search: String = "", path: String? = nil, ref: String? = nil, author: String = "", firstParent: Bool = false, refs: [String]? = nil, stashHashes: [String] = [], includeRecyclable: Bool = false, incomingOnly: Bool = false) async throws -> [GitCommit] {
         guard let path else {
-            return try await readLog(limit: limit, skip: skip, search: search, path: nil, ref: ref, author: author,
+            let rows = try await readLog(limit: limit, skip: skip, search: search, path: nil, ref: ref, author: author,
                 firstParent: firstParent, refs: refs, stashHashes: stashHashes, includeRecyclable: includeRecyclable, incomingOnly: incomingOnly)
+            return search.isEmpty && author.isEmpty ? rows : try await projectedHistory(rows)
         }
         try validatePath(path)
         var identity = try await historyReferenceIdentity()
@@ -143,7 +146,7 @@ public actor GitRepository {
         }
         let matching = rows.lazy.filter { (search.isEmpty || $0.body.range(of: search, options: .caseInsensitive) != nil)
             && (author.isEmpty || $0.author.range(of: author, options: .caseInsensitive) != nil) }
-        return Array(matching.dropFirst(max(0, skip)).prefix(max(0, limit)))
+        return try await projectedHistory(Array(matching.dropFirst(max(0, skip)).prefix(max(0, limit))))
     }
     private func readLog(limit: Int, skip: Int, search: String, path: String?, ref: String?, author: String,
                          firstParent: Bool, refs: [String]?, stashHashes: [String], includeRecyclable: Bool, incomingOnly: Bool) async throws -> [GitCommit] {
@@ -244,6 +247,9 @@ public actor GitRepository {
             if untracked { args += ["--no-index", "--", "/dev/null", path]; return try await run(args, allowedCodes: [0,1]).text }
             args += ["--", path]
         case let .staged(path): args += ["--cached", "--", path]
+        case let .between(from, to, path, originalPath):
+            let paths = Array(Set([path] + (originalPath.map { [$0] } ?? []))).sorted()
+            args += ["-M"] + (try await historyDiffArguments(from: from, to: to)) + ["--"] + paths
         case let .commit(hash, path):
             args = ["show", "--format=", "--root", "--first-parent", "--no-ext-diff", "--no-textconv", "--no-color"] + (ignoreWhitespace ? ["--ignore-all-space"] : []) + [hash, "--", path]
         }
@@ -434,4 +440,103 @@ public actor GitRepository {
         _ = try await GitProcess.run(at: url, arguments: ["stash", "push", "--include-untracked", "-m", message], literalPathspecs: false)
     }
     public func applyStash(ref: String) async throws { _ = try await run(["stash", "apply", ref]) }
+}
+
+extension GitRepository {
+    static func trackingCount(_ text: String, direction: String) -> Int? {
+        guard !text.isEmpty, !text.contains("gone") else { return nil }
+        let fields = text.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).split(separator: ",")
+        for field in fields {
+            let words = field.split(separator: " ")
+            if words.count == 2, words[0] == direction { return Int(words[1]) }
+        }
+        return 0
+    }
+
+    /// Signature presence is read from immutable object headers. This deliberately
+    /// does not launch GPG/SSH verification or describe an unverified signature as valid.
+    public func historySignatureStatuses(_ hashes: [String]) async throws -> [String: String] {
+        let requested = Set(hashes)
+        let pending = Array(requested.filter { signatureCache[$0] == nil })
+        guard !pending.isEmpty else { return signatureCache.filter { requested.contains($0.key) } }
+        let input = FileManager.default.temporaryDirectory.appendingPathComponent("auvgit-signatures-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: input) }
+        guard pending.allSatisfy({ [40, 64].contains($0.count) && $0.allSatisfy(\.isHexDigit) }) else { throw GitError("Invalid commit object ID") }
+        let resolved = pending
+        try Data((resolved.joined(separator: "\n") + "\n").utf8).write(to: input)
+        let data = try await GitProcess.run(at: url, arguments: ["cat-file", "--batch"], inputFile: input).data
+        var cursor = data.startIndex
+        for hash in pending {
+            guard let newline = data[cursor...].firstIndex(of: 10) else { break }
+            let fields = String(decoding: data[cursor..<newline], as: UTF8.self).split(separator: " ")
+            guard fields.count == 3, let size = Int(fields[2]), size <= data.distance(from: data.index(after: newline), to: data.endIndex) else { break }
+            let start = data.index(after: newline), end = data.index(start, offsetBy: size)
+            let header = String(decoding: data[start..<end], as: UTF8.self).components(separatedBy: "\n\n").first ?? ""
+            signatureCache[hash] = header.split(separator: "\n").contains { $0.hasPrefix("gpgsig ") || $0.hasPrefix("gpgsig-sha256 ") } ? "signed" : "N"
+            cursor = end < data.endIndex ? data.index(after: end) : end
+        }
+        try Task.checkCancellation()
+        return signatureCache.filter { requested.contains($0.key) }
+    }
+
+    /// Bridges hidden commits to the nearest visible ancestors and carries refs
+    /// from hidden tips to visible ancestors. Actual Git parent identity stays intact.
+    public func projectedHistory(_ commits: [GitCommit]) async throws -> [GitCommit] {
+        guard !commits.isEmpty else { return [] }
+        let identity = try await historyReferenceIdentity()
+        let parents: [String: [String]], refs: [String: [String]]
+        if let cache = historyProjectionCache, cache.identity == identity {
+            parents = cache.parents; refs = cache.refs
+        } else {
+            let head = try await GitProcess.run(at: url, arguments: ["rev-parse", "--verify", "HEAD"], allowedCodes: [0, 128])
+            let revisions = head.code == 0 ? ["HEAD"] : []
+            let output = try await GitProcess.run(at: url, arguments: ["rev-list", "--parents", "--all"] + revisions + ["--"])
+            var adjacency: [String: [String]] = [:]
+            for line in output.text.split(separator: "\n") {
+                let fields = line.split(separator: " ").map(String.init)
+                if let hash = fields.first { adjacency[hash] = Array(fields.dropFirst()) }
+            }
+            let listing = try await GitProcess.run(at: url, arguments: ["for-each-ref", "--format=%(objectname)%00%(refname)", "refs/heads", "refs/remotes", "refs/tags"])
+            var references: [String: [String]] = [:]
+            for line in listing.text.split(separator: "\n") {
+                let fields = line.split(separator: "\0").map(String.init)
+                guard fields.count == 2 else { continue }
+                // Annotated tags need peeling, while lightweight refs already name commits.
+                let hash = adjacency[fields[0]] != nil ? fields[0] : (try? await workflowRevision(fields[1]))
+                if let hash { references[hash, default: []].append(fields[1]) }
+            }
+            parents = adjacency; refs = references
+            historyProjectionCache = (identity, adjacency, references)
+        }
+        let visible = Set(commits.map(\.hash))
+        var memo: [String: [String]] = [:]
+        func nearest(_ start: String) -> [String] {
+            if let cached = memo[start] { return cached }
+            var pending = [start], seen = Set<String>(), found: [String] = []
+            while let hash = pending.popLast() {
+                guard seen.insert(hash).inserted else { continue }
+                if visible.contains(hash) { found.append(hash) }
+                else { pending.append(contentsOf: (parents[hash] ?? []).reversed()) }
+            }
+            memo[start] = found
+            return found
+        }
+        var projected: [String: [String]] = [:]
+        for (tip, names) in refs where !visible.contains(tip) {
+            for hash in nearest(tip) { projected[hash, default: []] += names.map { $0 + "~" } }
+        }
+        try Task.checkCancellation()
+        return commits.map { commit in
+            let actual = parents[commit.hash] ?? commit.parents
+            var seen = Set<String>()
+            let links = actual.flatMap { parent -> [String] in
+                let bridged = nearest(parent)
+                // Preserve an open frontier at the page boundary. A later page
+                // recomputes projection and joins it to its visible ancestor.
+                return bridged.isEmpty ? [parent] : bridged
+            }.filter { seen.insert($0).inserted }
+            return commit.historyPresentation(parents: actual, graphParents: links,
+                refs: Array(Set(commit.refs.filter { !$0.hasSuffix("~") } + (projected[commit.hash] ?? []))).sorted())
+        }
+    }
 }

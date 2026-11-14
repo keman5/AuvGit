@@ -3,6 +3,8 @@ import GitCore
 
 struct PartialStagingPane: View {
     @ObservedObject var session: FileCompareSession
+    var changeNavigation = 0
+    @State private var selectedHunk = 0
     @State private var selected: Set<Int> = []
     var body: some View {
         VStack(spacing: 0) {
@@ -20,6 +22,7 @@ struct PartialStagingPane: View {
                 Button(compareText(session.unstagePartial ? "Unstage File" : session.snapshot?.isConflict == true ? "Save & Mark Resolved" : "Stage File")) { Task { if session.unstagePartial { await session.unstageFile() } else { await session.stage(resolve: false) } } }.disabled(session.isBusy || session.isDirty)
             }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8).background(.bar)
             Divider()
+            ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(session.partial?.hunks ?? []) { hunk in
@@ -28,18 +31,25 @@ struct PartialStagingPane: View {
                             Spacer()
                             Button(compareText(session.unstagePartial ? "Unstage Hunk" : "Stage Hunk")) { Task { await session.applySelection(Set(hunk.lines.filter(\.isChange).map(\.id))); selected = [] } }
                                 .disabled(session.isBusy || session.isDirty || session.partial?.unavailableReason != nil)
-                        }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8).background(Color.accentColor.opacity(0.1))
+                        }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8).background(Color.accentColor.opacity(0.1)).id(hunk.id).onTapGesture { selectedHunk = hunk.id; publishChangeTargets() }
                         ForEach(hunk.lines) { line in
                             HStack(spacing: 8) {
                                 if line.isChange { Toggle("", isOn: Binding(get: { selected.contains(line.id) }, set: { if $0 { selected.insert(line.id) } else { selected.remove(line.id) } })).labelsHidden().toggleStyle(.checkbox) }
                                 else { Color.clear.frame(width: 16) }
                                 Text(line.text).font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
                                 Spacer(minLength: 0)
-                            }.padding(.horizontal, 12).padding(.vertical, 2).background(line.text.hasPrefix("+") ? Color.green.opacity(0.1) : line.text.hasPrefix("-") ? Color.red.opacity(0.1) : Color.clear)
+                            }.padding(.horizontal, 12).padding(.vertical, 2).background(line.text.hasPrefix("+") ? Color.green.opacity(0.1) : line.text.hasPrefix("-") ? Color.red.opacity(0.1) : Color.clear).simultaneousGesture(TapGesture().onEnded { selectedHunk = hunk.id; publishChangeTargets() })
                         }
                     }
                 }
             }
-        }.onChange(of: session.partial?.file.index.data) { _, _ in selected = [] }.onChange(of: session.partial?.file.worktree.data) { _, _ in selected = [] }.onChange(of: session.unstagePartial) { _, _ in selected = []; Task { await session.reloadPatch() } }
+            .onChange(of: changeNavigation) { old, new in
+                let targets = ComparisonChangeTargets(count: session.partial?.hunks.count ?? 0, selected: selectedHunk)
+                if let index = targets.target(forward: new > old) { selectedHunk = index; proxy.scrollTo(index, anchor: .top) }
+                publishChangeTargets()
+            }
+            }
+        }.onAppear { publishChangeTargets() }.onChange(of: session.partial?.hunks.count) { _, _ in selectedHunk = 0; publishChangeTargets() }.onChange(of: session.partial?.file.index.data) { _, _ in selected = []; selectedHunk = 0; publishChangeTargets() }.onChange(of: session.partial?.file.worktree.data) { _, _ in selected = []; selectedHunk = 0; publishChangeTargets() }.onChange(of: session.unstagePartial) { _, _ in selected = []; Task { await session.reloadPatch() } }
     }
+    private func publishChangeTargets() { session.editingCommands.updateChangeTargets(ComparisonChangeTargets(count: session.partial?.hunks.count ?? 0, selected: selectedHunk)) }
 }

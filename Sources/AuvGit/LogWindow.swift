@@ -185,7 +185,7 @@ private struct LogWindowContent: View {
                         HistoryPane(commits: store.commits, selection: $store.selectedCommit, search: $store.historySearch,
                             isLoading: store.loadingHistory, hasMore: store.hasMore,
                             onLoadMore: { Task { await store.loadHistory(reset: false) } }, isBusy: store.isBusy,
-                            onAction: historyAction, onShowChanges: { if let path = store.selectedCommitPath { compare(path) } }, showsDetails: false, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), visibleRemoteBranchNames: store.visibleHistoryRemoteBranchNames, currentBranch: store.branches.first { $0.isCurrent && !$0.isRemote }, localUnpushedCommitHashes: store.localUnpushedCommitHashes, navigationGeneration: branchSelection.navigationGeneration, onJump: jump, authorFilter: $store.historyAuthor)
+                            onAction: historyAction, onShowChanges: { if let path = store.selectedCommitPath { compare(path) } }, showsDetails: false, remoteBranchNames: Set(store.branches.filter(\.isRemote).map(\.name)), visibleRemoteBranchNames: store.visibleHistoryRemoteBranchNames, currentBranch: store.branches.first { $0.isCurrent && !$0.isRemote }, localUnpushedCommitHashes: store.localUnpushedCommitHashes, navigationGeneration: branchSelection.navigationGeneration, onJump: jump, authorFilter: $store.historyAuthor, selectedCommitIDs: store.selectedHistoryIDs, onSelectCommits: store.selectHistoryRows, virtualRows: store.historyVirtualRows, onGraphDrop: store.performHistoryGraphDrop, overlapLoader: store.loadHistoryOverlap, graphRepositoryIdentity: store.graphRepositoryIdentity, branches: store.branches, graphHeadCommitID: store.graphHeadCommitID)
                             .frame(minWidth: 520, minHeight: 270, idealHeight: 470)
                             .background { if let historyFocus { WorkspaceFileFocusRegion(focus: historyFocus) } }
                         VSplitView {
@@ -218,7 +218,7 @@ private struct LogWindowContent: View {
             .onDisappear { branchSelection.cancel() }
             .onChange(of: store.checkedHistoryRefs) { _, _ in branchSelection.cancel() }
             .onChange(of: store.historyNavigationGeneration) { _, _ in branchSelection.reset() }
-            .onChange(of: store.selectedCommit) { _, _ in guard !store.isRestoringViewState else { return }; Task { await store.loadCommitFiles() } }
+            .onChange(of: store.selectedCommit) { _, _ in guard !store.isRestoringViewState else { return }; store.historyPrimarySelectionChanged() }
             .onChange(of: store.selectedCommitPath) { _, _ in guard !store.isRestoringViewState else { return }; Task { await store.loadDiff() } }
             .onChange(of: store.historySearch) { _, _ in guard !store.isRestoringViewState else { return }; store.scheduleSearch() }
             .onChange(of: store.historyAuthor) { _, _ in guard !store.isRestoringViewState else { return }; store.scheduleSearch() }
@@ -324,6 +324,7 @@ private struct LogWindowContent: View {
     }
     private var changedFiles: some View {
         VStack(spacing: 0) {
+            HistoryComparisonControls(store: store)
             AuvGitPaneHeader(title: historyActionText("files"), systemImage: "doc.on.doc", count: store.commitFiles.count)
             if store.selectedCommit == nil { AuvGitEmptyState(title: logText("Select a commit"), systemImage: "doc.on.doc") }
             else if store.commitFiles.isEmpty { AuvGitEmptyState(title: historyActionText("noFiles"), systemImage: "doc.on.doc") }
@@ -371,8 +372,8 @@ private struct LogWindowContent: View {
         do { tags = try await repository.managedTags() } catch { store.report(error) }
     }
     private func compare(_ path: String) {
-        guard let repository = store.repository, let hash = store.comparisonRevision(for: path) else { return }
-        ComparePresenter.show(title: String(hash.prefix(8)) + " / " + path, repository: repository, target: .commit(hash: hash, path: path))
+        guard let repository = store.repository, let target = store.historyComparisonTarget(for: path) else { return }
+        ComparePresenter.show(title: path, repository: repository, target: target)
     }
     private func jump(_ value: String) {
         guard let repository = store.repository, !value.isEmpty else { return }

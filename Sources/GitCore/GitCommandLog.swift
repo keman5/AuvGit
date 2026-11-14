@@ -143,6 +143,11 @@ public enum GitFailureSummary {
     }
     public static func key(for message: String) -> String? {
         let text = message.lowercased()
+        let firstLine = text.split(separator: "\n").first?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let retainedHelperOutput = "git exited but an external helper kept its output stream open"
+        if firstLine == retainedHelperOutput || firstLine == retainedHelperOutput + "." {
+            return "External Git helper did not close its output stream"
+        }
         let mergeMessages = [
             "Merge commits must use a merge instruction; converting one to pick would flatten topology",
             "Merge requires a commit and label", "Merge source must be a merge commit", "Merge requires existing labels",

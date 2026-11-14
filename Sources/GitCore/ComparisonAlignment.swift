@@ -3,10 +3,10 @@ import Foundation
 /// Display-only bands. Ranges refer to original logical lines, never synthetic text.
 public struct ComparisonAlignment: Sendable {
     public let bands: [[Range<Int>]]
-    public init(texts: [String], baseline: Int = 0, conflictBlocks: [ConflictDraft.Block] = [], diffs cachedDiffs: [TextLineDiff]? = nil) {
+    public init(texts: [String], baseline: Int = 0, conflictBlocks: [ConflictDraft.Block] = [], diffs cachedDiffs: [TextLineDiff]? = nil, rules: ComparisonRules = .init(), endings: [ComparisonLineEnding] = []) {
         guard texts.indices.contains(baseline) else { bands = []; return }
         let counts = texts.map { $0.components(separatedBy: "\n").count }
-        let diffs = cachedDiffs.flatMap { $0.count == texts.count ? $0 : nil } ?? texts.map { TextLineDiff(source: texts[baseline], target: $0) }
+        let diffs = cachedDiffs.flatMap { $0.count == texts.count ? $0 : nil } ?? texts.indices.map { index in TextLineDiff(source: rules.textKey(texts[baseline], ending: endings.indices.contains(baseline) ? endings[baseline] : .lf), target: rules.textKey(texts[index], ending: endings.indices.contains(index) ? endings[index] : .lf), rules: rules) }
         if conflictBlocks.isEmpty {
             bands = Self.normalBands(texts: texts, baseline: baseline, diffs: diffs)
             return

@@ -1,0 +1,7 @@
+"index" = "索引";
+"worktree" = "工作区";
+"reverse" = "反转比较方向";
+"none" = "不显示辅助分支";
+"auxiliary" = "辅助分支";
+"stalePreview" = "图谱预览后仓库已发生变化，请重新检查操作。";
+"backToWorkspace" = "返回工作区";

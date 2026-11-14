@@ -113,6 +113,14 @@ if [[ "${1:-}" == --test-clone-dialogs ]]; then
   swift test --build-system native --filter "${AUVGIT_CLONE_TEST_FILTER:-RepositoryCreationOperationTests|CloneDestinationTests|CloneAuthenticationTests|CloneCredentialSecurityTests|DialogButtonWidthTests|DialogAppearanceTests|NativeFocusBridgeTests|NativeFocusAppearanceTests|WorkspaceProjectsTests|OperationProgressTests|UserOperationRetentionTests|LocalizationTests}"
   exit
 fi
+if [[ "${1:-}" == --test-smartgit-parity ]]; then
+  # Unshown AppKit hosts and temporary local repositories only. The explicit
+  # exclusions also protect an optional narrowed filter from activating windows.
+  swift test --build-system native -c release \
+    --filter "${AUVGIT_SMARTGIT_PARITY_FILTER:-GitCoreTests|Comparison|FileCompareSessionTests|History|LogLayoutAndSelectionTests|LogBranch|LogFileSortingTests|MainHistoryScopeTests|NativeCompactHistoryTableTests|CommitAvatarCacheTests|AuvGitLocalizationTests}" \
+    --skip 'ComparisonKeyboardShortcutsTests|HistoryKeyboardShortcutsTests|LogWindowSelectionFocusTests|ComparisonChromeGeometryTests.testMissingFileComparisonPaintsOpaqueBackgroundInBothAppearances|NativeCompactHistoryTableTests.testExpandedHistoryUsesNativeSelectedTextColorDuringTracking|NativeCompactHistoryTableTests.testNativeSelectionPaintsWhiteTextBeforeSwiftUISelectionUpdates'
+  exit
+fi
 if [[ "${1:-}" == --test-performance-review ]]; then
   swift test --build-system native -c release --filter "${AUVGIT_REVIEW_TEST_FILTER:-Comparison|ConflictPreviewPerformanceTests|RepositorySwitchLatencyTests|RepositoryQuietRefreshTests|ForegroundRefreshTests|DiffPreviewPerformanceTests|FileCompareSessionTests|WorkspaceCommitTests}"
   exit
@@ -150,7 +158,7 @@ INSTALL_APP=true
 case "${1:-}" in
   "") ;;
   --no-install) INSTALL_APP=false ;;
-  *) print -u2 "Usage: $0 [--no-install|--test-localizations|--test-dialog-dismissal|--test-dialog-focus|--test-dialog-audit|--test-clone-dialogs|--test-performance-review|--test-loading-performance|--test-dialog-buttons|--test-file-sorting|--test-refresh|--test-workspace-preview]"; exit 1 ;;
+  *) print -u2 "Usage: $0 [--no-install|--test-localizations|--test-dialog-dismissal|--test-dialog-focus|--test-dialog-audit|--test-clone-dialogs|--test-smartgit-parity|--test-performance-review|--test-loading-performance|--test-dialog-buttons|--test-file-sorting|--test-refresh|--test-workspace-preview]"; exit 1 ;;
 esac
 python3 scripts/check-localizations.py
 rm -rf -- "$PWD/.artifacts"
@@ -266,13 +274,8 @@ let deadline = Date().addingTimeInterval(15)
 while apps.contains(where: { !$0.isTerminated }) && Date() < deadline {
     RunLoop.current.run(until: Date().addingTimeInterval(0.1))
 }
-for app in apps where !app.isTerminated { app.forceTerminate() }
-let forcedDeadline = Date().addingTimeInterval(5)
-while apps.contains(where: { !$0.isTerminated }) && Date() < forcedDeadline {
-    RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-}
 guard apps.allSatisfy({ $0.isTerminated }) else {
-    fputs("AuvGit is still running. Local application was not replaced.\n", stderr)
+    fputs("AuvGit is still running, possibly waiting for unsaved changes. Save or discard changes and quit AuvGit, then rerun this build. Local application was not replaced.\n", stderr)
     exit(1)
 }
 SWIFT

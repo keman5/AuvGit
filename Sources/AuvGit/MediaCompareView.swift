@@ -163,6 +163,7 @@ struct MediaCompareView: View {
         switch snapshot.previewTarget {
         case .worktree: return (advancedText("index"), advancedText("worktree"))
         case .staged: return ("HEAD", advancedText("index"))
+        case .between(let from, let to, _, _): return (from.revisionTitle, to.revisionTitle)
         case .commit: return (L10n.text("Parent revision", table: "StaticPreview"), L10n.text("Commit revision", table: "StaticPreview"))
         case nil: return (L10n.text("Original", table: "StaticPreview"), L10n.text("Modified", table: "StaticPreview"))
         }

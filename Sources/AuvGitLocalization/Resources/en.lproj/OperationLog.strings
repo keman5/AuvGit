@@ -91,3 +91,5 @@
 "Branch or upstream changed. Fetch again before setting a tracking branch." = "Branch or upstream changed. Fetch again before setting a tracking branch.";
 
 "Remote branch changed; fetch updates and confirm deletion again" = "Remote branch changed; fetch updates and confirm deletion again";
+
+"External Git helper did not close its output stream" = "Git has exited, but an external helper has not closed its output stream.";

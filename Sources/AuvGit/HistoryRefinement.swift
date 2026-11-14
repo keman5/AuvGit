@@ -10,13 +10,30 @@ struct HistoryDisplayMenu: View {
     @AppStorage("history.showAuthorNames") private var names = true
     @AppStorage("history.showRemoteLabels") private var remoteLabels = true
     @AppStorage("history.showTagLabels") private var tagLabels = true
+    @AppStorage("history.identityMode") private var identityMode = HistoryIdentityMode.author.rawValue
+    @AppStorage("history.showIdentityEmails") private var emails = false
+    @AppStorage("history.showDateColumn") private var dates = true
+    @AppStorage("history.showHashColumn") private var hashes = true
+    @AppStorage("history.showOverlapColumn") private var overlap = false
     var body: some View {
         Menu {
             if let showMergedCommits { Toggle(historyRefinementText("Show merged commits"), isOn: showMergedCommits); Divider() }
-            Toggle(historyRefinementText("Show author avatars"), isOn: $avatars)
-            Toggle(historyRefinementText("Show author names"), isOn: $names)
+            Picker(graphFeatureText("Identity"), selection: $identityMode) {
+                Text(graphFeatureText("Author")).tag(HistoryIdentityMode.author.rawValue)
+                Text(graphFeatureText("Committer")).tag(HistoryIdentityMode.committer.rawValue)
+            }
+            Toggle(graphFeatureText("Show identity avatars"), isOn: $avatars)
+            Toggle(graphFeatureText("Show identity names"), isOn: $names)
+            Toggle(graphFeatureText("Show identity emails"), isOn: $emails)
+            Toggle(graphFeatureText("Show date column"), isOn: $dates)
+            Toggle(graphFeatureText("Show SHA column"), isOn: $hashes)
+            Toggle(graphFeatureText("Show overlap column"), isOn: $overlap)
             Toggle(historyRefinementText("Show remote branch labels"), isOn: $remoteLabels)
             Toggle(historyRefinementText("Show tag labels"), isOn: $tagLabels)
+            Divider()
+            Menu(graphFeatureText("Graph legend")) {
+                ForEach(["legend.current", "legend.remote", "legend.unpushed", "legend.merge", "legend.virtual", "legend.signature", "legend.upstream", "legend.projected", "legend.collapse", "legend.drag"], id: \.self) { key in Text(graphFeatureText(key)) }
+            }
         } label: {
             Image(systemName: "ellipsis").frame(width: 24, height: 24).contentShape(Rectangle())
         }.menuIndicator(.hidden).menuStyle(.borderlessButton).fixedSize()

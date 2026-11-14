@@ -29,6 +29,9 @@ helpers = {
     'resolverText': 'Resolver', 'advancedText': 'AdvancedDiff', 'pagedText': 'AdvancedDiff',
     'largeText': 'LargeComparison', 'compactText': 'CompactWorkspace',
     'shellToolbarText': 'ShellToolbar',
+    'graphFeatureText': 'HistoryGraphFeatures',
+    'historyComparisonText': 'HistoryComparison',
+    'comparisonParityText': 'ComparisonParity',
 }
 for name, original in all_tables.items():
     for locale in locales:
@@ -42,22 +45,23 @@ for name, original in all_tables.items():
                 return Counter(match.group(2) for match in re.finditer(pattern, text.replace('%%', '')))
             assert placeholders(value) == placeholders(translated[key]), f'{locale}/{name}/{key}: placeholder mismatch'
 # Helpers shared across UI files must be checked at every static call site.
+# A literal key must end the argument; concatenated prefixes are dynamic keys.
 for path in (root / 'Sources/AuvGit').glob('*.swift'):
     source = path.read_text()
     for helper, name in helpers.items():
-        for key in re.findall(r'\b' + helper + r'\("([^"\n]+)"', source):
+        for key in re.findall(r'\b' + helper + r'\("([^"\n]+)"(?=\s*[,)])', source):
             assert key in all_tables[name], f'{path.name}: missing {name}/{key}'
     if path.name == 'WorkspaceFilesPane.swift':
-        for key in re.findall(r'\b(?:text|actionButton)\("([^"\n]+)"', source):
+        for key in re.findall(r'\b(?:text|actionButton)\("([^"\n]+)"(?=\s*[,)])', source):
             assert key in all_tables['Files'], f'{path.name}: missing Files/{key}'
     for key, name in re.findall(r'L10n\.text\("([^"\n]+)",\s*table:\s*"([^"\n]+)"', source):
         assert key in all_tables[name], f'{path.name}: missing {name}/{key}'
 preferences = (root / 'Sources/AuvGit/PreferencesWindow.swift').read_text()
-for key in re.findall(r'choices\("([^"\n]+)"', preferences):
+for key in re.findall(r'choices\("([^"\n]+)"(?=\s*[,)])', preferences):
     assert key in all_tables['Preferences'], f'PreferencesWindow.swift: missing Preferences/{key}'
 for key in re.findall(r'\("[^"\n]+", "([^"\n]+)"\)', preferences):
     assert key in all_tables['Preferences'], f'PreferencesWindow.swift: missing picker label Preferences/{key}'
 source = (root / 'Sources/AuvGit/AuvGitApp.swift').read_text()
-for key in re.findall(r'\b(?:setStatus|setDiffTitle)\("([^"\n]+)"', source):
+for key in re.findall(r'\b(?:setStatus|setDiffTitle)\("([^"\n]+)"(?=\s*[,)])', source):
     assert key in all_tables['App'], f'RepositoryStore: missing {key}'
 print(f'{len(locales)} languages, {len(all_tables)} tables, {sum(map(len, all_tables.values()))} keys: parity and static lookup checks passed')

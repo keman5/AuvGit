@@ -1,0 +1,7 @@
+"index" = "Index";
+"worktree" = "Working Tree";
+"reverse" = "Reverse comparison";
+"none" = "No auxiliary branch";
+"auxiliary" = "Auxiliary branch";
+"stalePreview" = "The repository changed after the graph preview. Review the operation again.";
+"backToWorkspace" = "Back to Working Tree";

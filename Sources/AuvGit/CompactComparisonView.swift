@@ -14,19 +14,19 @@ struct CompactComparisonProjection {
         let columns: [[Line]]
     }
     let bands: [Band]
-    init(columns: [ComparisonEditorColumn], conflict: Bool) {
-        let texts = columns.map(\.text)
+    init(columns: [ComparisonEditorColumn], conflict: Bool, rules: ComparisonRules = .init()) {
+        let texts = columns.map { column in rules.ignoreLineEndings || column.lineEnding == .lf ? column.text : column.text.replacingOccurrences(of: "\n", with: (column.lineEnding == .crlf ? "\r" : "\u{001E}") + "\n") }
         let baseline = conflict ? columns.firstIndex(where: { $0.id == "worktree" }) ?? 0 : 0
         guard texts.indices.contains(baseline) else { bands = []; return }
         let blocks = conflict ? ConflictDraft.blocks(in: texts[baseline]) : []
-        let alignment = ComparisonAlignment(texts: texts, baseline: baseline, conflictBlocks: blocks)
+        let alignment = ComparisonAlignment(texts: texts, baseline: baseline, conflictBlocks: blocks, rules: rules)
         var changed = Array(repeating: Set<Int>(), count: texts.count)
         for pane in texts.indices where pane != baseline {
-            let diff = TextLineDiff(source: texts[baseline], target: texts[pane])
+            let diff = TextLineDiff(source: texts[baseline], target: texts[pane], rules: rules)
             changed[baseline].formUnion(diff.sourceChangedLines)
             changed[pane].formUnion(diff.targetChangedLines)
         }
-        let lines = texts.map { $0.components(separatedBy: "\n") }
+        let lines = columns.map { $0.text.components(separatedBy: "\n") }
         bands = alignment.bands.enumerated().compactMap { index, band in
             let isConflict = blocks.contains { (($0.startLine - 1)..<$0.endLine).overlaps(band[baseline]) }
             let selected = texts.indices.map { pane in
@@ -46,13 +46,14 @@ struct CompactComparisonView: View {
     let conflict: Bool
     let wraps: Bool
     let numbers: Bool
+    var rules = ComparisonRules()
     let onReturnToEditor: () -> Void
     var onRevealLine: ((String, Int) -> Void)? = nil
     @State private var bandFrames: [Int: CGRect] = [:]
     @State private var nativeScroll: NSScrollView?
     @StateObject private var horizontalSync = CompactHorizontalSynchronization()
     @StateObject private var projectionCache = CompactProjectionCache()
-    private var projection: CompactComparisonProjection { projectionCache.value(columns: columns, conflict: conflict) }
+    private var projection: CompactComparisonProjection { projectionCache.value(columns: columns, conflict: conflict, rules: rules) }
     var body: some View {
         let projection = self.projection
         let overviewFrames = wraps ? bandFrames : unwrappedBandFrames(projection)
@@ -168,11 +169,12 @@ private final class CompactProjectionCache: ObservableObject {
     private var identity: [String] = []
     private var conflict = false
     private var projection: CompactComparisonProjection?
-    func value(columns: [ComparisonEditorColumn], conflict: Bool) -> CompactComparisonProjection {
-        let newTexts = columns.map(\.text), newIdentity = columns.map { $0.id + ":" + String($0.firstLine) }
-        if projection == nil || texts != newTexts || identity != newIdentity || self.conflict != conflict {
-            texts = newTexts; identity = newIdentity; self.conflict = conflict
-            projection = CompactComparisonProjection(columns: columns, conflict: conflict)
+    private var rules = ComparisonRules()
+    func value(columns: [ComparisonEditorColumn], conflict: Bool, rules: ComparisonRules) -> CompactComparisonProjection {
+        let newTexts = columns.map(\.text), newIdentity = columns.map { $0.id + ":" + String($0.firstLine) + ":" + $0.lineEnding.rawValue }
+        if projection == nil || texts != newTexts || identity != newIdentity || self.conflict != conflict || self.rules != rules {
+            texts = newTexts; identity = newIdentity; self.conflict = conflict; self.rules = rules
+            projection = CompactComparisonProjection(columns: columns, conflict: conflict, rules: rules)
         }
         return projection!
     }
