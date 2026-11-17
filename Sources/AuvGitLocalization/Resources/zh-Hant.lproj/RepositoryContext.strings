@@ -10,3 +10,6 @@
 "Reload" = "重新載入";
 "Cancel" = "取消";
 "Save" = "儲存";
+"Add a remote to this repository" = "為此儲存庫新增遠端位址";
+"Remote name" = "遠端名稱";
+"Empty uses the fetch URL for pushing" = "留空則使用擷取位址推送";

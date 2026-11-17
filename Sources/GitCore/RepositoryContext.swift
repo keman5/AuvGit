@@ -36,8 +36,35 @@ extension GitRepository {
         let output = try await GitProcess.run(at: url, arguments: ["config", "--local", "--null", "--get-all", "remote.\(name).\(field)"], allowedCodes: [0, 1])
         return output.data.split(separator: 0, omittingEmptySubsequences: false).dropLast().map { String(decoding: $0, as: UTF8.self) }
     }
+    /// Accept Git's URL forms, including SCP syntax and local paths, without network access.
+    public static func isValidRemoteURL(_ value: String) -> Bool {
+        guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !value.hasPrefix("-"), value.rangeOfCharacter(from: .controlCharacters) == nil else { return false }
+        if value.contains("://") {
+            guard value.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
+                  let components = URLComponents(string: value), let scheme = components.scheme else { return false }
+            return scheme == "file" ? !components.path.isEmpty : !(components.host ?? "").isEmpty
+        }
+        return true
+    }
+    public static func isValidRemoteName(_ value: String) -> Bool {
+        !value.isEmpty && !value.hasPrefix("-") && !value.hasPrefix("/") && !value.hasSuffix("/") &&
+        !value.contains("..") && !value.contains("//") && !value.contains("@{") &&
+        value.split(separator: "/").allSatisfy { !$0.hasPrefix(".") && !$0.hasSuffix(".") && !$0.hasSuffix(".lock") } &&
+        value.rangeOfCharacter(from: .whitespacesAndNewlines.union(.controlCharacters).union(CharacterSet(charactersIn: "~^:?*[\\"))) == nil
+    }
+    public func addRemote(name: String, fetchURL: String, pushURL: String? = nil) async throws {
+        guard Self.isValidRemoteName(name) else { throw GitError("Enter a valid remote name.") }
+        guard Self.isValidRemoteURL(fetchURL), pushURL.map({ $0.isEmpty || Self.isValidRemoteURL($0) }) ?? true else { throw GitError("Enter a valid remote URL.") }
+        // Let Git reject an existing name instead of overwriting its config keys.
+        // `remote add` also installs the standard fetch refspec.
+        _ = try await GitProcess.run(at: url, arguments: ["remote", "add", "--", name, fetchURL])
+        if let pushURL, !pushURL.isEmpty {
+            _ = try await GitProcess.run(at: url, arguments: ["config", "--local", "--add", "remote.\(name).pushurl", pushURL])
+        }
+    }
     public func updateRemoteURL(expected: RepositoryRemoteConfiguration, fetchIndex: Int, fetchURL: String, pushURL: String?) async throws {
-        guard !fetchURL.isEmpty, !fetchURL.contains("\0"), !fetchURL.contains("\n"), pushURL.map({ !$0.contains("\0") && !$0.contains("\n") }) ?? true else { throw GitError("Enter a valid remote URL.") }
+        guard Self.isValidRemoteURL(fetchURL), pushURL.map({ $0.isEmpty || Self.isValidRemoteURL($0) }) ?? true else { throw GitError("Enter a valid remote URL.") }
         guard expected.fetchURLs.indices.contains(fetchIndex) else { throw GitError("The remote configuration changed. Reload before saving.") }
         let old = expected.fetchURLs[fetchIndex]
         let changesPush = pushURL.map { $0.isEmpty ? !expected.pushURLs.isEmpty : $0 != expected.pushURLs.first } ?? false

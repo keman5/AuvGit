@@ -10,3 +10,6 @@
 "Reload" = "重新加载";
 "Cancel" = "取消";
 "Save" = "保存";
+"Add a remote to this repository" = "为此仓库添加远程地址";
+"Remote name" = "远程名称";
+"Empty uses the fetch URL for pushing" = "留空则使用获取地址推送";

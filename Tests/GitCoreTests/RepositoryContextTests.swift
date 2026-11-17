@@ -26,6 +26,41 @@ final class RepositoryContextTests: XCTestCase {
         XCTAssertEqual(actualRefspec, refspec)
         do { try await repository.updateRemoteURL(expected: origin, fetchIndex: 0, fetchURL: "stale", pushURL: nil); XCTFail("Stale snapshot must not overwrite") } catch { }
     }
+    func testAddingFirstRemoteInstallsRefspecAndOptionalPushAndRejectsDuplicate() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let repository = try await GitRepository.initialize(at: directory)
+        try await repository.addRemote(name: "origin", fetchURL: "git@example.test:team/project.git", pushURL: "ssh://example.test/push")
+        let original = try await repository.remoteConfigurations()
+        XCTAssertEqual(original.first?.fetchURLs, ["git@example.test:team/project.git"])
+        XCTAssertEqual(original.first?.pushURLs, ["ssh://example.test/push"])
+        let refspec = try await GitProcess.run(at: directory, arguments: ["config", "--get", "remote.origin.fetch"]).text
+        XCTAssertEqual(refspec.trimmingCharacters(in: .whitespacesAndNewlines), "+refs/heads/*:refs/remotes/origin/*")
+        do {
+            try await repository.addRemote(name: "origin", fetchURL: "https://example.test/overwrite", pushURL: "https://example.test/overwrite")
+            XCTFail("A remote created externally after loading must never be overwritten")
+        } catch { }
+        let afterDuplicate = try await repository.remoteConfigurations()
+        XCTAssertEqual(afterDuplicate, original)
+        try await repository.addRemote(name: "upstream", fetchURL: "/tmp/local repository", pushURL: "")
+        let afterAdd = try await repository.remoteConfigurations()
+        XCTAssertEqual(afterAdd.first { $0.name == "origin" }, original.first)
+        XCTAssertEqual(afterAdd.first { $0.name == "upstream" }?.pushURLs, [])
+    }
+    func testInvalidRemoteInputsNeverWriteConfiguration() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let repository = try await GitRepository.initialize(at: directory)
+        for name in ["", " ", "bad name", "bad..name", "-option", "bad\nname", "bad.lock", "bad/"] {
+            do { try await repository.addRemote(name: name, fetchURL: "https://example.test/project"); XCTFail("Accepted invalid name: \(name)") } catch { }
+        }
+        for address in ["", "  ", "\n", "https://example.test/\nproject", "https://", "https://example.test/space path", "-option"] {
+            do { try await repository.addRemote(name: "origin", fetchURL: address); XCTFail("Accepted invalid URL") } catch { }
+        }
+        do { try await repository.addRemote(name: "origin", fetchURL: "https://example.test/project", pushURL: "  "); XCTFail("Accepted whitespace push URL") } catch { }
+        let values = try await repository.remoteConfigurations()
+        XCTAssertTrue(values.isEmpty)
+    }
     func testIgnoreSnapshotMissingUTF8SymlinkAndStaleSave() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

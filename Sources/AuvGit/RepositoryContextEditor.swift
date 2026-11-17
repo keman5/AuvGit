@@ -26,17 +26,27 @@ struct RepositoryContextEditor: View {
     @State private var loading = false
     @State private var error: String?
     private var selectedRemote: RepositoryRemoteConfiguration? { remotes.first { $0.name == remoteName } }
+    private var creatingRemote: Bool { loaded && remotes.isEmpty }
+    private var validRemoteInput: Bool {
+        (!creatingRemote || GitRepository.isValidRemoteName(remoteName)) &&
+        GitRepository.isValidRemoteURL(fetchURL) &&
+        (!editPush || pushURL.isEmpty || GitRepository.isValidRemoteURL(pushURL))
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(repositoryContextText(target.editor == .ignore ? "Edit Ignore File" : "Edit Remote URL")).font(.headline)
             Text(target.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             if target.editor == .ignore {
                 TextEditor(text: $ignoreText).font(.system(size: 12, design: .monospaced)).frame(minHeight: 240).disabled(!loaded || store.isBusy)
-            } else if remotes.isEmpty && loaded {
-                Text(repositoryContextText("No remotes configured")).foregroundStyle(.secondary)
             } else {
-                Picker(repositoryContextText("Remote"), selection: $remoteName) { ForEach(remotes) { Text($0.name).tag($0.name) } }
-                    .onChange(of: remoteName) { _, _ in selectRemote() }
+                if creatingRemote {
+                    Text(repositoryContextText("Add a remote to this repository")).foregroundStyle(.secondary)
+                    Text(repositoryContextText("Remote name")).font(.caption).foregroundStyle(.secondary)
+                    StableTextField(repositoryContextText("Remote name"), text: $remoteName)
+                } else {
+                    Picker(repositoryContextText("Remote"), selection: $remoteName) { ForEach(remotes) { Text($0.name).tag($0.name) } }
+                        .onChange(of: remoteName) { _, _ in selectRemote() }
+                }
                 if let remote = selectedRemote, remote.fetchURLs.count > 1 {
                     Picker(repositoryContextText("Fetch URL"), selection: $fetchIndex) {
                         ForEach(remote.fetchURLs.indices, id: \.self) { index in Text(remote.fetchURLs[index]).tag(index) }
@@ -45,11 +55,11 @@ struct RepositoryContextEditor: View {
                         fetchURL = remote.fetchURLs[index]
                     }
                 }
-                TextField(repositoryContextText("Fetch URL"), text: $fetchURL).textFieldStyle(.roundedBorder)
+                StableTextField(repositoryContextText("Fetch URL"), text: $fetchURL)
                 KeyViewProxy(label: repositoryContextText("Edit explicit push URL"), checked: editPush) { editPush.toggle() }
                 if editPush {
-                    TextField(repositoryContextText("Push URL"), text: $pushURL).textFieldStyle(.roundedBorder)
-                    Text(repositoryContextText("Empty removes the first explicit push URL")).font(.caption).foregroundStyle(.secondary)
+                    StableTextField(repositoryContextText("Push URL"), text: $pushURL)
+                    Text(repositoryContextText(creatingRemote ? "Empty uses the fetch URL for pushing" : "Empty removes the first explicit push URL")).font(.caption).foregroundStyle(.secondary)
                     if (selectedRemote?.pushURLs.count ?? 0) > 1 { Text(repositoryContextText("Only the first push URL is edited")).font(.caption).foregroundStyle(.secondary) }
                 }
             }
@@ -58,7 +68,7 @@ struct RepositoryContextEditor: View {
                 DialogButton(repositoryContextText("Reload")) { Task { await load() } }.disabled(store.isBusy || loading)
                 DialogButton(repositoryContextText("Cancel"), role: .cancel) { dismiss() }.disabled(store.isBusy)
                 DialogButton(repositoryContextText("Save"), prominent: true) { save() }
-                    .disabled(!loaded || store.isBusy || (target.editor == .remote && (selectedRemote == nil || fetchURL.isEmpty)))
+                    .disabled(!loaded || store.isBusy || (target.editor == .remote && (!validRemoteInput || (!creatingRemote && selectedRemote == nil))))
             }.buttonStyle(AuvGitDialogButtonStyle()).frame(maxWidth: .infinity)
         }.padding(20).frame(width: target.editor == .ignore ? 580 : 360)
         // Rehosting a sheet cancels SwiftUI .task; keep this finite read alive.
@@ -78,12 +88,13 @@ struct RepositoryContextEditor: View {
                 expectedIgnore = try await repository.gitignoreSnapshot()
                 ignoreText = expectedIgnore.flatMap { String(data: $0, encoding: .utf8) } ?? ""
             } else {
-                remotes = try await repository.remoteConfigurations(); remoteName = remotes.first?.name ?? ""; selectRemote()
+                remotes = try await repository.remoteConfigurations(); remoteName = remotes.first?.name ?? "origin"; selectRemote()
             }
             loaded = true
         } catch { self.error = GitCommandLog.redact(error.localizedDescription) }
     }
     private func save() {
+        let creating = creatingRemote, name = remoteName
         let expected = expectedIgnore, text = ignoreText, remote = selectedRemote, index = fetchIndex, fetch = fetchURL, push: String? = editPush ? pushURL : nil
         if target.editor == .ignore {
             if Data(text.utf8) == (expected ?? Data()) { dismiss(); return }
@@ -94,6 +105,7 @@ struct RepositoryContextEditor: View {
         Task {
             let success = await store.performRepositoryContextOperation(repositoryContextText(target.editor == .ignore ? "Edit Ignore File" : "Edit Remote URL"), path: target.path) { repository in
                 if target.editor == .ignore { try await repository.saveGitignore(text: text, expected: expected) }
+                else if creating { try await repository.addRemote(name: name, fetchURL: fetch, pushURL: push) }
                 else if let remote { try await repository.updateRemoteURL(expected: remote, fetchIndex: index, fetchURL: fetch, pushURL: push) }
             }
             if success { dismiss() } else { error = store.error }

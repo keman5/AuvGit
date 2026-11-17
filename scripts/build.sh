@@ -5,6 +5,11 @@ caffeinate -di -w $$ &
 BUILD_CAFFEINATE_PID=$!
 trap 'kill "$BUILD_CAFFEINATE_PID" 2>/dev/null || true' EXIT
 if command -v go >/dev/null 2>&1; then go clean -cache; fi
+if [[ "${1:-}" == --test-remote-editor ]]; then
+  # Unshown form hosts and disposable local Git repositories only.
+  swift test --build-system native --filter 'RepositoryContextEditorTests|RepositoryContextTests|RepositoryContextTargetingTests'
+  exit
+fi
 if [[ "${1:-}" == --test-apple-design ]]; then
   # All design snapshots and interaction checks use unshown hosts only.
   swift test --build-system native --filter 'AppleWorkspaceDesignTests|WorkspaceSplitLayoutTests|ControlTypographyTests|ComparisonChromeGeometryTests.testChangeArrowPairIgnoresInheritedToolbarMinimumWidth|WorkspaceNativeFilesTableTests|NativeBranchTableTests|DialogAppearanceTests.testSheetUsesSharedRadiusWithoutSystemModalFrame|DialogAppearanceTests.testMainWindowClipsTheFrameContainingTheSheetDimmer'

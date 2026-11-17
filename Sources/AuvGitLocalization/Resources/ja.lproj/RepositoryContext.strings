@@ -10,3 +10,6 @@
 "Reload" = "再読み込み";
 "Cancel" = "キャンセル";
 "Save" = "保存";
+"Add a remote to this repository" = "このリポジトリにリモートを追加";
+"Remote name" = "リモート名";
+"Empty uses the fetch URL for pushing" = "空欄の場合はフェッチURLでプッシュします";

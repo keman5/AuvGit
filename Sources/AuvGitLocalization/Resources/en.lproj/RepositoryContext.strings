@@ -10,3 +10,6 @@
 "Reload" = "Reload";
 "Cancel" = "Cancel";
 "Save" = "Save";
+"Add a remote to this repository" = "Add a remote to this repository";
+"Remote name" = "Remote name";
+"Empty uses the fetch URL for pushing" = "Empty uses the fetch URL for pushing";
