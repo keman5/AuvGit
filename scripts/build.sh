@@ -5,6 +5,11 @@ caffeinate -di -w $$ &
 BUILD_CAFFEINATE_PID=$!
 trap 'kill "$BUILD_CAFFEINATE_PID" 2>/dev/null || true' EXIT
 if command -v go >/dev/null 2>&1; then go clean -cache; fi
+if [[ "${1:-}" == --test-pull-recovery ]]; then
+  # Disposable local repositories only; never activate a test window.
+  swift test --build-system native --filter 'PullRecoveryTests|GitRepositoryTests.testLocalRemoteFetchPullPushAndDivergence|BranchSwitchTests|PullResultNoticeTests'
+  exit
+fi
 if [[ "${1:-}" == --test-remote-editor ]]; then
   # Unshown form hosts and disposable local Git repositories only.
   swift test --build-system native --filter 'RepositoryContextEditorTests|RepositoryContextTests|RepositoryContextTargetingTests'
@@ -86,7 +91,8 @@ if [[ "${1:-}" == --test-dialog-audit ]]; then
   exit
 fi
 if [[ "${1:-}" == --test-history-reset ]]; then
-  swift test --build-system native --filter 'HistoryResetTests|DialogAppearanceTests.testAdvancedReset'
+  # Disposable repositories and model fixtures only; never activate a window.
+  swift test --build-system native --filter 'HistoryResetTests|HistoryResetSelectionTests'
   exit
 fi
 if [[ "${1:-}" == --test-staging ]]; then
@@ -163,7 +169,7 @@ INSTALL_APP=true
 case "${1:-}" in
   "") ;;
   --no-install) INSTALL_APP=false ;;
-  *) print -u2 "Usage: $0 [--no-install|--test-localizations|--test-dialog-dismissal|--test-dialog-focus|--test-dialog-audit|--test-clone-dialogs|--test-smartgit-parity|--test-performance-review|--test-loading-performance|--test-dialog-buttons|--test-file-sorting|--test-refresh|--test-workspace-preview]"; exit 1 ;;
+  *) print -u2 "Usage: $0 [--no-install|--test-pull-recovery|--test-localizations|--test-dialog-dismissal|--test-dialog-focus|--test-dialog-audit|--test-clone-dialogs|--test-smartgit-parity|--test-performance-review|--test-loading-performance|--test-dialog-buttons|--test-file-sorting|--test-refresh|--test-workspace-preview]"; exit 1 ;;
 esac
 python3 scripts/check-localizations.py
 rm -rf -- "$PWD/.artifacts"

@@ -1000,16 +1000,12 @@ extension MainWindow {
         }
         if command == .reset || command == .resetAdvanced {
             guard let repository = store.repository, !store.isBusy else { return store.repository != nil }
-            if historyFocus.hasFileFocus, let commit = store.commits.first(where: { $0.hash == store.selectedCommit }) {
-                historyAction(command == .reset ? .reset : .resetAdvanced, commit)
-            } else {
-                Task {
-                    do {
-                        guard let commit = try await repository.log(limit: 1, ref: "HEAD").first,
-                              store.repository === repository, !store.isBusy else { return }
-                        resetRequest = HistoryResetRequest(commit: commit, repositoryURL: repository.url, advanced: command == .resetAdvanced)
-                    } catch { if store.repository === repository { store.report(error) } }
-                }
+            Task {
+                do {
+                    if let request = try await store.historyResetRequest(advanced: command == .resetAdvanced) {
+                        resetRequest = request
+                    }
+                } catch { if store.repository === repository { store.report(error) } }
             }
             return true
         }

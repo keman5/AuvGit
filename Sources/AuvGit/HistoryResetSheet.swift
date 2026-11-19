@@ -9,6 +9,22 @@ struct HistoryResetRequest: Identifiable {
     let advanced: Bool
 }
 
+@MainActor
+extension RepositoryStore {
+    func historyResetRequest(advanced: Bool) async throws -> HistoryResetRequest? {
+        guard let repository, !isBusy else { return nil }
+        // Menu and toolbar clicks can move focus without changing the selected commit.
+        let commit: GitCommit?
+        if let selected = commits.first(where: { $0.hash == selectedCommit }) {
+            commit = selected
+        } else {
+            commit = try await repository.log(limit: 1, ref: "HEAD").first
+        }
+        guard let commit, self.repository === repository, !isBusy else { return nil }
+        return HistoryResetRequest(commit: commit, repositoryURL: repository.url, advanced: advanced)
+    }
+}
+
 struct HistoryResetSheet: View {
     @ObservedObject var store: RepositoryStore
     let request: HistoryResetRequest

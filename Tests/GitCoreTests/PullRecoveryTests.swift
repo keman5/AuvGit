@@ -2,6 +2,18 @@ import XCTest
 @testable import GitCore
 
 final class PullRecoveryTests: XCTestCase {
+    private final class StashWrites: @unchecked Sendable {
+        private let lock = NSLock()
+        private var commands: [String] = []
+        func record(_ notification: Notification, directory: String) {
+            guard let record = notification.object as? GitCommandRecord,
+                  record.directory == directory, record.operation == "stash",
+                  record.command.contains("'push'") || record.command.contains("'create'") else { return }
+            lock.lock(); defer { lock.unlock() }
+            commands.append(record.command)
+        }
+        var values: [String] { lock.lock(); defer { lock.unlock() }; return commands }
+    }
     private struct Fixture { let root: URL; let local: GitRepository; let peer: GitRepository }
     private func write(_ text: String, _ path: String = "shared", in repo: GitRepository) throws {
         try text.write(to: repo.url.appendingPathComponent(path), atomically: true, encoding: .utf8)
@@ -30,6 +42,68 @@ final class PullRecoveryTests: XCTestCase {
             _ = try await GitProcess.run(at: repo.url, arguments: ["config"] + pair)
         }
     }
+
+    func testHardResetThenPullDoesNotCreateEvenATemporaryStash() async throws {
+        for remoteName: String? in [nil, "origin"] {
+            let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
+            _ = try await f.local.workflowRead(["config", "merge.autostash", "true"])
+            _ = try await f.local.workflowRead(["config", "rebase.autostash", "true"])
+            let base = try await f.local.workflowRevision("HEAD")
+            try write("local commit\n", in: f.local); try await commit(f.local, "local commit")
+            try write("staged\n", in: f.local); try await f.local.stage(paths: ["shared"])
+            try write("working\n", in: f.local)
+            try write("remote\n", in: f.peer); try await commit(f.peer, "remote"); try await f.peer.push()
+
+            _ = try await f.local.reset(to: base, mode: .hard)
+            let resetStatus = try await f.local.status()
+            XCTAssertTrue(resetStatus.isEmpty)
+            let writes = StashWrites()
+            let observer = NotificationCenter.default.addObserver(forName: GitCommandLog.notification, object: nil, queue: nil) {
+                writes.record($0, directory: f.local.url.path)
+            }
+            defer { NotificationCenter.default.removeObserver(observer) }
+
+            let result = try await f.local.runNetwork(.pull, remoteName: remoteName, progress: { _ in })
+
+            XCTAssertNil(result.pullOutcome)
+            XCTAssertEqual(writes.values, [], "A reset worktree needs no recovery stash")
+            let stashes = try await f.local.stashes(), status = try await f.local.status()
+            XCTAssertTrue(stashes.isEmpty)
+            XCTAssertTrue(status.isEmpty)
+            let localHead = try await f.local.workflowRevision("HEAD"), remoteHead = try await f.peer.workflowRevision("HEAD")
+            XCTAssertEqual(localHead, remoteHead)
+            XCTAssertEqual(try String(contentsOf: f.local.url.appendingPathComponent("shared"), encoding: .utf8), "remote\n")
+        }
+    }
+
+    func testDiscardFilesThenPullCreatesNoStashAndPreservesManualBackup() async throws {
+        let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
+        try write("manual backup\n", in: f.local)
+        try await f.local.stash(message: "Existing manual stash")
+        let originalStashes = try await f.local.stashes()
+        try write("discard me\n", in: f.local)
+        try write("discard draft", "draft", in: f.local)
+        try write("remote\n", in: f.peer); try await commit(f.peer, "remote"); try await f.peer.push()
+        try await f.local.discardWorkspace(paths: ["shared", "draft"])
+        let resetStatus = try await f.local.status()
+        XCTAssertTrue(resetStatus.isEmpty)
+        let writes = StashWrites()
+        let observer = NotificationCenter.default.addObserver(forName: GitCommandLog.notification, object: nil, queue: nil) {
+            writes.record($0, directory: f.local.url.path)
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        let result = try await f.local.runNetwork(.pull, progress: { _ in })
+
+        XCTAssertNil(result.pullOutcome)
+        XCTAssertEqual(writes.values, [])
+        let stashes = try await f.local.stashes(), status = try await f.local.status()
+        XCTAssertEqual(stashes, originalStashes)
+        XCTAssertTrue(status.isEmpty)
+        XCTAssertEqual(try String(contentsOf: f.local.url.appendingPathComponent("shared"), encoding: .utf8), "remote\n")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: f.local.url.appendingPathComponent("draft").path))
+    }
+
     func testExplicitRemotePullPreservesRecoveryAndRejectsAnotherTrackingRemote() async throws {
         let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
         _ = try await f.local.workflowRead(["remote", "add", "other", f.root.appendingPathComponent("remote.git").path])
@@ -45,9 +119,9 @@ final class PullRecoveryTests: XCTestCase {
         let unchanged = try await f.local.workflowRevision("HEAD")
         XCTAssertEqual(unchanged, initial)
         let result = try await f.local.runNetwork(.pull, remoteName: "origin", progress: { _ in })
-        XCTAssertEqual(result.pullOutcome?.changesRestored, true)
-        XCTAssertNotNil(result.pullOutcome?.stashHash)
-        XCTAssertEqual(result.pullOutcome?.conflicts, [])
+        XCTAssertNil(result.pullOutcome)
+        let stashes = try await f.local.stashes()
+        XCTAssertTrue(stashes.isEmpty)
         let localHead = try await f.local.workflowRevision("HEAD"), peerHead = try await f.peer.workflowRevision("HEAD")
         XCTAssertEqual(localHead, peerHead)
         XCTAssertEqual(try String(contentsOf: f.local.url.appendingPathComponent("shared"), encoding: .utf8), "working\n")
@@ -127,7 +201,75 @@ final class PullRecoveryTests: XCTestCase {
         XCTAssertEqual(staged, "index")
         XCTAssertEqual(try String(contentsOf: f.local.url.appendingPathComponent("staged"), encoding: .utf8), "working")
         XCTAssertEqual(try String(contentsOf: f.local.url.appendingPathComponent("notes"), encoding: .utf8), "notes")
-        let stashes = try await f.local.stashes(); XCTAssertEqual(stashes.count, 1)
+        XCTAssertNil(result.pullOutcome?.stashHash)
+        XCTAssertFalse(result.pullOutcome?.needsNotice ?? false)
+        let stashes = try await f.local.stashes(); XCTAssertTrue(stashes.isEmpty)
+    }
+
+    func testFastForwardPreservesIndexAndWorkingChangesWithoutCreatingAStash() async throws {
+        let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
+        try write("manual backup", in: f.local)
+        try await f.local.stash(message: "Existing manual stash")
+        let originalStashes = try await f.local.stashes()
+        _ = try await f.local.workflowRead(["config", "merge.autostash", "true"])
+        _ = try await f.local.workflowRead(["config", "rebase.autostash", "true"])
+        try write("working\n", in: f.local)
+        try write("index", "staged", in: f.local); try await f.local.stage(paths: ["staged"])
+        try write("working", "staged", in: f.local)
+        try write("notes", "notes", in: f.local)
+        try write("remote", "remote", in: f.peer); try await commit(f.peer, "remote"); try await f.peer.push()
+
+        let result = try await f.local.runNetwork(.pull, progress: { _ in })
+
+        XCTAssertNil(result.pullOutcome)
+        let stashes = try await f.local.stashes()
+        XCTAssertEqual(stashes, originalStashes)
+        let index = try await f.local.workflowRead(["show", ":staged"])
+        XCTAssertEqual(index, "index")
+        XCTAssertEqual(try String(contentsOf: f.local.url.appendingPathComponent("staged"), encoding: .utf8), "working")
+        XCTAssertEqual(try String(contentsOf: f.local.url.appendingPathComponent("shared"), encoding: .utf8), "working\n")
+        XCTAssertEqual(try String(contentsOf: f.local.url.appendingPathComponent("notes"), encoding: .utf8), "notes")
+        XCTAssertEqual(try String(contentsOf: f.local.url.appendingPathComponent("remote"), encoding: .utf8), "remote")
+    }
+
+    func testUpToDateDirtyPullDoesNotCreateAStash() async throws {
+        let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
+        try write("working\n", in: f.local)
+        let before = try await f.local.workflowRevision("HEAD")
+
+        let result = try await f.local.runNetwork(.pull, progress: { _ in })
+
+        XCTAssertNil(result.pullOutcome)
+        let stashes = try await f.local.stashes(), after = try await f.local.workflowRevision("HEAD")
+        XCTAssertTrue(stashes.isEmpty)
+        XCTAssertEqual(before, after)
+        XCTAssertEqual(try String(contentsOf: f.local.url.appendingPathComponent("shared"), encoding: .utf8), "working\n")
+    }
+
+    func testCleanRebaseRestorationDropsOnlyItsAutomaticStash() async throws {
+        let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
+        try write("manual backup", in: f.local)
+        try await f.local.stash(message: "Existing manual stash")
+        let originalStashes = try await f.local.stashes()
+        try write("local", "local", in: f.local); try await commit(f.local, "local")
+        try write("working\n", in: f.local)
+        try write("index", "staged", in: f.local); try await f.local.stage(paths: ["staged"])
+        try write("working", "staged", in: f.local)
+        try write("remote", "remote", in: f.peer); try await commit(f.peer, "remote"); try await f.peer.push()
+
+        let result = try await f.local.runNetwork(.pull, progress: { _ in })
+
+        XCTAssertEqual(result.pullOutcome?.changesRestored, true)
+        XCTAssertNil(result.pullOutcome?.stashHash)
+        XCTAssertFalse(result.pullOutcome?.needsNotice ?? false)
+        let stashes = try await f.local.stashes()
+        XCTAssertEqual(stashes, originalStashes)
+        let index = try await f.local.workflowRead(["show", ":staged"])
+        XCTAssertEqual(index, "index")
+        XCTAssertEqual(try String(contentsOf: f.local.url.appendingPathComponent("staged"), encoding: .utf8), "working")
+        XCTAssertEqual(try String(contentsOf: f.local.url.appendingPathComponent("shared"), encoding: .utf8), "working\n")
+        let parent = try await f.local.workflowRevision("HEAD^"), remote = try await f.peer.workflowRevision("HEAD")
+        XCTAssertEqual(parent, remote)
     }
 
     func testStagedConflictFallsBackToWorktreeMergeAndKeepsRecoveryCopy() async throws {
@@ -152,6 +294,64 @@ final class PullRecoveryTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: f.local.url.appendingPathComponent("notes"), encoding: .utf8), "remote notes")
         let saved = try await f.local.workflowRead(["show", hash + "^3:notes"])
         XCTAssertEqual(saved, "local notes")
+    }
+
+    func testUntrackedFileAlreadyDeliveredByRemoteNeedsNoRetainedStash() async throws {
+        let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
+        try write("same notes\n", "notes", in: f.local)
+        try write("same notes\n", "notes", in: f.peer)
+        try await commit(f.peer, "track notes"); try await f.peer.push()
+
+        let result = try await f.local.runNetwork(.pull, progress: { _ in })
+
+        XCTAssertNil(result.pullOutcome?.stashHash)
+        XCTAssertFalse(result.pullOutcome?.needsNotice ?? false)
+        let stashes = try await f.local.stashes(), status = try await f.local.status()
+        XCTAssertTrue(stashes.isEmpty)
+        XCTAssertTrue(status.isEmpty)
+        XCTAssertEqual(try String(contentsOf: f.local.url.appendingPathComponent("notes"), encoding: .utf8), "same notes\n")
+    }
+
+    func testIdenticalRemoteFileDoesNotPreventRestoringIndexWorktreeAndOtherUntrackedFiles() async throws {
+        let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
+        try write("manual backup", in: f.local)
+        try await f.local.stash(message: "Existing manual stash")
+        let originalStashes = try await f.local.stashes()
+        try write("working\n", in: f.local)
+        try write("index", "staged", in: f.local); try await f.local.stage(paths: ["staged"])
+        try write("working", "staged", in: f.local)
+        try write("same notes\n", "notes", in: f.local)
+        try write("local draft", "draft", in: f.local)
+        try write("same notes\n", "notes", in: f.peer)
+        try await commit(f.peer, "track notes"); try await f.peer.push()
+
+        let result = try await f.local.runNetwork(.pull, progress: { _ in })
+
+        XCTAssertNil(result.pullOutcome?.stashHash)
+        XCTAssertFalse(result.pullOutcome?.needsNotice ?? false)
+        let stashes = try await f.local.stashes()
+        XCTAssertEqual(stashes, originalStashes)
+        let index = try await f.local.workflowRead(["show", ":staged"])
+        XCTAssertEqual(index, "index")
+        XCTAssertEqual(try String(contentsOf: f.local.url.appendingPathComponent("staged"), encoding: .utf8), "working")
+        XCTAssertEqual(try String(contentsOf: f.local.url.appendingPathComponent("shared"), encoding: .utf8), "working\n")
+        XCTAssertEqual(try String(contentsOf: f.local.url.appendingPathComponent("draft"), encoding: .utf8), "local draft")
+    }
+
+    func testSameUntrackedContentWithDifferentExecutableModeRetainsRecovery() async throws {
+        let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
+        try write("same notes\n", "notes", in: f.local)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: f.local.url.appendingPathComponent("notes").path)
+        try write("same notes\n", "notes", in: f.peer)
+        try await commit(f.peer, "track notes"); try await f.peer.push()
+
+        let result = try await f.local.runNetwork(.pull, progress: { _ in })
+
+        XCTAssertNotNil(result.pullOutcome?.stashHash)
+        let stashes = try await f.local.stashes()
+        XCTAssertEqual(stashes.count, 1)
+        let mode = try await f.local.workflowRead(["ls-tree", stashes[0].hash + "^3", "--", "notes"])
+        XCTAssertTrue(mode.hasPrefix("100755"))
     }
 
     func testExistingRebaseConflictIsNotAbortedOrStashedByAnotherPull() async throws {
