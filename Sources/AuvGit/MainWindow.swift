@@ -927,7 +927,7 @@ struct MainWindow: View {
                     Button(aiCommitText("Generation scope…")) { aiScopeRepository = store.repository }
                         .disabled(store.repository == nil || aiCommit.isLoading)
                     Divider()
-                    Button("Signed-off-by", action: addSignoff)
+                    Button(mainText("Add Signed-off-by"), action: addSignoff)
                     Section(refinementText("Recent commit messages")) {
                         if store.recentCommitMessages.isEmpty {
                             Text(refinementText("No recent commit messages"))

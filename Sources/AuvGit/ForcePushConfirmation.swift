@@ -52,7 +52,7 @@ struct PullResultNotice: Identifiable {
         } else { message = Self.localizedFailure(error.localizedDescription) }
     }
     private static func localizedFailure(_ message: String) -> String {
-        GitFailureSummary.message(for: message, localize: { L10n.text($0, table: "OperationLog") }) ?? GitCommandLog.redact(message)
+        OperationFailure.display(message)
     }
 }
 

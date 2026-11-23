@@ -40,11 +40,31 @@ final class HistoryResetSelectionTests: XCTestCase {
             XCTAssertEqual(request.repositoryURL, store.repositoryURL)
             XCTAssertEqual(request.advanced, advanced)
         }
+        // A list refresh can temporarily remove the selected commit from the displayed rows.
+        store.commits.removeAll { $0.hash == target }
         let resolved = try await store.historyResetRequest(advanced: true)
         let request = try XCTUnwrap(resolved)
+        XCTAssertEqual(request.commit.hash, target)
         let activeRepo = try XCTUnwrap(store.repository)
         let context = try await activeRepo.resetContext()
-        _ = try await activeRepo.reset(to: request.commit.hash, mode: .mixed, expected: context)
+
+        store.isBusy = true
+        XCTAssertThrowsError(try store.startHistoryReset(request, mode: .mixed, context: context))
+        let unchangedHead = try await activeRepo.workflowRevision("HEAD")
+        XCTAssertEqual(unchangedHead, tip)
+        store.isBusy = false
+
+        try store.startHistoryReset(request, mode: .mixed, context: context)
+        XCTAssertTrue(store.isBusy, "The confirmation must start a real repository operation")
+        let deadline = ContinuousClock.now + .seconds(10)
+        while (store.isBusy || !store.files.contains(where: { $0.path == "added.txt" })) && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertFalse(store.isBusy)
+        XCTAssertNil(store.error)
+        XCTAssertTrue(store.files.contains { $0.path == "added.txt" && $0.isUntracked })
+        XCTAssertTrue(store.operationLog.contains { $0.command.contains("--mixed") && $0.exitCode == 0 })
+
         let head = try await activeRepo.workflowRevision("HEAD")
         let index = try await activeRepo.workflowRead(["show", ":file.txt"])
         let staged = try await activeRepo.workflowRead(["diff", "--cached", "--name-only"])

@@ -81,3 +81,4 @@
 "toolbarSeparator" = "縦区切り線";
 
 "stagedRatio" = "%ld/%ld ステージ済み";
+"Add Signed-off-by" = "署名者を追加";

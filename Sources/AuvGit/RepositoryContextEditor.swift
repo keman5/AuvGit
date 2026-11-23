@@ -91,7 +91,7 @@ struct RepositoryContextEditor: View {
                 remotes = try await repository.remoteConfigurations(); remoteName = remotes.first?.name ?? "origin"; selectRemote()
             }
             loaded = true
-        } catch { self.error = GitCommandLog.redact(error.localizedDescription) }
+        } catch { self.error = OperationFailure.display(error.localizedDescription) }
     }
     private func save() {
         let creating = creatingRemote, name = remoteName

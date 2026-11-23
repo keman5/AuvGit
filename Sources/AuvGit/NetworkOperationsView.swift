@@ -326,9 +326,11 @@ struct NetworkOperationsView: View {
                     return
                 }
                 let result = try await repository.runNetwork(operation, credential: credential, progress: { _ in })
-                output = result.output + "\n" + networkText("completed")
+                let detail = result.output.components(separatedBy: .newlines)
+                    .map(RepositoryStore.progressDetail).joined(separator: "\n")
+                output = detail + "\n" + networkText("completed")
                 if let outcome = result.fetchOutcome, store.repository === repository {
-                    output = FetchResultNotice(outcome: outcome).message + "\n\n" + result.output
+                    output = FetchResultNotice(outcome: outcome).message + "\n\n" + detail
                     fetchResult = FetchResultPrompt(repository: repository, outcome: outcome)
                 }
                 if let outcome = result.pullOutcome, outcome.needsNotice, store.repository === repository {

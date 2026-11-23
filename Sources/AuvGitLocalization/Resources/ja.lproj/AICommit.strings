@@ -47,3 +47,6 @@
 "Only changes in the selected scope are sent to your service. Generated text fills the draft and never stages or commits." = "選択した範囲の変更のみをサービスに送信します。生成結果は下書きに入力され、自動的なステージやコミットは行いません。";
 "Patch limit (KB)" = "差分の上限（KB）";
 "Increase the patch limit in AI settings, or generate from file names and change counts. Summary mode cannot describe code details." = "AI 設定で差分の上限を増やすか、ファイル名と変更数から生成してください。概要モードではコードの詳細を説明できません。";
+"API request failed (%@): %@" = "API リクエストに失敗しました（%1$@）：%2$@";
+"Invalid response (%@)" = "応答の形式が無効です（%@）";
+"Unknown content type" = "不明なコンテンツタイプ";

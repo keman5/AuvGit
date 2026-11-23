@@ -56,6 +56,17 @@ for path in (root / 'Sources/AuvGit').glob('*.swift'):
             assert key in all_tables['Files'], f'{path.name}: missing Files/{key}'
     for key, name in re.findall(r'L10n\.text\("([^"\n]+)",\s*table:\s*"([^"\n]+)"', source):
         assert key in all_tables[name], f'{path.name}: missing {name}/{key}'
+# An app-written GitError must have a translation even when it is reached
+# through a dynamic catch/report path. External and interpolated diagnostics
+# are handled separately by the failure presenter.
+external_diagnostics = {
+    'fatal: not a git repository (or any of the parent directories): .git',
+    'Git exited but an external helper kept its output stream open.',
+}
+for module in ('GitCore', 'AuvGit'):
+    for path in (root / 'Sources' / module).glob('*.swift'):
+        for key in re.findall(r'GitError\("([^"\\\n]+)"(?=\s*(?:\)|,\s*exitCode:))', path.read_text()):
+            assert key in all_tables['OperationLog'] or key in external_diagnostics, f'{path.name}: untranslated GitError/{key}'
 preferences = (root / 'Sources/AuvGit/PreferencesWindow.swift').read_text()
 for key in re.findall(r'choices\("([^"\n]+)"(?=\s*[,)])', preferences):
     assert key in all_tables['Preferences'], f'PreferencesWindow.swift: missing Preferences/{key}'

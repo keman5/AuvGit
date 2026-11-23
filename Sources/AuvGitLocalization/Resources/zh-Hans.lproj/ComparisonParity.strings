@@ -25,3 +25,4 @@
 "unstageSelection" = "取消暂存选区内变化";
 "unstageInner" = "取消暂存当前行内变化";
 "noSelectedChange" = "选区内没有可应用的变化。";
+"Shell" = "Shell 脚本";

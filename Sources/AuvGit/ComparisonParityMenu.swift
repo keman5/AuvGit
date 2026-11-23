@@ -22,7 +22,7 @@ struct ComparisonParityMenu: View {
                 Text(comparisonParityText("automatic")).tag("automatic")
                 Text(comparisonParityText("plain")).tag("plain")
                 Text("Swift").tag("swift"); Text("JavaScript / TypeScript").tag("ts")
-                Text("Python").tag("py"); Text("Shell").tag("sh")
+                Text("Python").tag("py"); Text(comparisonParityText("Shell")).tag("sh")
                 Text("C / C++ / Objective-C").tag("cpp"); Text("Go").tag("go")
                 Text("Rust").tag("rs"); Text("Java / Kotlin").tag("java")
                 Text("JSON").tag("json"); Text("YAML / TOML").tag("yaml")

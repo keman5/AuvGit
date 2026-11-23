@@ -159,7 +159,8 @@ final class AICommitController: ObservableObject {
                 }
             } catch is CancellationError {} catch {
                 if let self, self.requestID == token {
-                    if error is AICommitFailure || error is AICommitAPIError { self.error = error.localizedDescription }
+                    if let apiError = error as? AICommitAPIError { self.error = apiError.displayMessage }
+                    else if error is AICommitFailure { self.error = error.localizedDescription }
                     else { self.error = aiCommitText("Generation failed; check AI settings") }
                 }
             }
@@ -172,6 +173,10 @@ struct AICommitAPIError: LocalizedError {
     let statusCode: Int
     let message: String
     var errorDescription: String? { "API request failed (\(statusCode)): \(message)" }
+    var displayMessage: String {
+        L10n.text("API request failed (%@): %@", table: "AICommit",
+                  arguments: [String(statusCode), GitCommandLog.redact(message)])
+    }
 }
 
 enum AICommitAPI {
@@ -200,8 +205,8 @@ enum AICommitAPI {
         }
         struct Response: Decodable { struct Choice: Decodable { struct Message: Decodable { let content: String }; let message: Message }; let choices: [Choice] }
         guard let value = try? JSONDecoder().decode(Response.self, from: data).choices.first?.message.content else {
-            let type = response.value(forHTTPHeaderField: "Content-Type") ?? "unknown content type"
-            throw AICommitAPIError(statusCode: response.statusCode, message: "Invalid response (\(type))")
+            let type = response.value(forHTTPHeaderField: "Content-Type") ?? aiCommitText("Unknown content type")
+            throw AICommitAPIError(statusCode: response.statusCode, message: L10n.text("Invalid response (%@)", table: "AICommit", arguments: [type]))
         }
         return value
     }

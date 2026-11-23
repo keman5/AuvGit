@@ -275,7 +275,7 @@ struct ComparisonEditor: NSViewRepresentable {
             value.editingCommands?.replaceSearchAction = { [weak self] options, replacement, all in
                 guard let self, let pane = self.historyTarget() else { return comparisonSearchText("This preview is read-only.") }
                 switch ComparisonSearch.replacementEdit(in: pane.text.string, options: options, replacement: replacement, all: all, selected: pane.text.selectedRange()) {
-                case .failure(let error): return error.localizedDescription
+                case .failure: return comparisonSearchText("Invalid regular expression")
                 case .success(let edit):
                     guard let edit else { return nil }
                     pane.text.replaceAsUndoableEdit(edit.text, range: edit.range, actionName: comparisonSearchText(all ? "Replace all" : "Replace"))

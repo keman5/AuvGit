@@ -25,3 +25,4 @@
 "unstageSelection" = "取消暫存選取範圍內變更";
 "unstageInner" = "取消暫存目前行內變更";
 "noSelectedChange" = "選取範圍內沒有可套用的變更。";
+"Shell" = "Shell 指令碼";

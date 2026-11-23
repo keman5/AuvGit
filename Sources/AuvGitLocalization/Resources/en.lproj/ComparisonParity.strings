@@ -25,3 +25,4 @@
 "unstageSelection" = "Unstage Selected Changes";
 "unstageInner" = "Unstage Inner-line Difference";
 "noSelectedChange" = "No applicable change at the selection.";
+"Shell" = "Shell";

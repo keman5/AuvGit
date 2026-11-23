@@ -51,13 +51,17 @@ public enum L10n {
     }
     public static func text(_ key: String, table: String = "App", language: AppLanguage, arguments: [CVarArg]) -> String {
         let resolved = language == .system ? self.language : language
-        func lookup(_ code: String) -> String? {
-            guard let bundle = localizedBundles[code] else { return nil }
-            let sentinel = "__AUVGIT_MISSING__"
+        let format = translation(key, table: table, language: resolved) ?? key
+        return arguments.isEmpty ? format : String(format: format, locale: Locale(identifier: resolved.rawValue), arguments: arguments)
+    }
+
+    public static func translation(_ key: String, table: String, language: AppLanguage) -> String? {
+        let sentinel = "__AUVGIT_MISSING__"
+        func lookup(_ language: AppLanguage) -> String? {
+            guard let bundle = localizedBundles[language.rawValue] else { return nil }
             let value = bundle.localizedString(forKey: key, value: sentinel, table: table)
             return value == sentinel ? nil : value
         }
-        let format = lookup(resolved.rawValue) ?? lookup("en") ?? key
-        return arguments.isEmpty ? format : String(format: format, locale: Locale(identifier: resolved.rawValue), arguments: arguments)
+        return lookup(language == .system ? self.language : language) ?? lookup(.en)
     }
 }

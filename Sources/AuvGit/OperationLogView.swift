@@ -43,7 +43,7 @@ struct OperationLogView: View {
                                 Image(systemName: record.cancelled ? "minus.circle" : record.error == nil ? "checkmark.circle" : "exclamationmark.triangle").foregroundStyle(record.error == nil ? Color.secondary : .red)
                                 Text(record.date.formatted(date: .omitted, time: .standard)).monospacedDigit()
                                 Text(record.command.isEmpty ? record.operation : "git " + record.operation).fontWeight(.medium)
-                                Text(record.error.flatMap { GitFailureSummary.message(for: $0, localize: text) } ?? text(record.cancelled ? "Cancelled" : record.error == nil ? "Completed" : "Failed"))
+                                Text(record.error.flatMap(OperationFailure.summary) ?? text(record.cancelled ? "Cancelled" : record.error == nil ? "Completed" : "Failed"))
                                 Spacer()
                                 Text(String(format: "%.2fs", record.duration)).foregroundStyle(.secondary)
                             }.font(.caption)

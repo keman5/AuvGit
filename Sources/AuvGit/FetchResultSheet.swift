@@ -26,7 +26,7 @@ struct FetchResultNotice {
         }
         if let failure = outcome.upstreamCheckFailure {
             parts.append(networkText("fetchUpstreamCheckFailed") + "\n" +
-                (GitFailureSummary.message(for: failure, localize: { L10n.text($0, table: "OperationLog") }) ?? GitCommandLog.redact(failure)))
+                OperationFailure.display(failure))
         }
         return parts.joined(separator: "\n\n")
     }

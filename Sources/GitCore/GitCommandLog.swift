@@ -130,9 +130,28 @@ public enum GitCommandLog {
     }
 }
 public enum GitFailureSummary {
+    private static let closedEndpoint = #/^(?:Connection closed|Connection reset) by (\S+) port ([0-9]+)$/#
+
     public static func message(for message: String, localize: (String) -> String) -> String? {
         guard let key = key(for: message) else { return nil }
         let summary = localize(key)
+        if key == "SSH connection closed" || key == "SSH connection reset" {
+            let endpoint = message.split(whereSeparator: \.isNewline).lazy
+                .compactMap { $0.trimmingCharacters(in: .whitespaces).wholeMatch(of: closedEndpoint) }.first
+            let detail: String
+            if let endpoint {
+                let format = key == "SSH connection closed"
+                    ? "SSH connection closed by %@ on port %@."
+                    : "SSH connection reset by %@ on port %@."
+                detail = String(format: localize(format), String(endpoint.1), String(endpoint.2))
+            } else {
+                detail = summary
+            }
+            if message.localizedCaseInsensitiveContains("could not read from remote repository") {
+                return detail + "\n\n" + localize("Could not read the remote repository. Check your access rights and confirm the repository exists.")
+            }
+            return detail
+        }
         guard key == "Remote rejected the push" else { return summary }
         let lines = GitCommandLog.redact(message).split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
         let remote = lines.filter { $0.lowercased().hasPrefix("remote:") }.map { String($0.dropFirst(7)).trimmingCharacters(in: .whitespaces) }
@@ -174,8 +193,8 @@ public enum GitFailureSummary {
         if text.contains("unknown index entry format") || text.contains("unsupported ce_mode") || text.contains("index file corrupt") || text.contains("index file smaller than expected") || text.contains("bad signature") && text.contains("index") {
             return "Git index is corrupt; workspace changes are unavailable."
         }
-        if text.contains("could not read username") || text.contains("authentication failed") || text.contains("askpass") { return "Authentication required" }
-        if text.contains("permission denied (publickey)") { return "SSH authentication failed" }
+        if text.contains("could not read username") || text.contains("could not read password") || text.contains("authentication failed") || text.contains("invalid username or token") || text.contains("http basic: access denied") || text.contains("askpass") { return "Authentication required" }
+        if text.contains("permission denied (publickey") { return "SSH authentication failed" }
         if text.contains("couldn't find remote ref") || text.contains("no such ref was fetched") {
             return "The tracked remote branch is unavailable. Fetch and choose an existing tracking branch."
         }
@@ -185,10 +204,21 @@ public enum GitFailureSummary {
         if text.contains("no upstream branch") || text.contains("no tracking information") { return "No upstream branch configured" }
         if text.contains("non-fast-forward") || text.contains("fetch first") || text.contains("not possible to fast-forward") { return "Remote and local branches have diverged" }
         if text.contains("timed out") { return "Git operation timed out" }
-        if text.contains("could not resolve host") || text.contains("unable to access") || text.contains("connection refused") { return "Cannot connect to remote" }
+        if text.contains("connection closed by") {
+            return "SSH connection closed"
+        }
+        if text.contains("connection reset by") { return "SSH connection reset" }
+        if text.contains("could not resolve host") || text.contains("could not resolve hostname") || text.contains("connection refused")
+            || text.contains("remote end hung up unexpectedly") || text.contains("no route to host") || text.contains("network is unreachable") || text.contains("failed to connect") {
+            return "Cannot connect to remote"
+        }
+        if text.contains("repository not found") || text.contains("does not appear to be a git repository")
+            || text.contains("could not read from remote repository") || text.contains("the requested url returned error: 404") {
+            return "Could not read the remote repository. Check your access rights and confirm the repository exists."
+        }
+        if text.contains("unable to access") { return "Cannot connect to remote" }
         if text.contains("would be overwritten") { return "Local changes would be overwritten" }
         if text.contains("index.lock") { return "Repository is locked by another Git operation" }
-        if text.contains("repository not found") { return "Remote repository unavailable" }
         if text.contains("unknown revision") || text.contains("bad revision") || text.contains("not a valid object") || text.contains("needed a single revision") || text.contains("pathspec") { return "Revision or path not found" }
         if text.contains("unable to auto-detect email") || text.contains("author identity unknown") || text.contains("empty ident") { return "Git author identity is not configured" }
         if text.contains("unmerged") || text.contains("resolve your current index") || text.contains("merge conflict") || text.contains("automatic merge failed") { return "Resolve conflicts before continuing" }

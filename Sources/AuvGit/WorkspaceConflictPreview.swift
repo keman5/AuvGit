@@ -31,7 +31,7 @@ struct WorkspaceConflictPreview: View {
         [column("ours", "Ours (Stage 2)", snapshot.ours), column("worktree", "Merge Result (Read-only)", snapshot.worktree), column("theirs", "Theirs (Stage 3)", snapshot.theirs)]
     }
     private var searchError: String? {
-        if case .failure(let error) = ComparisonSearch.matches(in: "", options: searchOptions) { return comparisonSearchText("Invalid regular expression") + ": " + error.localizedDescription }
+        if case .failure = ComparisonSearch.matches(in: "", options: searchOptions) { return comparisonSearchText("Invalid regular expression") }
         return nil
     }
     private func selectConflict(_ index: Int) {

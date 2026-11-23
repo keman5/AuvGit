@@ -81,3 +81,4 @@
 "toolbarSeparator" = "竖向分隔线";
 
 "stagedRatio" = "%ld/%ld 已暂存";
+"Add Signed-off-by" = "添加签署人";

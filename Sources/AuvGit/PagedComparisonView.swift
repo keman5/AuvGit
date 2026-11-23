@@ -244,7 +244,7 @@ struct PagedComparisonView: View {
                     revealRequest = ComparisonRevealRequest(paneID: first.0, firstLine: first.2.firstLine, number: first.2.firstLine)
                 }
             } catch is CancellationError {}
-            catch { if pageToken == token { searchError = largeText(error.localizedDescription) } }
+            catch { if pageToken == token { searchError = OperationFailure.display(largeText(error.localizedDescription)) } }
         }
     }
     private func search() {
@@ -263,7 +263,7 @@ struct PagedComparisonView: View {
                 }
                 guard searchToken == token else { return }; hits = found; resultsLimited = limited
             } catch is CancellationError {}
-            catch { if searchToken == token { searchError = largeText(error.localizedDescription) } }
+            catch { if searchToken == token { searchError = OperationFailure.display(largeText(error.localizedDescription)) } }
             if searchToken == token { isSearching = false }
         }
     }
@@ -279,7 +279,7 @@ struct PagedComparisonView: View {
         patchTask = Task {
             do { let value = try await LargeTextComparison.patch(source: source, target: target, rules: rules); try Task.checkCancellation(); if patchToken == token { patch = value } }
             catch is CancellationError {}
-            catch { if patchToken == token { searchError = largeText(error.localizedDescription) } }
+            catch { if patchToken == token { searchError = OperationFailure.display(largeText(error.localizedDescription)) } }
             if patchToken == token { patchBusy = false }
         }
     }

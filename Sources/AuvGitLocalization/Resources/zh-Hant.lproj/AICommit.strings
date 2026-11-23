@@ -47,3 +47,6 @@
 "Only changes in the selected scope are sent to your service. Generated text fills the draft and never stages or commits." = "僅將所選範圍的變更傳送至所選服務。生成文字填入草稿，不會自動暫存或提交。";
 "Patch limit (KB)" = "差異補丁限制（KB）";
 "Increase the patch limit in AI settings, or generate from file names and change counts. Summary mode cannot describe code details." = "可在 AI 設定中提高補丁限制，或根據檔案名稱和變更數量生成。摘要模式無法描述程式碼細節。";
+"API request failed (%@): %@" = "API 要求失敗（%1$@）：%2$@";
+"Invalid response (%@)" = "回應格式無效（%@）";
+"Unknown content type" = "未知內容類型";

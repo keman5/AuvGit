@@ -116,4 +116,56 @@ final class OperationFailureTests: XCTestCase {
         await fulfillment(of: [eventLogged], timeout: 1)
     }
 
+    @MainActor
+    func testRemoteDisconnectTranslationsKeepEndpointAndRawDiagnostic() throws {
+        let diagnostic = """
+        Connection closed by 127.0.0.1 port 7890
+        fatal: Could not read from remote repository.
+
+        Please make sure you have the correct access rights
+        and the repository exists.
+        """
+        let previous = UserDefaults.standard.object(forKey: L10n.preferenceKey)
+        defer { UserDefaults.standard.set(previous, forKey: L10n.preferenceKey) }
+        let logged = expectation(description: "Original diagnostic reaches operation log")
+        logged.expectedFulfillmentCount = 4
+        let repository = URL(fileURLWithPath: "/localization-test")
+        let observer = NotificationCenter.default.addObserver(forName: OperationFailure.notification, object: nil, queue: nil) { notification in
+            guard let event = notification.object as? OperationFailure.Event, event.repository == repository else { return }
+            XCTAssertEqual(event.message, diagnostic)
+            logged.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        let translations = [
+            "en": "SSH connection closed by 127.0.0.1 on port 7890.",
+            "zh-Hans": "SSH 连接已被 127.0.0.1（端口 7890）关闭。",
+            "zh-Hant": "SSH 連線已由 127.0.0.1（連接埠 7890）關閉。",
+            "ja": "127.0.0.1（ポート 7890）が SSH 接続を閉じました。"
+        ]
+        let endpoint = try XCTUnwrap(RemoteEndpoint.parse("ssh://git@example.test/repo"))
+        for (language, prefix) in translations {
+            UserDefaults.standard.set(language, forKey: L10n.preferenceKey)
+            let summary = OperationFailure.message(GitError(diagnostic), repository: repository)
+            let guidance = L10n.text("Could not read the remote repository. Check your access rights and confirm the repository exists.", table: "OperationLog")
+            XCTAssertEqual(summary, prefix + "\n\n" + guidance)
+            XCTAssertEqual(OperationFailure.display(diagnostic), summary)
+            XCTAssertEqual(RepositoryStore.progressDetail("Connection closed by 127.0.0.1 port 7890"), prefix)
+            XCTAssertEqual(RepositoryStore.progressDetail("fatal: Could not read from remote repository."), guidance)
+            XCTAssertNil(NetworkAuthenticationPolicy.prompt(for: GitError(diagnostic), endpoint: endpoint))
+        }
+        wait(for: [logged], timeout: 1)
+    }
+
+    func testLocalErrorsAndRecoveryDetailsUseTheSameTranslator() {
+        let previous = UserDefaults.standard.object(forKey: L10n.preferenceKey)
+        defer { UserDefaults.standard.set(previous, forKey: L10n.preferenceKey) }
+        UserDefaults.standard.set("zh-Hans", forKey: L10n.preferenceKey)
+        XCTAssertEqual(OperationFailure.display("Git operation timed out after 45 seconds."), "Git 操作在 45 秒后超时。")
+        XCTAssertEqual(OperationFailure.display("Unknown rebase instruction on todo line 15"), "变基计划第 15 行包含未知指令。")
+        XCTAssertEqual(OperationFailure.display("Unknown stash reference"), "找不到此贮藏引用。")
+        XCTAssertEqual(OperationFailure.display("Invalid revision\nSaved changes remain in stash stash@{2}"),
+                       "无效的版本。\n修改保留在贮藏 stash@{2} 中。")
+        XCTAssertEqual(OperationFailure.display("Repository-specific hook detail"), "Repository-specific hook detail")
+    }
+
 }

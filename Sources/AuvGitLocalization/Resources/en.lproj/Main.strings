@@ -81,3 +81,4 @@
 "toolbarSeparator" = "Vertical Separator";
 
 "stagedRatio" = "%ld/%ld staged";
+"Add Signed-off-by" = "Add Signed-off-by";

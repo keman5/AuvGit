@@ -235,7 +235,7 @@ struct StreamingComparisonView: View {
                 let value = try await reader.search(options); try Task.checkCancellation()
                 guard searchToken == token else { return }; results = value.hits; resultsLimited = value.isLimited
             } catch is CancellationError {}
-            catch { if searchToken == token { searchError = largeText(error.localizedDescription) } }
+            catch { if searchToken == token { searchError = OperationFailure.display(largeText(error.localizedDescription)) } }
             if searchToken == token { isSearching = false }
         }
     }

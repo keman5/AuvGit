@@ -505,7 +505,7 @@ struct DiffTextSurface: NSViewRepresentable {
                         (scroll.documentView as? ReadOnlyDiffTextView)?.searchMatches = columns[column]
                     }
                     completion(self.matches.count, nil)
-                case .failure(let error): completion(0, error.localizedDescription)
+                case .failure: completion(0, comparisonSearchText("Invalid regular expression"))
                 }
                 if let (direction, report) = self.pendingSearchNavigation {
                     self.pendingSearchNavigation = nil; self.navigateSearch(direction: direction, completion: report)

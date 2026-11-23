@@ -654,7 +654,7 @@ private struct FileCompareContent: View {
     private var showsCompact: Bool { compact && layout != "patch" && supportsNativeComparison }
     private var searchError: String? {
         if let replacementError { return replacementError }
-        if case .failure(let error) = ComparisonSearch.matches(in: "", options: searchOptions) { return comparisonSearchText("Invalid regular expression") + ": " + error.localizedDescription }
+        if case .failure = ComparisonSearch.matches(in: "", options: searchOptions) { return comparisonSearchText("Invalid regular expression") }
         return nil
     }
     private var controls: some View {

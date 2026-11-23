@@ -129,7 +129,7 @@ final class HistoryOverlapCache: ObservableObject {
             cache[key] = result; values = result; isLoading = false
         } catch {
             guard !Task.isCancelled, scope == generation, self.requestID == requestID else { return }
-            self.error = error.localizedDescription; isLoading = false
+            self.error = OperationFailure.display(error.localizedDescription); isLoading = false
         }
     }
 }

@@ -47,3 +47,6 @@
 "Only changes in the selected scope are sent to your service. Generated text fills the draft and never stages or commits." = "Only changes in the selected scope are sent to your service. Generated text fills the draft and never stages or commits.";
 "Patch limit (KB)" = "Patch limit (KB)";
 "Increase the patch limit in AI settings, or generate from file names and change counts. Summary mode cannot describe code details." = "Increase the patch limit in AI settings, or generate from file names and change counts. Summary mode cannot describe code details.";
+"API request failed (%@): %@" = "API request failed (%@): %@";
+"Invalid response (%@)" = "Invalid response (%@)";
+"Unknown content type" = "Unknown content type";

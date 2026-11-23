@@ -25,3 +25,4 @@
 "unstageSelection" = "選択した変更をステージから除外";
 "unstageInner" = "行内の差分をステージから除外";
 "noSelectedChange" = "選択範囲に適用できる変更はありません。";
+"Shell" = "シェルスクリプト";

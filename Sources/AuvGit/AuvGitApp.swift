@@ -379,8 +379,11 @@ final class RepositoryStore: ObservableObject {
     }
     static func progressDetail(_ message: String) -> String {
         if message.hasPrefix("remote: ") { return L10n.text("remote", table: "OperationLog") + ": " + progressDetail(String(message.dropFirst(8))) }
-        guard let colon = message.firstIndex(of: ":") else { return L10n.text(message, table: "OperationLog") }
-        return L10n.text(String(message[..<colon]), table: "OperationLog") + message[colon...]
+        if let colon = message.firstIndex(of: ":"),
+           let label = L10n.translation(String(message[..<colon]), table: "OperationLog", language: L10n.language) {
+            return label + message[colon...]
+        }
+        return OperationFailure.display(message)
     }
     var displayStatus: String {
         if let error { return hasLatestOperation ? status + ": " + error : error }
@@ -520,7 +523,7 @@ final class RepositoryStore: ObservableObject {
     @Published private var errorMessage: String?
     @Published private(set) var workspaceStatusFailure: String?
     var error: String? {
-        get { errorMessage.map(localizedError) }
+        get { errorMessage.map(OperationFailure.display) }
         set { errorMessage = newValue }
     }
     @Published private var activityRecords: [(date: Date?, operation: String?, error: String?)] = []
@@ -529,21 +532,12 @@ final class RepositoryStore: ObservableObject {
             if let operation = record.operation, let date = record.date {
                 return "\(date.formatted(Date.FormatStyle(date: .omitted, time: .standard).locale(L10n.locale)))  " + L10n.text("%@ completed", arguments: [operationName(operation)])
             }
-            return localizedError(record.error ?? "")
+            return OperationFailure.display(record.error ?? "")
         }
     }
     private func setStatus(_ key: String, arguments: [String] = []) { if statusKey != key { statusKey = key }; if statusArguments != arguments { statusArguments = arguments } }
     private func setDiffTitle(_ key: String, arguments: [String] = []) { if diffTitleKey != key { diffTitleKey = key }; if diffTitleArguments != arguments { diffTitleArguments = arguments } }
     private func operationName(_ name: String) -> String { L10n.text(name) }
-    private func localizedError(_ message: String) -> String {
-        if let summary = GitFailureSummary.message(for: message, localize: { L10n.text($0, table: "OperationLog") }) { return summary }
-        let owned = ["Git operation timed out after 120 seconds.", "Git exited but an external helper kept its output stream open.", "Git output exceeds the 32 MB display limit."]
-        if owned.contains(message) { return L10n.text(message) }
-        if message.hasPrefix("Git command failed ("), message.hasSuffix(").") {
-            return L10n.text("Git command failed (%@).", arguments: [String(message.dropFirst(20).dropLast(2))])
-        }
-        return message
-    }
     private var restored = false
     private var repoVersion = UUID()
     private var diffVersion = UUID()
@@ -1839,8 +1833,11 @@ final class RepositoryStore: ObservableObject {
             completion(hint)
         }
     }
-    func operation(_ name: String, refreshFilesOnly: Bool = false, fileStatusPaths: [String]? = nil, onFailure: ((Error) -> Void)? = nil, body: @escaping (GitRepository) async throws -> Void) {
-        guard let repository, workspaceStatusFailure == nil, !isBusy, pendingRepositoryPath == nil else { return }
+    @discardableResult
+    func operation(_ name: String, refreshFilesOnly: Bool = false, fileStatusPaths: [String]? = nil,
+                   waitForBackgroundSync: Bool = true, onFailure: ((Error) -> Void)? = nil,
+                   body: @escaping (GitRepository) async throws -> Void) -> Bool {
+        guard let repository, workspaceStatusFailure == nil, !isBusy, pendingRepositoryPath == nil else { return false }
         cancelAutomaticRefresh()
         pauseProjectPreparation()
         RepositoryReadCoordinator.shared.invalidate(repository: repository.url)
@@ -1852,9 +1849,8 @@ final class RepositoryStore: ObservableObject {
         let operationID = currentUserOperationID
         let progress = progressHandler(for: repository, operationID: operationID)
         Task {
-            // Local index writes do not depend on unrelated projects' network
-            // requests or optional previews finishing their cancellation.
-            if refreshFilesOnly { stopBackgroundRepositorySync() }
+            // Reset and index writes can proceed while background fetches cancel.
+            if refreshFilesOnly || !waitForBackgroundSync { stopBackgroundRepositorySync() }
             else { await cancelBackgroundRepositorySync() }
             var failure: Error?
             do { try await GitCommandLog.$progress.withValue(progress) { try await GitCommandLog.$operationID.withValue(operationID) { try await GitCommandLog.$userInitiated.withValue(true) { try await body(repository) } } }; if !persistsSession { NotificationCenter.default.post(name: .auvGitWorktreeChanged, object: repository.url) }; activityRecords.insert((Date(), name, nil), at: 0); setStatus("%@ completed", arguments: [name]) }
@@ -1865,6 +1861,7 @@ final class RepositoryStore: ObservableObject {
             if refreshFilesOnly { await refreshFileStatus(paths: failure == nil ? fileStatusPaths : nil) }
             else { await refresh() }
         }
+        return true
     }
     /// Runs against the captured sidebar target, even when another repository is active.
     func performRepositoryContextOperation(_ name: String, path: String, body: @escaping (GitRepository) async throws -> Void) async -> Bool {
