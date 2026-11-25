@@ -384,7 +384,7 @@ struct MainWindow: View {
 
     private var observedContent: some View {
         toolbarContent.onReceive(NotificationCenter.default.publisher(for: .auvGitWorktreeChanged)) { event in
-            guard handlesStoreEvents else { return }
+            guard handlesStoreEvents, (event.userInfo?["sourceStore"] as? RepositoryStore) !== store else { return }
             if let url = event.object as? URL, url == store.repositoryURL { Task { await store.refresh() } }
         }
         .onReceive(NotificationCenter.default.publisher(for: .auvGitReuseCommitMessage)) { event in

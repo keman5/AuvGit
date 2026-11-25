@@ -1187,6 +1187,13 @@ final class RepositoryStore: ObservableObject {
                           reuseStashes: worktreeOnly && lastObservedState != nil)
         } catch { /* A canceled background read never becomes an operation error. */ }
     }
+    func refreshAfterRepositoryChange(at url: URL) async {
+        guard let repositoryURL, Self.sameRepositoryLocation(repositoryURL, url), !isBusy else { return }
+        // A refresh already reading the old refs must not swallow the write notification.
+        cancelAutomaticRefresh()
+        refreshingRepository = nil
+        await refresh()
+    }
     func refresh(knownFiles: [GitFile]? = nil, knownState: RepositoryChangeState? = nil, opening: Bool = false, reuseMetadata: Bool = false, reuseStashes: Bool = false,
                  loadsWorkspaceComparison: Bool = true, onFileStatus: ((RepositoryStore) -> Void)? = nil) async {
         guard let repository, (!isBusy || opening), refreshingRepository != repository.url else { return }
@@ -1853,13 +1860,21 @@ final class RepositoryStore: ObservableObject {
             if refreshFilesOnly || !waitForBackgroundSync { stopBackgroundRepositorySync() }
             else { await cancelBackgroundRepositorySync() }
             var failure: Error?
-            do { try await GitCommandLog.$progress.withValue(progress) { try await GitCommandLog.$operationID.withValue(operationID) { try await GitCommandLog.$userInitiated.withValue(true) { try await body(repository) } } }; if !persistsSession { NotificationCenter.default.post(name: .auvGitWorktreeChanged, object: repository.url) }; activityRecords.insert((Date(), name, nil), at: 0); setStatus("%@ completed", arguments: [name]) }
-            catch { failure = error }
+            do {
+                try await GitCommandLog.$progress.withValue(progress) {
+                    try await GitCommandLog.$operationID.withValue(operationID) {
+                        try await GitCommandLog.$userInitiated.withValue(true) { try await body(repository) }
+                    }
+                }
+                activityRecords.insert((Date(), name, nil), at: 0)
+                setStatus("%@ completed", arguments: [name])
+            } catch { failure = error }
             finishUserOperation(name, repository: repository, failure: failure)
             isBusy = false
             if let failure { onFailure?(failure) }
             if refreshFilesOnly { await refreshFileStatus(paths: failure == nil ? fileStatusPaths : nil) }
             else { await refresh() }
+            if failure == nil, !refreshFilesOnly || !persistsSession { notifyRepositoryChange(repository) }
         }
         return true
     }
@@ -1914,7 +1929,9 @@ final class RepositoryStore: ObservableObject {
         finishUserOperation(name, repository: repository)
         activityRecords.insert((Date(), name, nil), at: 0)
         setStatus("%@ completed", arguments: [name])
-        if !persistsSession { NotificationCenter.default.post(name: .auvGitWorktreeChanged, object: repository.url) }
+    }
+    func notifyRepositoryChange(_ repository: GitRepository) {
+        NotificationCenter.default.post(name: .auvGitWorktreeChanged, object: repository.url, userInfo: ["sourceStore": self])
     }
     func report(_ error: Error) {
         guard !(error is CancellationError) else { return }

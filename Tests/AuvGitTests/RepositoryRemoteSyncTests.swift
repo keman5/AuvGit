@@ -1,9 +1,82 @@
+import Combine
 import XCTest
 @testable import AuvGit
 @testable import GitCore
 
 @MainActor
 final class RepositoryRemoteSyncTests: XCTestCase {
+    func testMainWindowCommitAndPushRefreshAlreadyOpenLogWithoutBackgroundPolling() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let remote = root.appendingPathComponent("remote.git")
+        let local = root.appendingPathComponent("local")
+        _ = try await GitProcess.run(at: root, arguments: ["init", "--bare", "-b", "main", remote.path])
+        _ = try await GitProcess.run(at: root, arguments: ["clone", remote.path, local.path])
+        for arguments in [
+            ["config", "user.name", "Test"], ["config", "user.email", "test@example.invalid"],
+            ["config", "commit.gpgSign", "false"],
+            ["commit", "--allow-empty", "-m", "base"], ["push", "-u", "origin", "main"]
+        ] {
+            _ = try await GitProcess.run(at: local, arguments: arguments)
+        }
+        let main = RepositoryStore()
+        let log = RepositoryStore(persistsSession: false, usesCheckedHistoryScope: true)
+        defer { log.closeTransientSession() }
+        for store in [main, log] {
+            store.setApplicationActive(false)
+            store.repository = GitRepository(url: local)
+            store.repositoryURL = store.repository?.url
+            await store.refresh()
+        }
+        let repository = try XCTUnwrap(main.repository)
+        let base = try await repository.workflowRevision("HEAD")
+        XCTAssertEqual(log.commits.first?.hash, base)
+        XCTAssertEqual(log.localUnpushedCommitHashes, [])
+
+        // Receive the same repository notification as the Log window without opening a window.
+        var logRefresh: Task<Void, Never>?
+        let observation = NotificationCenter.default.publisher(for: .auvGitWorktreeChanged).sink { event in
+            guard let url = event.object as? URL, RepositoryStore.sameRepositoryLocation(url, local) else { return }
+            logRefresh = Task { await log.refreshAfterRepositoryChange(at: url) }
+        }
+        defer { observation.cancel() }
+        func waitForLogRefresh(_ action: String) async throws {
+            let deadline = Date().addingTimeInterval(8)
+            while Date() < deadline && logRefresh == nil {
+                try await Task.sleep(for: .milliseconds(15))
+            }
+            let refresh = try XCTUnwrap(logRefresh, "\(action) must notify the already open Log window")
+            await refresh.value
+            logRefresh = nil
+        }
+
+        try Data("local change".utf8).write(to: local.appendingPathComponent("change.txt"))
+        try await repository.stage(paths: ["change.txt"])
+        await main.refresh()
+        main.commitMessage = "Outgoing local commit"
+        XCTAssertTrue(main.canCommit)
+        main.commit()
+        try await waitForLogRefresh("Commit")
+
+        let outgoing = try await repository.workflowRevision("HEAD")
+        let upstream = try await repository.workflowRevision("@{upstream}")
+        XCTAssertNotEqual(outgoing, base)
+        XCTAssertEqual(upstream, base)
+        XCTAssertEqual(log.commits.first?.hash, outgoing)
+        XCTAssertEqual(log.localUnpushedCommitHashes, [outgoing])
+        log.selectedCommit = outgoing
+
+        XCTAssertTrue(main.operation("Push") { try await $0.push() })
+        try await waitForLogRefresh("Push")
+        let published = try await GitProcess.run(at: root, arguments: ["--git-dir", remote.path, "rev-parse", "refs/heads/main"]).text
+        XCTAssertEqual(published.trimmingCharacters(in: .newlines), outgoing)
+        XCTAssertNil(main.error, main.operationLog.filter { $0.error != nil }.prefix(4).map { $0.command }.joined(separator: "\n"))
+        XCTAssertEqual(main.localUnpushedCommitHashes, [])
+        XCTAssertEqual(log.localUnpushedCommitHashes, [])
+        XCTAssertEqual(log.selectedCommit, outgoing)
+    }
+
     func testConfiguredRemoteSurvivesOpeningAndRefreshWithoutTrackingRefs() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

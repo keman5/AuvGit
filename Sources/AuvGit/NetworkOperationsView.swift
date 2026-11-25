@@ -300,6 +300,7 @@ struct NetworkOperationsView: View {
             let credential: NetworkCredential?
             if let suppliedCredential { credential = suppliedCredential }
             else { credential = await authentication.savedCredential(for: repository, operation: operation) }
+            var repositoryChanged = false
             do { try await authentication.perform(with: credential) { try await GitCommandLog.$operationID.withValue(operationID) { try await GitCommandLog.$userInitiated.withValue(true) { try await GitCommandLog.$progress.withValue(progress) {
                 let identity = try await repository.networkPreviewIdentity()
                 if operation == .push && !acceptsMigratedPushIdentity && expected != nil && (expected != identity || expectedRepository != repository.url) { throw GitError(networkText("previewExpired")) }
@@ -326,6 +327,7 @@ struct NetworkOperationsView: View {
                     return
                 }
                 let result = try await repository.runNetwork(operation, credential: credential, progress: { _ in })
+                repositoryChanged = true
                 let detail = result.output.components(separatedBy: .newlines)
                     .map(RepositoryStore.progressDetail).joined(separator: "\n")
                 output = detail + "\n" + networkText("completed")
@@ -363,6 +365,7 @@ struct NetworkOperationsView: View {
             }
             store.isBusy = false; task = nil
             if operation != .pushPreview { await store.refresh() }
+            if repositoryChanged { store.notifyRepositoryChange(repository) }
             await loadRepositoryContext()
         }
     }
@@ -381,9 +384,11 @@ struct NetworkOperationsView: View {
             else if let promptCredential = prompt.credential { credential = promptCredential }
             else { credential = await authentication.savedCredential(for: prompt.repository, operation: .push) }
             let shouldSaveCredential = suppliedCredential == nil ? prompt.saveCredential : saveCredential
+            var repositoryChanged = false
             do {
                 let result = try await authentication.perform(with: credential) { try await GitCommandLog.$operationID.withValue(operationID) { try await GitCommandLog.$userInitiated.withValue(true) { try await GitCommandLog.$progress.withValue(progress) { try await prompt.repository.forcePush(prompt.preview, credential: credential, progress: { _ in })
                 } } } }
+                repositoryChanged = true
                 output += "\n" + result.output + "\n" + networkText("completed")
                 await saveCredentialAfterSuccess(credential, requested: shouldSaveCredential, repository: prompt.repository, operation: .push)
                 store.completeNetworkOperation(forcePushText("action"), repository: prompt.repository)
@@ -405,7 +410,9 @@ struct NetworkOperationsView: View {
                 store.finishUserOperation(name, repository: prompt.repository, failure: error)
             }
             store.isBusy = false; task = nil
-            await store.refresh(); await loadRepositoryContext()
+            await store.refresh()
+            if repositoryChanged { store.notifyRepositoryChange(prompt.repository) }
+            await loadRepositoryContext()
         }
     }
     private func saveCredentialAfterSuccess(_ credential: NetworkCredential?, requested: Bool, repository: GitRepository, operation: NetworkOperation) async {

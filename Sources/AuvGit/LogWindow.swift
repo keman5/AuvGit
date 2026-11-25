@@ -225,7 +225,10 @@ private struct LogWindowContent: View {
             .onChange(of: store.branches) { _, _ in Task { await loadTags() } }
             .onChange(of: store.commits) { _, _ in Task { await loadTags() } }
             .onReceive(NotificationCenter.default.publisher(for: .auvGitWorktreeChanged)) { event in
-                if let url = event.object as? URL, url == store.repositoryURL { Task { await store.refresh(); await loadTags() } }
+                guard (event.userInfo?["sourceStore"] as? RepositoryStore) !== store,
+                      let url = event.object as? URL, let root = store.repositoryURL,
+                      RepositoryStore.sameRepositoryLocation(url, root) else { return }
+                Task { await store.refreshAfterRepositoryChange(at: url); await loadTags() }
             }
             .auvGitSheet(item: $resetRequest) { HistoryResetSheet(store: store, request: $0) }
         .auvGitSheet(isPresented: $showOperationLog) { OperationLogView(store: store) }
