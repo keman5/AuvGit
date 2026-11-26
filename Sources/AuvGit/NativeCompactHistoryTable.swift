@@ -53,6 +53,9 @@ struct NativeCompactHistoryTable: NSViewRepresentable {
     var identityWidth: CGFloat = 110
     var hashWidth: CGFloat = 75
     var requiresSelectionActivation: Bool = false
+    var terminalVisible = false
+    var toolTipsEnabled = true
+    var repositoryIdentity: UUID? = nil
     var rowIDs: [String] { virtualRows.map(\.id) + commits.map(\.hash) }
     func commit(at row: Int) -> GitCommit? {
         let index = row - virtualRows.count
@@ -60,6 +63,15 @@ struct NativeCompactHistoryTable: NSViewRepresentable {
     }
     func virtual(at row: Int) -> HistoryVirtualRow? { virtualRows.indices.contains(row) ? virtualRows[row] : nil }
     func mergeCount(_ commit: GitCommit) -> Int? { collapsedMerges.contains(commit.hash) ? collapsedCounts[commit.hash] ?? 0 : nil }
+
+    func toolTip(at row: Int) -> String? {
+        guard let commit = commit(at: row) else {
+            return virtual(at: row).map { graphFeatureText($0 == .workingTree ? "Working Tree" : "Index") }
+        }
+        let signature = commit.signatureStatus == "signed" ? graphFeatureText("Signed (not verified)") : commit.signatureStatus
+        return commit.subject + "\n" + identityMode.name(commit) + " <" + identityMode.email(commit) + ">\n"
+            + HistoryCalendarDate.text(commit.committedDate) + "\n" + graphFeatureText("Signature") + ": " + signature
+    }
 
     func referenceBadges(_ commit: GitCommit) -> [HistoryNativeReferenceBadge] {
         let visible = commit.refs.filter { styles.isVisibleReference($0) && (showRemoteLabels || !styles.isRemoteReference($0)) && (showTagLabels || !styles.isTagReference($0)) }
@@ -84,6 +96,10 @@ struct NativeCompactHistoryTable: NSViewRepresentable {
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
         let table = CompactHistoryTableView()
+        table.toolTipsEnabled = toolTipsEnabled
+        table.toolTipForRow = { [weak coordinator = context.coordinator] row in
+            coordinator?.parent.toolTip(at: row)
+        }
         table.headerView = nil
         table.backgroundColor = .clear
         table.rowHeight = HistoryColumnLayout.rowHeight(compact: compact)
@@ -114,8 +130,11 @@ struct NativeCompactHistoryTable: NSViewRepresentable {
         scroll.documentView = table
         context.coordinator.table = table
         scroll.contentView.postsBoundsChangedNotifications = true
-        context.coordinator.observer = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main) { [weak coordinator = context.coordinator] _ in
-            MainActor.assumeIsolated { coordinator?.requestMore() }
+        context.coordinator.observer = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main) { [weak coordinator = context.coordinator, weak table] _ in
+            MainActor.assumeIsolated {
+                table?.refreshHistoryToolTips()
+                coordinator?.requestMore()
+            }
         }
         return scroll
     }
@@ -127,6 +146,11 @@ struct NativeCompactHistoryTable: NSViewRepresentable {
             coordinator.didDeliverSelectionActivation = false
         }
         guard let table = coordinator.table else { return }
+        let historyTable = table as? CompactHistoryTableView
+        historyTable?.toolTipsEnabled = toolTipsEnabled
+        if previous.terminalVisible != terminalVisible || previous.navigationGeneration != navigationGeneration {
+            historyTable?.invalidateHistoryToolTips()
+        }
         table.rowHeight = HistoryColumnLayout.rowHeight(compact: compact)
         coordinator.updatingSelection = true
         if previous.navigationGeneration != navigationGeneration {
@@ -158,10 +182,12 @@ struct NativeCompactHistoryTable: NSViewRepresentable {
             table.scrollRowToVisible(row)
         }
         coordinator.appliedSelection = selection
+        historyTable?.refreshHistoryToolTips()
         coordinator.requestMore()
     }
     static func dismantleNSView(_ view: NSScrollView, coordinator: Coordinator) {
         if let observer = coordinator.observer { NotificationCenter.default.removeObserver(observer) }
+        (coordinator.table as? CompactHistoryTableView)?.toolTipsEnabled = false
     }
 
     @MainActor
@@ -240,7 +266,7 @@ struct NativeCompactHistoryTable: NSViewRepresentable {
                         item.keyEquivalentModifierMask = binding.eventModifiers
                     }
                 }
-                item.representedObject = (action, commit, parent.navigationGeneration)
+                item.representedObject = (action, commit, menuContext(for: action))
                 item.isEnabled = (!action.isMutation || !parent.isBusy)
                     && (table.selectedRowIndexes.count <= 1 || [.copyHash, .copyMessage].contains(action))
                 menu.addItem(item)
@@ -303,10 +329,19 @@ struct NativeCompactHistoryTable: NSViewRepresentable {
             parent.onGraphDrop?(HistoryGraphDropRequest(source: payload.source, targetCommitID: commit.hash, operation: operation))
             return true
         }
+        private func menuContext(for action: HistoryAction) -> UUID? {
+            // Refresh can rebuild history while a reset menu is open. The
+            // confirmation still checks the current branch and HEAD before writing.
+            switch action {
+            case .reset, .resetAdvanced: return parent.repositoryIdentity ?? parent.navigationGeneration
+            default: return parent.navigationGeneration
+            }
+        }
+
         @objc func performAction(_ item: NSMenuItem) {
             guard item.isEnabled,
-                  let (action, commit, generation) = item.representedObject as? (HistoryAction, GitCommit, UUID?),
-                  generation == parent.navigationGeneration,
+                  let (action, commit, context) = item.representedObject as? (HistoryAction, GitCommit, UUID?),
+                  context == menuContext(for: action),
                   parent.commits.contains(where: { $0.hash == commit.hash }),
                   !action.isMutation || !parent.isBusy else { return }
             if let table, table.selectedRowIndexes.count > 1 {
@@ -321,10 +356,88 @@ struct NativeCompactHistoryTable: NSViewRepresentable {
     }
 }
 
-private final class CompactHistoryTableView: NSTableView {
+final class CompactHistoryTableView: NSTableView {
+    final class HistoryToolTipOwner: NSObject, NSViewToolTipOwner {
+        weak var table: CompactHistoryTableView?
+
+        func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData: UnsafeMutableRawPointer?) -> String {
+            guard let table, view === table, table.historyToolTipOwner === self,
+                  let row = table.historyToolTipRows[tag] else { return "" }
+            return table.historyToolTip(at: point, expectedRow: row) ?? ""
+        }
+    }
+
     var graphClick: ((Int, CGFloat) -> Bool)?
     var didClickSelection: ((Int) -> Void)?
     var mouseOrigin = NSPoint.zero
+    var toolTipForRow: ((Int) -> String?)?
+    private(set) var historyToolTipOwner: HistoryToolTipOwner?
+    private(set) var historyToolTipRows: [NSView.ToolTipTag: Int] = [:]
+    private var historyToolTipRects: [NSRect] = []
+    private var firstToolTipRow: Int?
+    var toolTipsEnabled = true {
+        didSet {
+            if !toolTipsEnabled && oldValue { invalidateHistoryToolTips() }
+        }
+    }
+
+    private func historyToolTip(at point: NSPoint, expectedRow: Int) -> String? {
+        guard toolTipsEnabled, !isHiddenOrHasHiddenAncestor, let window, let root = window.contentView,
+              visibleRect.contains(point), row(at: point) == expectedRow else { return nil }
+        // AppKit's delayed request can still carry coordinates from before a split resized.
+        let pointer = window.mouseLocationOutsideOfEventStream
+        let local = convert(pointer, from: nil)
+        let hitPoint = root.superview?.convert(pointer, from: nil) ?? pointer
+        guard visibleRect.contains(local), row(at: local) == expectedRow,
+              let hit = root.hitTest(hitPoint), hit === self || hit.isDescendant(of: self) else { return nil }
+        return toolTipForRow?(expectedRow)
+    }
+
+    func refreshHistoryToolTips() {
+        let rect = visibleRect.intersection(bounds)
+        guard toolTipsEnabled, window != nil, !isHiddenOrHasHiddenAncestor, numberOfRows > 0,
+              !rect.isEmpty, let rows = Range(rows(in: rect)), !rows.isEmpty else {
+            invalidateHistoryToolTips()
+            return
+        }
+        let regions = rows.map { self.rect(ofRow: $0).intersection(rect) }
+        guard firstToolTipRow != rows.lowerBound || historyToolTipRects != regions else { return }
+        invalidateHistoryToolTips()
+        firstToolTipRow = rows.lowerBound
+        historyToolTipRects = regions
+        let owner = HistoryToolTipOwner()
+        owner.table = self
+        historyToolTipOwner = owner
+        for (row, region) in zip(rows, regions) where !region.isEmpty {
+            let tag = addToolTip(region, owner: owner, userData: nil)
+            historyToolTipRows[tag] = row
+        }
+    }
+
+    func invalidateHistoryToolTips() {
+        historyToolTipOwner?.table = nil
+        for tag in historyToolTipRows.keys { removeToolTip(tag) }
+        historyToolTipOwner = nil
+        historyToolTipRows.removeAll(keepingCapacity: true)
+        historyToolTipRects.removeAll(keepingCapacity: true)
+        firstToolTipRow = nil
+    }
+
+    override func reloadData() {
+        invalidateHistoryToolTips()
+        super.reloadData()
+        refreshHistoryToolTips()
+    }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        refreshHistoryToolTips()
+    }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        invalidateHistoryToolTips()
+        refreshHistoryToolTips()
+    }
+
     override func mouseDown(with event: NSEvent) {
         mouseOrigin = convert(event.locationInWindow, from: nil)
         let row = self.row(at: mouseOrigin)
@@ -357,13 +470,12 @@ final class CompactHistoryCell: NSView {
         guard let commit = parent.commit(at: index) else {
             avatarTask?.cancel(); avatarURL = nil; avatar = nil
             let title = parent.virtual(at: index).map { graphFeatureText($0 == .workingTree ? "Working Tree" : "Index") } ?? ""
-            setAccessibilityElement(true); setAccessibilityRole(.staticText); setAccessibilityLabel(title); toolTip = title
+            setAccessibilityElement(true); setAccessibilityRole(.staticText); setAccessibilityLabel(title)
             needsDisplay = true; return
         }
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
         setAccessibilityLabel(L10n.text("history.commitAccessibility", table: "Detail", arguments: [commit.subject, commit.author, commit.shortHash]))
-        toolTip = commit.subject + "\n" + parent.identityMode.name(commit) + " <" + parent.identityMode.email(commit) + ">\n" + HistoryCalendarDate.text(commit.committedDate) + "\n" + graphFeatureText("Signature") + ": " + (commit.signatureStatus == "signed" ? graphFeatureText("Signed (not verified)") : commit.signatureStatus)
         let url = parent.showAvatars ? CommitAvatarIdentity.url(email: parent.identityMode.email(commit)) : nil
         if avatarURL != url {
             avatarTask?.cancel()

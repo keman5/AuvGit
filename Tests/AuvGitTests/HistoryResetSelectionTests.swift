@@ -1,9 +1,95 @@
+import AppKit
+import SwiftUI
 import XCTest
+import AuvGitLocalization
 @testable import AuvGit
 @testable import GitCore
 
 @MainActor
 final class HistoryResetSelectionTests: XCTestCase {
+    func testMixedResetFromHistoryMenuSurvivesSameRepositoryRefresh() async throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repo = try await GitRepository.initialize(at: root)
+        for (key, value) in [("user.name", "Reset Tester"), ("user.email", "reset@example.invalid"), ("commit.gpgsign", "false"), ("core.hooksPath", "/dev/null")] {
+            _ = try await repo.workflowRead(["config", key, value])
+        }
+        let file = root.appendingPathComponent("file.txt")
+        for content in ["parent", "local tip"] {
+            try content.write(to: file, atomically: true, encoding: .utf8)
+            try await repo.stage(paths: ["file.txt"])
+            try await repo.commit(message: content)
+        }
+        let store = RepositoryStore(persistsSession: false, followsCurrentBranch: true)
+        defer { store.closeTransientSession() }
+        await store.open(root)
+        let parent = try await repo.workflowRevision("HEAD^")
+        store.selectedCommit = parent
+        store.selectJournalRows([parent])
+        var request: HistoryResetRequest?
+        let table = NSTableView()
+        table.addTableColumn(NSTableColumn(identifier: .init("history")))
+        let commits = store.commits
+        let graph = CommitGraph(commits: commits)
+        let styles = HistoryGraphStylePlan(commits: commits, remoteBranchNames: [])
+        let repositoryURL = try XCTUnwrap(store.repositoryURL)
+        let repositoryIdentity = store.graphRepositoryIdentity
+        func history(generation: UUID, repositoryIdentity: UUID) -> NativeCompactHistoryTable {
+            NativeCompactHistoryTable(commits: commits, graph: graph, styles: styles,
+                selection: .constant(parent), navigationGeneration: generation,
+                graphWidth: 24, nameWidth: 70, dateWidth: 65, showAvatars: false, showNames: true,
+                showRemoteLabels: true, showTagLabels: true, isBusy: false, hasMore: false, isLoading: false,
+                onLoadMore: {}, onAction: { action, commit in
+                    request = HistoryResetRequest(commit: commit, repositoryURL: repositoryURL, advanced: action == .resetAdvanced)
+                }, repositoryIdentity: repositoryIdentity)
+        }
+        let coordinator = history(generation: UUID(), repositoryIdentity: repositoryIdentity).makeCoordinator()
+        coordinator.table = table
+        table.dataSource = coordinator
+        table.reloadData()
+        table.selectRowIndexes(IndexSet(integer: try XCTUnwrap(commits.firstIndex { $0.hash == parent })), byExtendingSelection: false)
+        let menu = NSMenu()
+        coordinator.menuNeedsUpdate(menu)
+        let item = try XCTUnwrap(menu.items.first { ($0.representedObject as? (HistoryAction, GitCommit, UUID?))?.0 == .resetAdvanced })
+        XCTAssertTrue(item.isEnabled)
+        coordinator.parent = history(generation: UUID(), repositoryIdentity: UUID())
+        coordinator.performAction(item)
+        XCTAssertNil(request, "An open reset menu must never target a different repository, even with the same commits")
+
+        coordinator.parent = history(generation: UUID(), repositoryIdentity: repositoryIdentity)
+        coordinator.performAction(item)
+
+        let target = try XCTUnwrap(request, "Refreshing history in the same repository must preserve the reset menu target")
+        XCTAssertEqual(target.commit.hash, parent)
+        let host = NSHostingView(rootView: HistoryResetSheet(store: store, request: target).nativeFocusRoot())
+        host.frame = NSRect(x: 0, y: 0, width: 360, height: 480)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close() }
+        func confirmation(in view: NSView) -> NSButton? {
+            if let button = view as? NSButton, button.title == L10n.text("confirm", table: "HistoryReset") { return button }
+            return view.subviews.lazy.compactMap(confirmation).first
+        }
+        let deadline = ContinuousClock.now + .seconds(5)
+        while confirmation(in: host)?.isEnabled != true, ContinuousClock.now < deadline {
+            host.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let confirm = try XCTUnwrap(confirmation(in: host))
+        XCTAssertTrue(confirm.isEnabled)
+        confirm.performClick(nil)
+        while store.isBusy || !store.files.contains(where: { $0.path == "file.txt" && $0.isUnstaged }) {
+            if ContinuousClock.now >= deadline { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let head = try await repo.workflowRevision("HEAD")
+        XCTAssertEqual(head, parent)
+        XCTAssertTrue(store.files.contains { $0.path == "file.txt" && $0.isUnstaged && !$0.isStaged })
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "local tip")
+    }
+
     func testSelectedCommitResetMovesAllLaterChangesToUnstagedWorktree() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

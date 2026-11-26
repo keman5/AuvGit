@@ -140,6 +140,79 @@ final class NativeCompactHistoryTableTests: XCTestCase {
             showAvatars: false, showNames: true, showRemoteLabels: true, showTagLabels: true,
             isBusy: false, hasMore: false, isLoading: false, onLoadMore: {}, onAction: action)
     }
+
+    func testHistoryToolTipsRejectDelayedRequestsOverTerminal() async throws {
+        final class PointerWindow: NSWindow {
+            var pointer = NSPoint.zero
+            override var mouseLocationOutsideOfEventStream: NSPoint { pointer }
+        }
+        _ = NSApplication.shared
+        var model = pane("hover")
+        let frame = NSRect(x: 0, y: 0, width: 650, height: 200)
+        let host = NSHostingView(rootView: model.frame(width: frame.width, height: frame.height))
+        host.frame = frame
+        let window = PointerWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let root = NSView(frame: frame)
+        window.contentView = root
+        root.addSubview(host)
+        defer { window.close() }
+
+        func table(in view: NSView) -> CompactHistoryTableView? {
+            if let table = view as? CompactHistoryTableView { return table }
+            return view.subviews.lazy.compactMap { table(in: $0) }.first
+        }
+        func settle() async throws {
+            for _ in 0..<5 {
+                root.layoutSubtreeIfNeeded()
+                try await Task.sleep(for: .milliseconds(10))
+            }
+        }
+
+        try await settle()
+        let history = try XCTUnwrap(table(in: host))
+        history.refreshHistoryToolTips()
+        let original = try XCTUnwrap(history.historyToolTipOwner)
+        let tag = try XCTUnwrap(history.historyToolTipRows.first(where: { $0.value == 0 })?.key)
+        let rowPoint = NSPoint(x: 40, y: history.rect(ofRow: 0).midY)
+        let stationaryPointer = history.convert(rowPoint, to: nil)
+        window.pointer = stationaryPointer
+        let text = original.view(history, stringForToolTip: tag, point: rowPoint, userData: nil)
+        XCTAssertTrue(text.hasPrefix("Commit\n"))
+
+        let session = TerminalSession(directory: FileManager.default.temporaryDirectory)
+        let terminal = session.view
+        terminal.frame = NSRect(x: 0, y: stationaryPointer.y - 24, width: frame.width, height: 48)
+        root.addSubview(terminal, positioned: .above, relativeTo: host)
+        XCTAssertTrue(try XCTUnwrap(root.hitTest(stationaryPointer)).isDescendant(of: terminal))
+        // The same registered row and pointer coordinates are now under the command line.
+        XCTAssertEqual(original.view(history, stringForToolTip: tag, point: rowPoint, userData: nil), "")
+
+        model.terminalVisible = true
+        host.rootView = model.frame(width: frame.width, height: frame.height)
+        try await settle()
+        XCTAssertTrue(table(in: host) === history)
+        let current = try XCTUnwrap(history.historyToolTipOwner)
+        let currentTag = try XCTUnwrap(history.historyToolTipRows.first(where: { $0.value == 0 })?.key)
+        XCTAssertFalse(original === current)
+        XCTAssertEqual(current.view(history, stringForToolTip: currentTag, point: rowPoint, userData: nil), "")
+
+        terminal.frame.origin.y = 0
+        window.pointer = NSPoint(x: 40, y: 24)
+        XCTAssertTrue(try XCTUnwrap(root.hitTest(window.pointer)).isDescendant(of: terminal))
+        XCTAssertEqual(current.view(history, stringForToolTip: currentTag, point: rowPoint, userData: nil), "")
+        window.pointer = stationaryPointer
+        XCTAssertEqual(current.view(history, stringForToolTip: currentTag, point: rowPoint, userData: nil), text)
+        XCTAssertEqual(original.view(history, stringForToolTip: currentTag, point: rowPoint, userData: nil), "")
+
+        model.toolTipsEnabled = false
+        host.rootView = model.frame(width: frame.width, height: frame.height)
+        try await settle()
+        XCTAssertTrue(history.historyToolTipRows.isEmpty)
+        XCTAssertEqual(current.view(history, stringForToolTip: currentTag, point: rowPoint, userData: nil), "")
+        XCTAssertFalse(window.isVisible)
+    }
+
     func testExpandedGraphRetainsPixelsAcrossUnchangedUpdatesAndUnrelatedSelections() throws {
         _ = NSApplication.shared
         let commit = GitCommit(hash: "retained", parents: [], author: "Test", date: .distantPast, subject: "Retained", body: "", refs: [])

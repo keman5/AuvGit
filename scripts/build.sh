@@ -150,7 +150,7 @@ if [[ "${1:-}" == --test-checkbox-focus ]]; then
 fi
 if [[ "${1:-}" == --test-terminal ]]; then
   # Unshown AppKit hosts and isolated PTYs only; never activate a test window.
-  swift test --build-system native --filter "${AUVGIT_TERMINAL_TEST_FILTER:-TerminalAppearanceTests|WorkspaceKeyboardShortcutsTests|TerminalTests}"
+  swift test --build-system native --filter "${AUVGIT_TERMINAL_TEST_FILTER:-TerminalAppearanceTests|WorkspaceKeyboardShortcutsTests|TerminalTests|NativeCompactHistoryTableTests.testHistoryToolTipsRejectDelayedRequestsOverTerminal}"
   exit
 fi
 if [[ "${1:-}" == --test-context-focus ]]; then

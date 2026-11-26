@@ -70,6 +70,8 @@ struct HistoryPane: View {
     var branches: [GitBranch] = []
     var graphHeadCommitID: String? = nil
     var requiresSelectionActivation: Bool = false
+    var terminalVisible = false
+    var toolTipsEnabled = true
     @AppStorage("history.showAuthorAvatars") private var showAvatars = true
     @AppStorage("history.showAuthorNames") private var showNames = true
     @AppStorage("history.showRemoteLabels") private var showRemoteLabels = true
@@ -138,7 +140,8 @@ struct HistoryPane: View {
                             onToggleMerge: { hash in if !collapsedMerges.insert(hash).inserted { collapsedMerges.remove(hash) } },
                             onGraphDrop: onGraphDrop == nil ? nil : { pendingGraphDrop = preparedDrop($0) }, currentBranch: currentBranch, branches: branches,
                             compact: compact, messageWidth: messageWidth, identityWidth: authorWidth, hashWidth: hashWidth,
-                            requiresSelectionActivation: requiresSelectionActivation)
+                            requiresSelectionActivation: requiresSelectionActivation, terminalVisible: terminalVisible,
+                            toolTipsEnabled: toolTipsEnabled, repositoryIdentity: graphRepositoryIdentity)
                             .overlay { if visible.isEmpty && virtualRows.isEmpty { emptyHistory.allowsHitTesting(false) } }
                     }.frame(width: max(geometry.size.width, contentWidth), alignment: .leading)
                 }
