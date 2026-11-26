@@ -54,13 +54,32 @@ final class HistoryResetSelectionTests: XCTestCase {
         XCTAssertEqual(unchangedHead, tip)
         store.isBusy = false
 
-        try store.startHistoryReset(request, mode: .mixed, context: context)
+        // A failed Git reset must tell the confirmation sheet why it failed.
+        let lock = root.appendingPathComponent(".git/index.lock")
+        try Data().write(to: lock)
+        var failure: Error?
+        var completed = false
+        try store.startHistoryReset(request, mode: .mixed, context: context,
+                                    onFailure: { failure = $0 }, onSuccess: { completed = true })
+        let failureDeadline = ContinuousClock.now + .seconds(10)
+        while failure == nil, !completed, ContinuousClock.now < failureDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try FileManager.default.removeItem(at: lock)
+        XCTAssertTrue(try XCTUnwrap(failure).localizedDescription.contains("index.lock"))
+        XCTAssertFalse(completed)
+        let failedHead = try await activeRepo.workflowRevision("HEAD")
+        XCTAssertEqual(failedHead, tip)
+
+        try store.startHistoryReset(request, mode: .mixed, context: context,
+                                    onFailure: { failure = $0 }, onSuccess: { completed = true })
         XCTAssertTrue(store.isBusy, "The confirmation must start a real repository operation")
         let deadline = ContinuousClock.now + .seconds(10)
         while (store.isBusy || !store.files.contains(where: { $0.path == "added.txt" })) && ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
         XCTAssertFalse(store.isBusy)
+        XCTAssertTrue(completed, "The confirmation can close after Git succeeds")
         XCTAssertNil(store.error)
         XCTAssertTrue(store.files.contains { $0.path == "added.txt" && $0.isUntracked })
         XCTAssertTrue(store.operationLog.contains { $0.command.contains("--mixed") && $0.exitCode == 0 })

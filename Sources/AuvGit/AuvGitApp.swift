@@ -1843,6 +1843,7 @@ final class RepositoryStore: ObservableObject {
     @discardableResult
     func operation(_ name: String, refreshFilesOnly: Bool = false, fileStatusPaths: [String]? = nil,
                    waitForBackgroundSync: Bool = true, onFailure: ((Error) -> Void)? = nil,
+                   onSuccess: (() -> Void)? = nil,
                    body: @escaping (GitRepository) async throws -> Void) -> Bool {
         guard let repository, workspaceStatusFailure == nil, !isBusy, pendingRepositoryPath == nil else { return false }
         cancelAutomaticRefresh()
@@ -1872,6 +1873,7 @@ final class RepositoryStore: ObservableObject {
             finishUserOperation(name, repository: repository, failure: failure)
             isBusy = false
             if let failure { onFailure?(failure) }
+            else { onSuccess?() }
             if refreshFilesOnly { await refreshFileStatus(paths: failure == nil ? fileStatusPaths : nil) }
             else { await refresh() }
             if failure == nil, !refreshFilesOnly || !persistsSession { notifyRepositoryChange(repository) }

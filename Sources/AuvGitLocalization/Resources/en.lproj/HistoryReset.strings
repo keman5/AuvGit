@@ -12,3 +12,5 @@
 "keepMessage" = "Moves HEAD and updates files; Git refuses when local changes would be overwritten.";
 "checking" = "Checking the current branch…";
 "busy" = "The repository is busy. Wait for the current operation to finish, then try again.";
+"mixedAtCurrentCommit" = "This is the current commit. Mixed reset only unstages changes here. To undo this commit and keep its changes, select its parent instead.";
+"resetting" = "Resetting…";
