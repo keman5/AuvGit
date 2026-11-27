@@ -8,8 +8,11 @@ struct WorkspaceFileRow: Identifiable, Sendable {
     var isIgnored: Bool { file == nil }
     let name: String
     let directory: String
+    let statusKey: String
     init(path: String, file: GitFile?) {
         self.path = path; self.file = file
+        // Use the same status parts as the badge, including its staged prefix.
+        statusKey = file.map { WorkspaceFileStatus($0).keys.joined(separator: " ") } ?? "!"
         if path.hasSuffix("/") || path.contains("//") {
             name = (path as NSString).lastPathComponent
             directory = (path as NSString).deletingLastPathComponent
@@ -19,10 +22,6 @@ struct WorkspaceFileRow: Identifiable, Sendable {
         } else {
             name = path; directory = ""
         }
-    }
-    var statusKey: String {
-        guard let file else { return "!" }
-        return file.isConflict ? "U" : file.isUntracked ? "?" : file.indexStatus != " " ? file.indexStatus : file.worktreeStatus
     }
     var worktreeKey: String { file?.worktreeStatus ?? " " }
     var indexKey: String { file?.indexStatus ?? " " }

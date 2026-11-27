@@ -29,7 +29,7 @@ final class WorkspaceFilePreparationTests: XCTestCase {
         let first = WorkspaceFilePreparation(repository: "/first", files: files, ignoredPaths: [], filter: "", filterCase: "exact", category: .all, showHidden: true, showIgnored: false, sort: [.init(column: .status, ascending: false)])
         let cache = WorkspaceFilePreparationCache()
         let firstResult = try cache.prepare(first)
-        XCTAssertEqual(firstResult.rows.map(\.path), ["b", "a"])
+        XCTAssertEqual(firstResult.rows.map(\.path), ["a", "b"])
         let second = WorkspaceFilePreparation(repository: "/second", files: [files[0]], ignoredPaths: [], filter: "", filterCase: "exact", category: .all, showHidden: true, showIgnored: false, sort: first.sort)
         let secondResult = try cache.prepare(second)
         XCTAssertEqual(secondResult.paths, ["a"])

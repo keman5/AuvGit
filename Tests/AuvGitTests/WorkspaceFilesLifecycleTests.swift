@@ -76,6 +76,45 @@ final class WorkspaceFilesLifecycleTests: XCTestCase {
         }
         XCTAssertFalse(window.isVisible)
     }
+    func testStatusHeaderSortsAllThreeModificationStates() async throws {
+        _ = NSApplication.shared
+        let state = State()
+        state.files = [
+            GitFile(path: "repo/a.swift", indexStatus: "M", worktreeStatus: "M"),
+            GitFile(path: "repo/b.swift", indexStatus: " ", worktreeStatus: "M"),
+            GitFile(path: "repo/c.swift", indexStatus: "M", worktreeStatus: " "),
+            GitFile(path: "repo/d.swift", indexStatus: " ", worktreeStatus: "M")
+        ]
+        state.selection = ["repo/a.swift"]
+        let host = NSHostingView(rootView: Fixture(state: state))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 350),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close() }
+        try await waitForFiles(in: host, count: 4, prefix: "repo")
+        let native = try XCTUnwrap(table(in: host))
+
+        for (ascending, expected, selectedIndex) in [
+            (true, ["b.swift", "d.swift", "c.swift", "a.swift"], 3),
+            (false, ["a.swift", "c.swift", "b.swift", "d.swift"], 0),
+            (true, ["a.swift", "b.swift", "c.swift", "d.swift"], 0)
+        ] {
+            native.sortDescriptors = [NSSortDescriptor(key: "status", ascending: ascending)]
+            let deadline = Date().addingTimeInterval(4)
+            while Date() < deadline {
+                host.layoutSubtreeIfNeeded()
+                if let pane = native.coordinator?.parent, pane.isReady, pane.rows.map(\.name) == expected { break }
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            XCTAssertEqual(native.coordinator?.parent.rows.map(\.name), expected)
+            XCTAssertEqual(native.selectedRowIndexes, IndexSet(integer: selectedIndex))
+            XCTAssertEqual(state.selection, ["repo/a.swift"])
+        }
+        XCTAssertTrue(native.sortDescriptors.isEmpty)
+        XCTAssertFalse(window.isVisible)
+    }
+
     private func files(_ prefix: String, count: Int) -> [GitFile] {
         (0..<count).map { GitFile(path: "\(prefix)/file\($0).swift", indexStatus: " ", worktreeStatus: "M") }
     }
