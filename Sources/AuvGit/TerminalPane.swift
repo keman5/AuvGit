@@ -19,8 +19,8 @@ struct TerminalPane: View {
                     ForEach(terminals.sessions.keys.sorted(), id: \.self) { path in
                         Button(terminalText("closeSession", path)) { terminals.close(URL(fileURLWithPath: path)) }
                     }
-                } label: { Label(terminalText("sessions", terminals.sessions.count, TerminalConfiguration.maximumSessions), systemImage: "square.stack") }
-                .menuStyle(.borderlessButton).font(.system(size: 11)).fixedSize().help(terminalText("sessions", terminals.sessions.count, TerminalConfiguration.maximumSessions))
+                } label: { Label(terminalText("sessions", terminals.sessions.count), systemImage: "square.stack") }
+                .menuStyle(.borderlessButton).font(.system(size: 11)).fixedSize().help(terminalText("sessionCapacity", TerminalConfiguration.maximumSessions))
                 Button { terminals.hide() } label: { Image(systemName: "chevron.down").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(.plain).help(terminalText("hide")).accessibilityLabel(terminalText("hide"))
                 Button { terminals.close(directory); terminals.hide() } label: { Image(systemName: "xmark").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(.plain).help(terminalText("close")).accessibilityLabel(terminalText("close"))
             }.controlSize(.small).padding(.horizontal, 12).frame(height: 32)
